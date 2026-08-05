@@ -56,8 +56,10 @@ real street layout, solid buildings. Tight and unforgiving.
 ### The original map
 
 The v31 procedural coast-to-desert state was retired from the picker; its gas
-stations, diner and town centre live on in NEON. The original build is
-preserved verbatim as `gta_vice_city_destroy_and_kill_v31.html`.
+stations, diner and town centre live on in NEON. The pristine v31 build is
+preserved at git tag `v31-pristine` (`git show v31-pristine` /
+`git checkout v31-pristine`); the HTML file of that name at the root is a
+redirect stub kept for old bookmarks.
 
 ---
 

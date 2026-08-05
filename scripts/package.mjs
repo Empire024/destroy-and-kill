@@ -22,11 +22,14 @@ const INCLUDE = [
   'serve_game.js',
   'serve_game.py',
   'README.md',
+  'CHANGELOG.md',
   'vendor',
   'src',
+  'data',                     // expansion content: vehicles, races, zones, coins, radio, traffic
   'docs',
   'assets/ASSET_MANIFEST.json',
   'assets/ATTRIBUTION.md',
+  'assets/audio',             // radio manifest + attribution + user-track folder
   'assets/processed',
   'assets/prague'
 ];

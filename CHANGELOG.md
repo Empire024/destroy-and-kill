@@ -76,7 +76,7 @@ per-subsystem handoffs and test evidence in `docs/handoffs/`.
 - **The legacy state** (user directive), after its assets were ported:
   map card, 40× procedural region, grid traffic/peds, missions (already
   disabled), Pay'n'Spray, packages, safehouses, legacy hospitals and ramps.
-  The original v31 build remains runnable as its own HTML file. Fixed on the
+  The pristine v31 build is preserved at git tag `v31-pristine`. Fixed on the
   way out: death-respawn no longer teleports to legacy coordinates, and the
   on-foot clamp no longer pins you to the legacy coastline.
 
