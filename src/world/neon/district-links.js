@@ -853,11 +853,19 @@
     // maxY — on an exit the deck-height stretch is a road you drive along, not
     // a merge nose, and leaving it unrailed is a 30-unit drop off the side.
     barrierRail(b, pts, sIn, { off: 27.5, minY: 3.5 });
-    // The ring-facing rail has to stay suppressed while the exit is still at
-    // deck height: sitting 25.5 off the other side of the ramp, it would stand
-    // in the ring's own carriageway. By the time the exit is below this window
-    // it is past CLEAR_L, so the rail lands in the gore and not in traffic.
-    barrierRail(b, pts, -sIn, { off: 25.5, minY: 3.5, maxY: RING_Y - 4.5 });
+
+    // The ring-facing rail cannot exist while the exit is still over the ring:
+    // sitting 25.5 off that side of the ramp it would stand in the ring's own
+    // carriageway. Cut it by POSITION, not by height. Clipping it with a maxY
+    // instead (which is what the entrances do, and what this used to do) leaves
+    // the stretch between clearance and y=25.5 bare — and by then the two decks
+    // have already parted, so that is a gore with an open side. From the
+    // clearance point on, the ramp is outboard of the ring's rail line, so the
+    // rail is safe at every height.
+    let iClear = pts.length - 1;
+    for (let i = 0; i < pts.length; i++)
+      if (legLateral(rp, pts[i]) >= CLEAR_L) { iClear = i; break; }
+    barrierRail(b, pts.slice(iClear), -sIn, { off: 25.5, minY: 3.5 });
 
     // Open the ring's inside rail across the slip lane, and only there. That
     // rail sits 27.5 in from the leg; as the exit diverges, the line sweeps

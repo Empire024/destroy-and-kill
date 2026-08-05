@@ -139,9 +139,25 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 /* ------------------------------------------------------------ overpass --- */
 
-const PAUSE_MS = 5000;          // between tiles — be a good neighbour
+const PAUSE_MS = 12000;         // between tiles — be a good neighbour
+const BACKOFF_429_MS = 45000;   // a 429 means "slow down", so actually slow down
 const MAX_ATTEMPTS = 2;         // a timeout means "ask for less", not "ask again harder"
 const TILE_TARGET_KM2 = 1.6;    // tile size that reliably answers in ~1-2 s
+
+/**
+ * Per-tile response cache. Lives under tools/ rather than assets/ so it can
+ * never be swept into a release build by scripts/package.mjs.
+ *
+ * This exists because of a mistake worth not repeating: the first run of the
+ * full-centre fetch pulled five of six tiles successfully, the sixth got a 502,
+ * and because the merge was held in memory until the end, all five good tiles —
+ * eleven minutes of somebody else's donated CPU — were thrown away. Every tile
+ * is now written to disk the moment it arrives, so a failed run resumes instead
+ * of restarting, and no tile is ever requested twice.
+ */
+const CACHE_DIR = path.join(HERE, '.cache');
+const tileKey = (b) =>
+  `t_${b.south.toFixed(5)}_${b.west.toFixed(5)}_${b.north.toFixed(5)}_${b.east.toFixed(5)}.json`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -203,7 +219,12 @@ async function fetchTile(box, label) {
       } catch (err) {
         lastErr = err;
         process.stderr.write(`[overpass] ${label} failed: ${err.message}\n`);
-        if (attempt < MAX_ATTEMPTS) await sleep(PAUSE_MS);
+        // 429 is the server explicitly asking for less traffic. Honour it with
+        // a real pause rather than trotting straight round to the next endpoint.
+        const rateLimited = /\b429\b/.test(err.message);
+        if (attempt < MAX_ATTEMPTS || rateLimited) {
+          await sleep(rateLimited ? BACKOFF_429_MS : PAUSE_MS);
+        }
       }
     }
   }
@@ -219,18 +240,57 @@ async function fetchTile(box, label) {
  */
 async function fetchOverpass(box) {
   const tiles = tileBox(box);
+  await mkdir(CACHE_DIR, { recursive: true });
   process.stderr.write(`[overpass] ${tiles.length} tile(s) for the requested box\n`);
+
   const byKey = new Map();
+  const failed = [];
+
   for (let i = 0; i < tiles.length; i++) {
-    if (i > 0) await sleep(PAUSE_MS);
-    const osm = await fetchTile(tiles[i], `tile ${i + 1}/${tiles.length}`);
+    const label = `tile ${i + 1}/${tiles.length}`;
+    const cacheFile = path.join(CACHE_DIR, tileKey(tiles[i]));
+
+    let osm = null;
+    try {
+      osm = JSON.parse(await readFile(cacheFile, 'utf8'));
+      process.stderr.write(`[cache] ${label} served from ${path.basename(cacheFile)} — not re-requested\n`);
+    } catch { /* not cached yet */ }
+
+    if (!osm) {
+      if (byKey.size > 0 || failed.length) await sleep(PAUSE_MS);
+      try {
+        osm = await fetchTile(tiles[i], label);
+        // Checkpoint IMMEDIATELY: a later tile failing must not cost this one.
+        await writeFile(cacheFile, JSON.stringify(osm));
+        process.stderr.write(`[cache] ${label} saved to ${path.basename(cacheFile)}\n`);
+      } catch (err) {
+        process.stderr.write(`[overpass] ${label} GIVING UP: ${err.message}\n`);
+        failed.push({ label, box: tiles[i], err: err.message });
+        continue;
+      }
+    }
+
     let added = 0;
     for (const el of osm.elements || []) {
       const k = `${el.type}/${el.id}`;
       if (!byKey.has(k)) { byKey.set(k, el); added++; }
     }
-    process.stderr.write(`[overpass] tile ${i + 1}: +${added} new elements (${byKey.size} total)\n`);
+    process.stderr.write(`[overpass] ${label}: +${added} new elements (${byKey.size} total)\n`);
   }
+
+  if (failed.length) {
+    // Do not pretend a partial fetch is the whole box. Report exactly which
+    // tiles are missing and stop — the cached ones are on disk, so re-running
+    // asks Overpass only for what is genuinely absent.
+    process.stderr.write(`\n[overpass] ${failed.length}/${tiles.length} tile(s) failed:\n`);
+    for (const f of failed) {
+      process.stderr.write(`  ${f.label} ${f.box.south},${f.box.west},${f.box.north},${f.box.east} — ${f.err}\n`);
+    }
+    process.stderr.write('[overpass] the successful tiles are cached; re-run to fetch only these.\n');
+    throw new Error(`${failed.length} of ${tiles.length} tiles could not be fetched — refusing to ` +
+                    'write a partial extract that would silently be missing a chunk of the city');
+  }
+
   return { elements: [...byKey.values()] };
 }
 

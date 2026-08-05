@@ -632,7 +632,14 @@
       // just because the map got bigger buys nothing but triangles. Keeping the
       // quad COUNT constant is what matters (at 3x an unscaled step cost ~180k
       // extra triangles for no visible difference).
-      const step = 24 * SCALE;
+      // The ground is dead flat, so a finer grid buys nothing but triangles —
+      // the only reason it is tessellated at all is the per-quad shading
+      // patchwork. A fixed step means the quad COUNT grows with area, which is
+      // the wrong thing to hold constant; cap it so a city four times the size
+      // does not pay four times the triangles for a surface you cannot see the
+      // detail of anyway. At the original extent max() picks 24*SCALE, so this
+      // is a no-op there and only bites once the map is genuinely large.
+      const step = Math.max(24 * SCALE, (BOUNDS.maxX - BOUNDS.minX) / 80);
       for (let x = BOUNDS.minX; x < BOUNDS.maxX; x += step) {
         const x1 = Math.min(x + step, BOUNDS.maxX);
         for (let z = BOUNDS.minZ; z < BOUNDS.maxZ; z += step) {
