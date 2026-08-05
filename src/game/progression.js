@@ -678,7 +678,7 @@
     currentVehicle() { return currentId; },
     selectVehicle(id) { return selectVehicle(id); },
     wallet() { return wallet; },
-    spend(n) { const ok = spend(n); if (ok) refreshWalletLine(); return ok; },
+    spend(n, reason) { const ok = spend(n, reason); if (ok) refreshWalletLine(); return ok; },
     credit(n) { const v = credit(n); refreshWalletLine(); return v; },
     stats() { return { raceWins: counters.raceWins, zoneRecords: counters.zoneRecords, coins: counters.coins }; },
 
@@ -690,7 +690,7 @@
       if (!api.isUnlocked(id)) return { ok: false, reason: progressFor(id).need };
       const cost = num(e.purchaseCost, 0);
       if (cost <= 0) return { ok: false, reason: 'not for sale' };
-      if (!spend(cost)) return { ok: false, reason: 'need ' + nf(cost - wallet) + ' more' };
+      if (!spend(cost, 'purchase:' + id)) return { ok: false, reason: 'need ' + nf(cost - wallet) + ' more' };
       owned.add(id); saveOwned(); saveUnlocks(); refreshWalletLine();
       if (cardsBuilt) renderCards();
       ctx.fx.banner('CAR PURCHASED', e.displayName, hex(e.baseColor));
@@ -742,7 +742,8 @@
   window.GAME_DEBUG_PROG = {
     state: () => ({
       wallet, owned: [...owned], unlocks: Object.assign({}, unlocks), current: currentId,
-      counters: Object.assign({}, counters), paints: Object.assign({}, paints), tuneCfg: Object.assign({}, tuneCfg)
+      counters: Object.assign({}, counters), paints: Object.assign({}, paints), tuneCfg: Object.assign({}, tuneCfg),
+      lastSpend: lastSpend ? Object.assign({}, lastSpend) : null
     }),
     grant: (kind, n) => {
       if (counters[kind] == null) { console.error('[progression] no counter "' + kind + '"'); return null; }

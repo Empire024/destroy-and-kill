@@ -197,9 +197,11 @@ pooled separately and never disposed).
 - **Rubber band**: `±8 %` of target speed, proportional to the along-track gap
   to the player, clamped. Nothing else adjusts opponent pace. Documented here
   because it is invisible in play and would otherwise look like cheating.
-- **Player contact**: the player driving INTO a car (closing component > 3)
-  shoves it and knocks 14 u/s off it, at most once per 0.25 s; a car catching
-  the player from behind sidesteps instead.
+- **Player contact**: opponents are published to `ctx.actors.extraCollidables`,
+  so the engine pushes the player's car out of them (push-out only). This module
+  prices the rest: the player driving INTO a car (closing component > 3) shoves
+  it and knocks 14 u/s off it, at most once per 0.25 s; a car catching the
+  player from behind sidesteps instead.
 
 Two AI bugs found and fixed by measurement, both worth remembering because both
 looked harmless in code review:
@@ -300,21 +302,33 @@ array `ctx.world.obstaclesNear()` returns — one per opponent per frame, engine
 
 ---
 
-## 7. What the seam still needs (ctx requests)
+## 7. Seam requests — 1 and 2 landed and adopted
 
-1. **`ctx.engine.teleportCar(x, z, heading, atY)`.** It resolves its height with
-   `groundHeightAt(x, z, carState.y)`, so a grid on the freeway deck lands the
-   car *under* the deck — on COASTAL FREEWAY that is open water, and the car
-   drowned during the countdown, every time. `GAME_DEBUG.teleport` already takes
-   `atY`. Until it exists, `placeCar()` seeds `ctx.carState.y` (one field, the
-   one `teleportCar` immediately overwrites) and the reason is commented at the
-   call site.
-2. **Player-vs-opponent collision.** The engine's resolver walks `traffic[]`
-   only, and a race opponent must not live there — `manageRegionalPopulation`
-   would recycle it mid-race and the lane AI at line ~3382 would steer it. So
-   opponents take a shove and the player drives through them. A
-   `ctx.actors.extraCollidables` array that the resolver also walks (same graded
-   bash/blast rules) would fix it with no change to this module's ownership.
+1. **`ctx.engine.teleportCar(x, z, heading, atY)`** — *landed, adopted.* Without
+   the level hint a grid on the freeway deck resolved to the street under it,
+   which on COASTAL FREEWAY is open water: the car landed at y = -9 and drowned
+   during the countdown, every time. `placeCar()` now just forwards `atY` and
+   the old `carState.y` seeding workaround is gone.
+   **Re-verified:** freeway grid places the car at **y = 30.1** with all four
+   opponents at y = 30, and the race runs to `results` in 121.75 s, `dead=false`.
+2. **`ctx.actors.extraCollidables`** — *landed, adopted.* Each active opponent
+   object is pushed into the array at `startRace` (it already carries `x/z/y`;
+   `r = 4.0`, `solid = true`) and spliced out on finish, abandon, world change
+   and dispose. Opponents still cannot live in `traffic[]` — the population
+   manager would recycle them mid-race and the lane AI would steer them — and
+   this module still prices every consequence of a contact (shove, speed loss,
+   sidestep, crash sound); the engine only pushes the player out.
+   **Re-verified, head-on ram at speed, same race, A/B on the `solid` flag:**
+
+   | `solid` | min centre-to-centre distance | shove still fires |
+   |---|---|---|
+   | `false` (old behaviour) | **1.05** — straight through the car | yes |
+   | `true` (published) | **7.35** — bodies never interpenetrate | yes |
+
+   The contact test in `updateRace` was widened 7.4 → 8.6 to match: the resolver
+   now holds the circles 8.2 apart (4.2 + r), so the old threshold would almost
+   never have seen the contact it is there to price. Published count goes
+   0 → 4 → 0 across a race, and is 0 at idle.
 3. **`progression.spend(amount, reason) -> bool`.** `entryFee` is implemented
    against it, with a direct `progression.wallet` read/write as the fallback.
    All authored races are free until progression confirms which it wants.
@@ -347,8 +361,8 @@ the schema and used exactly as documented.
 
 - **Opponents do not collide with each other, or with traffic and pedestrians.**
   They can overlap in a slow corner and they drive through the city's cars. The
-  whiskers only see `obstaclesNear` boxes. Fixing this properly wants request 2
-  above plus a per-race broad phase.
+  whiskers only see `obstaclesNear` boxes. The player↔opponent case is solved
+  (`extraCollidables`); this one wants a per-race broad phase and is deferred.
 - **Opponents are kinematic** — no engine vehicle model, no drift, no damage,
   no engine note. `tuneKey` therefore only scales a straight-line ceiling.
 - **The ×12 combined cap is unmeasured in play** (see §6); ×7.5 is the highest

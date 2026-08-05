@@ -757,136 +757,11 @@ const LIGHT_BASE={key:{color:moon.color.getHex(),intensity:moon.intensity},
 // still drawn in NEON after one legacy round-trip (587 draw calls vs 73 on a
 // clean boot). Those call sites now add in here, which needs the group to exist
 // before they first run.
-const legacyGroup=new THREE.Group(); legacyGroup.name='legacy-world'; scene.add(legacyGroup);
+// ---------- Collision resolvers (shared by every world) ----------
+// The legacy capital grid, its region constants, ground plane, buildings and
+// spatial hash were removed with the legacy map. Worlds own their geometry;
+// the engine keeps only the push-out maths below.
 
-// ---------- World ----------
-const WORLD=1170, HALF=WORLD/2;             // original coastal capital footprint
-const REGION_LENGTH=WORLD*40;                   // forty city-widths from coast to desert frontier
-const REGION_MIN_X=HALF-REGION_LENGTH, REGION_MAX_X=HALF+28;
-const REGION_HALF_Z=WORLD*5.5, REGION_MIN_Z=-REGION_HALF_Z, REGION_MAX_Z=REGION_HALF_Z;
-const COAST_X=HALF+28;
-const BLOCK=90;                    // spatial-hash cell size only (layout below is non-uniform)
-const ROAD=42, SW=9;               // wide roads + sidewalk width each side
-const SHORE=28, LAND=REGION_LENGTH; // LAND remains as a legacy alias for old helper code
-function insideState(x,z){ return x>=REGION_MIN_X&&x<=REGION_MAX_X&&z>=REGION_MIN_Z&&z<=REGION_MAX_Z; }
-function isOceanAt(x,z){ return x>COAST_X+10; }
-function clampToState(x,z){ return {x:clamp(x,REGION_MIN_X+20,COAST_X-20),z:clamp(z,REGION_MIN_Z+20,REGION_MAX_Z-20)}; }
-function isCityCore(x,z){ return x>-HALF-180&&x<HALF+120&&Math.abs(z)<HALF+180; }
-// Variable-width blocks: road centre-lines at irregular spacing → some big, some small.
-const roadLines=(()=>{ const L=[]; let p=-HALF+ROAD; L.push(p);
-  while(true){ p+=rand(80,215); if(p>HALF-ROAD) break; L.push(p); } return L; })();
-const GRID=roadLines.length;
-const RMIN=roadLines[0], RMAX=roadLines[GRID-1], CMID=(RMIN+RMAX)/2, CLEN=(RMAX-RMIN)+ROAD;
-function nearLine(v){ let m=1e9; for(let i=0;i<roadLines.length;i++){ const d=Math.abs(v-roadLines[i]); if(d<m)m=d; } return m; }
-function onRoad(x,z){ return nearLine(x)<ROAD/2 || nearLine(z)<ROAD/2; }
-function roadPoint(){ let x,z,t=0; do{ x=rand(RMIN,RMAX); z=rand(RMIN,RMAX); t++; }while(!onRoad(x,z)&&t<120); return {x,z}; }
-
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(WORLD+SHORE*2,WORLD+SHORE*2),new THREE.MeshStandardMaterial({color:0x0c0e16,roughness:.95}));
-ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
-
-// Low-cost state floor. Biome-colored streaming tiles sit a few centimetres above it.
-const stateFloor=new THREE.Mesh(
-  new THREE.PlaneGeometry(REGION_LENGTH,REGION_HALF_Z*2),
-  new THREE.MeshStandardMaterial({color:0x20251d,roughness:1,metalness:0})
-);
-stateFloor.rotation.x=-Math.PI/2; stateFloor.position.set((REGION_MIN_X+COAST_X)/2,-0.10,0); stateFloor.receiveShadow=true; scene.add(stateFloor);
-
-// Visible hard limits on the non-ocean edges. These replace invisible "water" teleports.
-const stateBoundaryWalls=[];
-const boundaryMat=new THREE.MeshStandardMaterial({color:0x292d35,roughness:.88,metalness:.18});
-const boundaryTopMat=new THREE.MeshBasicMaterial({color:0xff7a24});
-function addStateBoundaryWall(x,z,w,d){
-  const wall=new THREE.Mesh(new THREE.BoxGeometry(w,22,d),boundaryMat);wall.position.set(x,11,z);wall.castShadow=true;wall.receiveShadow=true;scene.add(wall);
-  const top=new THREE.Mesh(new THREE.BoxGeometry(Math.max(2,w+.5),1.1,Math.max(2,d+.5)),boundaryTopMat);top.position.set(x,22.3,z);scene.add(top);
-  stateBoundaryWalls.push({x,z,w,d});
-}
-addStateBoundaryWall(REGION_MIN_X+7,0,14,REGION_HALF_Z*2+80);
-addStateBoundaryWall((REGION_MIN_X+COAST_X)/2,REGION_MIN_Z+7,REGION_LENGTH+50,14);
-addStateBoundaryWall((REGION_MIN_X+COAST_X)/2,REGION_MAX_Z-7,REGION_LENGTH+50,14);
-
-// roads + sidewalks: a lighter pavement strip under each road; the road on top leaves SW-wide kerbs
-const roadMat=new THREE.MeshStandardMaterial({color:0x15161d,roughness:.8});
-const sideMat=new THREE.MeshStandardMaterial({color:0x33373f,roughness:.95});
-const paveHGeo=new THREE.PlaneGeometry(CLEN,ROAD+2*SW), paveVGeo=new THREE.PlaneGeometry(ROAD+2*SW,CLEN);
-const roadHGeo=new THREE.PlaneGeometry(CLEN,ROAD), roadVGeo=new THREE.PlaneGeometry(ROAD,CLEN);
-for(let i=0;i<GRID;i++){ const c=roadLines[i];
-  const ph=new THREE.Mesh(paveHGeo,sideMat); ph.rotation.x=-Math.PI/2; ph.position.set(CMID,0.02,c); ph.receiveShadow=true; scene.add(ph);
-  const pv=new THREE.Mesh(paveVGeo,sideMat); pv.rotation.x=-Math.PI/2; pv.position.set(c,0.02,CMID); pv.receiveShadow=true; scene.add(pv);
-  const rh=new THREE.Mesh(roadHGeo,roadMat); rh.rotation.x=-Math.PI/2; rh.position.set(CMID,0.035,c); scene.add(rh);
-  const rv=new THREE.Mesh(roadVGeo,roadMat); rv.rotation.x=-Math.PI/2; rv.position.set(c,0.035,CMID); scene.add(rv);
-}
-// centre-line dashes
-const dashMat=new THREE.MeshBasicMaterial({color:0xffd23f}), dashGeo=new THREE.PlaneGeometry(3,10), dashGroup=new THREE.Group();
-for(let i=0;i<GRID;i++){ const line=roadLines[i];
-  for(let d=RMIN;d<=RMAX;d+=34){
-    const a=new THREE.Mesh(dashGeo,dashMat); a.rotation.x=-Math.PI/2; a.rotation.z=Math.PI/2; a.position.set(d,0.06,line); dashGroup.add(a);
-    const b=new THREE.Mesh(dashGeo,dashMat); b.rotation.x=-Math.PI/2; b.position.set(line,0.06,d); dashGroup.add(b);
-  }
-}
-scene.add(dashGroup);
-
-// ---------- Districts, buildings & landmarks ----------
-const buildings=[]; const buildGroup=new THREE.Group(); scene.add(buildGroup);
-const neonColors=[0xff2d9b,0x20e3ff,0xffd23f,0x9b5cff,0x3bff8b,0xff6b3b];
-// district hue by world-x: downtown(blue/purple) → neon(pink/cyan) → industrial(amber/green)
-function districtHue(wx){ const t=(wx+HALF)/WORLD; return t<.34?rand(230,275):t<.67?rand(285,330):rand(35,90); }
-const treeGeo=new THREE.ConeGeometry(4,12,7), treeMat=new THREE.MeshStandardMaterial({color:0x1f7a3a,roughness:.9});
-const trunkMat=new THREE.MeshStandardMaterial({color:0x5a3a1a});
-const trunkGeo=new THREE.CylinderGeometry(1,1.4,6);
-const trees=[];   // knock-over obstacles
-function addTree(tx,tz){
-  const g=new THREE.Group(); g.position.set(tx,0,tz);   // origin at the base so it pivots when it falls
-  const tr=new THREE.Mesh(trunkGeo,trunkMat); tr.position.y=3; tr.castShadow=true; g.add(tr);
-  const cn=new THREE.Mesh(treeGeo,treeMat); cn.position.y=11; cn.castShadow=true; g.add(cn);
-  scene.add(g);
-  trees.push({g,x:tx,z:tz,fallen:false,fall:0,ax:1,az:0});
-}
-
-// One central-ish block is a park.
-const parkA=Math.max(0,Math.floor((GRID-1)/2)), parkB=Math.max(0,Math.floor((GRID-1)/2)-1);
-// Each cell is the block between consecutive road lines, inset by the road half-width + sidewalk.
-for(let a=0;a<GRID-1;a++)for(let b=0;b<GRID-1;b++){
-  const x0=roadLines[a]+ROAD/2+SW, x1=roadLines[a+1]-ROAD/2-SW;
-  const z0=roadLines[b]+ROAD/2+SW, z1=roadLines[b+1]-ROAD/2-SW;
-  const bw=x1-x0, bd=z1-z0; if(bw<12||bd<12) continue;   // block too small → open plaza
-  const cx=(x0+x1)/2, cz=(z0+z1)/2;
-  if(a===parkA&&b===parkB){
-    const patch=new THREE.Mesh(new THREE.PlaneGeometry(bw,bd),new THREE.MeshStandardMaterial({color:0x12401f,roughness:.95}));
-    patch.rotation.x=-Math.PI/2; patch.position.set(cx,0.05,cz); patch.receiveShadow=true; scene.add(patch);
-    const nt=clamp(Math.floor(bw*bd/1500)+3,3,14);
-    for(let k=0;k<nt;k++) addTree(x0+rand(6,bw-6), z0+rand(6,bd-6));
-    continue;
-  }
-  // bigger blocks get subdivided into more (and taller) buildings
-  const cols=bw>150?3:bw>85?2:1, rows=bd>150?3:bd>85?2:1;
-  const cwid=bw/cols, cdep=bd/rows, hue=districtHue(cx), big=(bw>150&&bd>150);
-  for(let ci=0;ci<cols;ci++)for(let ri=0;ri<rows;ri++){
-    const w=cwid-8, d=cdep-8; if(w<9||d<9) continue;
-    const px=x0+ci*cwid+cwid/2, pz=z0+ri*cdep+cdep/2, h=rand(20,big?175:110);
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
-      new THREE.MeshStandardMaterial({color:new THREE.Color(`hsl(${hue|0},28%,13%)`),roughness:.7,metalness:.3}));
-    mesh.position.set(px,h/2,pz); mesh.castShadow=true; mesh.receiveShadow=true; buildGroup.add(mesh);
-    const nc=pick(neonColors);
-    const trim=new THREE.Mesh(new THREE.BoxGeometry(w+1,2,d+1),new THREE.MeshBasicMaterial({color:nc}));
-    trim.position.set(px,h+1,pz); buildGroup.add(trim);
-    if(Math.random()<.7){ const band=new THREE.Mesh(new THREE.BoxGeometry(w+.5,rand(4,10),d+.5),new THREE.MeshBasicMaterial({color:nc,transparent:true,opacity:.22})); band.position.set(px,rand(10,h-6),pz); buildGroup.add(band); }
-    buildings.push({x:px,z:pz,w,d,h});
-  }
-}
-function hitBuilding(x,z,r){ for(const b of buildings){ if(x>b.x-b.w/2-r&&x<b.x+b.w/2+r&&z>b.z-b.d/2-r&&z<b.z+b.d/2+r) return b; } return null; }
-
-// ---------- Collision core (spatial grid + push-out resolvers) ----------
-// Buildings are bucketed into a grid so we only test the handful near the car.
-const BGRID=new Map();
-const bkey=(cx,cz)=>cx*10007+cz;
-function gridAdd(b){ const cx=Math.floor(b.x/BLOCK), cz=Math.floor(b.z/BLOCK); const k=bkey(cx,cz); let a=BGRID.get(k); if(!a){a=[];BGRID.set(k,a);} a.push(b); }
-for(const b of buildings) gridAdd(b);
-const _nb=[];
-function nearbyBuildings(x,z){ _nb.length=0; const cx=Math.floor(x/BLOCK), cz=Math.floor(z/BLOCK);
-  for(let ix=cx-2;ix<=cx+2;ix++)for(let iz=cz-2;iz<=cz+2;iz++){ const a=BGRID.get(bkey(ix,iz)); if(a) for(let i=0;i<a.length;i++) _nb.push(a[i]); }
-  return _nb; }
-// Push a circle (pt,R) out of an AABB (center bx,bz, half-extents hx,hz); reflect vel along the normal.
-// Returns the closing speed of the impact (0 if no contact / moving away).
 function aabbPush(pt,R,bx,bz,hx,hz,vel,rest){
   const cx=clamp(pt.x,bx-hx,bx+hx), cz=clamp(pt.z,bz-hz,bz+hz);
   let dx=pt.x-cx, dz=pt.z-cz, d2=dx*dx+dz*dz;
@@ -927,377 +802,11 @@ function circlePush(pt,R,ox,oz,oR,vel,rest){
   return 0;
 }
 
-// Ocean surrounding the island city (sits below the land, so it only shows past the shore)
-{ const water=new THREE.Mesh(new THREE.PlaneGeometry(WORLD*4,WORLD*4),
-    new THREE.MeshStandardMaterial({color:0x0a3350,roughness:.12,metalness:.6,transparent:true,opacity:.94}));
-  water.rotation.x=-Math.PI/2; water.position.y=-1.2; water.receiveShadow=true; scene.add(water);
-  // palms dotted along the shoreline
-  for(let i=0;i<24;i++){ const e=(Math.random()*4)|0; let x,z;
-    if(e===0){ x=rand(-LAND,LAND); z=LAND-rand(2,9); } else if(e===1){ x=rand(-LAND,LAND); z=-LAND+rand(2,9); }
-    else if(e===2){ x=LAND-rand(2,9); z=rand(-LAND,LAND); } else { x=-LAND+rand(2,9); z=rand(-LAND,LAND); }
-    const palm=new THREE.Mesh(new THREE.CylinderGeometry(1,1.6,14),trunkMat); palm.position.set(x,7,z); palm.castShadow=true; scene.add(palm);
-    const top=new THREE.Mesh(new THREE.SphereGeometry(6,8,6),treeMat); top.position.set(x,15,z); scene.add(top); }
-}
+// (the legacy island ocean + shoreline palms died with the map — GameSea owns
+// the water for every world now)
 
-// ---------- 40× STATE v17: flat, curved roads, cities and streaming ----------
-// The state is intentionally flat again. Mountains remain as roadside scenery,
-// while roads and AI all share one stable ground plane.
-function stateBaseHeight(x,z){
-  return 0;
-}
-function smoothStateRoute(name,width,anchors,closed=false,samples=6,profile=1){
-  const curve=new THREE.CatmullRomCurve3(anchors.map(p=>new THREE.Vector3(p[0],0,p[1])),closed,'catmullrom',.42);
-  const count=Math.max(8,(closed?anchors.length:anchors.length-1)*samples),points=[];
-  for(let i=0;i<=count;i++){
-    const p=curve.getPoint(i/count);
-    points.push([p.x,p.z,0]);
-  }
-  return {name,width,points,closed};
-}
-function cityLoopAnchors(p,rx=520,rz=360){
-  const a=[]; for(let i=0;i<12;i++){ const q=i/12*Math.PI*2,w=1+Math.sin(i*2.17+p.x*.0002)*.12; a.push([p.x+Math.cos(q)*rx*w,p.z+Math.sin(q)*rz/w]); } return a;
-}
-const STATE_PLACES=[
-  {name:'Ocean Beach',type:'resort',x:250,z:-3250},{name:'Vice Heights',type:'resort',x:120,z:3450},
-  {name:'International Airport',type:'airport',x:-2850,z:-1750},{name:'Port Calder',type:'industrial',x:-2300,z:-3650},
-  {name:'Old Palms',type:'suburb',x:-4300,z:1800},{name:'Redland City',type:'city',x:-7100,z:3150},
-  {name:'Neon Bay',type:'city',x:-7600,z:300},{name:'Pine Creek',type:'city',x:-11200,z:3450},
-  {name:'Blackwater',type:'swamptown',x:-10800,z:-5000},{name:'Morrow Farms',type:'farm',x:-13500,z:-500},
-  {name:'Dry Ridge',type:'factory',x:-17800,z:1250},{name:'Sierra Vista',type:'city',x:-23200,z:1450},
-  {name:'Mesa Verde',type:'town',x:-26700,z:-1450},{name:'Dust County',type:'city',x:-30200,z:0},
-  {name:'Aircraft Graveyard',type:'graveyard',x:-34200,z:-2300},{name:'Cinder Wind Farm',type:'windfarm',x:-36500,z:3000},
-  {name:'Cinder City',type:'city',x:-39200,z:3850},{name:'Fort Cinder',type:'military',x:-40500,z:1450},
-  {name:'Last Chance',type:'city',x:-45100,z:250}
-];
-const ROUTE_SPECS=[
-  ['Interstate 6',40,[[RMIN,roadLines[Math.floor(GRID/2)]],[-1500,100],[-3100,760],[-5200,-120],[-7200,900],[-9400,-250],[-11800,1100],[-14300,250],[-16800,1550],[-19400,420],[-22000,1350],[-24700,-280],[-27500,900],[-30400,-650],[-33300,520],[-36500,-620],[-39800,780],[-43000,-420],[-45500,180]],false,7,.75],
-  ['Coastal Ribbon',32,[[420,-6100],[250,-5200],[510,-4300],[180,-3400],[470,-2500],[130,-1600],[430,-700],[160,300],[440,1250],[150,2300],[420,3400],[170,4550],[450,5900]],false,6,.25],
-  ['North County Sweep',27,[[-900,2450],[-2800,3100],[-4700,2700],[-6800,3900],[-9000,3050],[-11200,4100],[-13600,3300],[-16000,4550],[-18700,3500],[-21400,4700],[-24200,3650],[-27400,4800],[-31000,3900],[-34600,5150],[-38500,4200],[-42000,5200],[-45400,4700]],false,6,.65],
-  ['Swamp Serpent',25,[[-1100,-1650],[-2600,-2850],[-4700,-2200],[-6500,-4100],[-8500,-3300],[-10400,-5550],[-12600,-4500],[-14500,-5900],[-16500,-4300],[-18800,-3500],[-21100,-2550],[-24000,-3200],[-26300,-1800]],false,7,.15],
-  ['Farm Belt',23,[[-3600,500],[-4800,2200],[-6500,1500],[-7800,2850],[-9600,1200],[-11300,2350],[-13000,-250],[-14500,900],[-15800,-2500],[-17600,-1200],[-19100,-3300]],false,6,.45],
-  ['Mountain Pass',27,[[-13200,650],[-14500,2400],[-16000,1250],[-17600,3400],[-19400,1500],[-21100,300],[-22600,2100],[-24200,700],[-25800,3100],[-27600,1700],[-29400,650]],false,8,1.25],
-  ['Desert Highway',36,[[-25800,-200],[-28000,-1650],[-30100,-700],[-32100,-2700],[-34400,-1400],[-36500,-300],[-38600,1650],[-40700,500],[-42800,1600],[-45400,180]],false,7,.5],
-  ['Dust Loop',24,[[-30400,100],[-31800,2400],[-34400,3600],[-37300,3100],[-39900,1350],[-42000,-1000],[-39800,-3150],[-36600,-3700],[-33700,-2950],[-31700,-1600]],true,6,.5],
-  ['Wetlands Loop',18,[[-6400,-3800],[-7350,-5450],[-9700,-6100],[-12100,-5500],[-13800,-4250],[-11600,-3350],[-9000,-4050]],true,5,.08],
-  ['Airport Connector',29,[[roadLines[1],RMIN],[-1100,-900],[-1900,-1900],[-3000,-1250],[-4100,-2100],[-5200,-300]],false,6,.2],
-  ['Redland Parkway',25,[[-5200,250],[-6100,1550],[-7100,3150],[-8700,3650],[-10100,2550]],false,6,.5],
-  ['Blackwater Causeway',22,[[-7600,300],[-8800,-1350],[-10800,-5000],[-13000,-4300]],false,6,.12],
-  ['Sierra Spur',24,[[-19600,420],[-21400,2500],[-23200,1450],[-24800,300]],false,6,1.0],
-  ['Cinder Connector',26,[[-36500,-620],[-37800,1900],[-39200,3850],[-40500,1450]],false,6,.8]
-];
-const STATE_ROUTES=ROUTE_SPECS.map(r=>smoothStateRoute(r[0],r[1],r[2],r[3],r[4],r[5]));
-for(const p of STATE_PLACES){
-  if(!['city','resort','town','swamptown'].includes(p.type)) continue;
-  const size=p.type==='city'?1:p.type==='resort'?.72:.62;
-  STATE_ROUTES.push(smoothStateRoute(p.name+' Ring',p.type==='city'?25:20,cityLoopAnchors(p,560*size,390*size),true,5,p.x<-15000?.55:.25));
-  STATE_ROUTES.push(smoothStateRoute(p.name+' Cross',18,[[p.x-520*size,p.z-80],[p.x,p.z+140],[p.x+520*size,p.z-120]],false,7,.12));
-}
-const STATE_RIVERS=[
-  [[-4800,5900],[-6100,4100],[-7900,2300],[-9700,800],[-11100,-1300],[-11600,-3300],[-10800,-6100]],
-  [[-16800,6100],[-17700,4300],[-19100,2700],[-20200,900],[-21100,-1300],[-22500,-3400],[-23800,-6100]]
-];
-const STATE_ROAD_SEGMENTS=[],STATE_ROAD_CELL=1200,STATE_ROAD_GRID=new Map();
-const roadGridKey=(x,z)=>x+','+z;
-function indexStateRoad(s){
-  const pad=s.width*.5+90,minx=Math.floor((Math.min(s.ax,s.bx)-pad)/STATE_ROAD_CELL),maxx=Math.floor((Math.max(s.ax,s.bx)+pad)/STATE_ROAD_CELL),minz=Math.floor((Math.min(s.az,s.bz)-pad)/STATE_ROAD_CELL),maxz=Math.floor((Math.max(s.az,s.bz)+pad)/STATE_ROAD_CELL);
-  for(let x=minx;x<=maxx;x++)for(let z=minz;z<=maxz;z++){const k=roadGridKey(x,z),a=STATE_ROAD_GRID.get(k)||[];a.push(s);STATE_ROAD_GRID.set(k,a);}
-}
-for(let ri=0;ri<STATE_ROUTES.length;ri++){
-  const route=STATE_ROUTES[ri];
-  for(let i=0;i<route.points.length-1;i++){
-    const a=route.points[i],b=route.points[i+1],s={routeIndex:ri,segmentIndex:i,ax:a[0],az:a[1],ay:a[2]||0,bx:b[0],bz:b[1],by:b[2]||0,width:route.width};
-    STATE_ROAD_SEGMENTS.push(s); indexStateRoad(s);
-  }
-}
-const stateRoadGroup=new THREE.Group(); stateRoadGroup.frustumCulled=false; scene.add(stateRoadGroup);
-const stateRoadMat=new THREE.MeshStandardMaterial({color:0x24262b,roughness:.88,metalness:.02});
-const stateShoulderMat=new THREE.MeshStandardMaterial({color:0x6c6252,roughness:1});
-const stateBarrierMat=new THREE.MeshStandardMaterial({color:0x90979a,roughness:.72,metalness:.4});
-function makeStripInstances(segments,extraWidth,mat,yOffset=.02){
-  const geo=new THREE.BoxGeometry(1,1,1); geo.userData.shared=true;
-  const im=new THREE.InstancedMesh(geo,mat,segments.length),m=new THREE.Matrix4(),q=new THREE.Quaternion(),pos=new THREE.Vector3(),sc=new THREE.Vector3(),from=new THREE.Vector3(0,0,1),dir=new THREE.Vector3();
-  for(let i=0;i<segments.length;i++){
-    const s=segments[i],dx=s.bx-s.ax,dy=s.by-s.ay,dz=s.bz-s.az,len=Math.hypot(dx,dy,dz)||1;dir.set(dx,dy,dz).normalize();q.setFromUnitVectors(from,dir);
-    pos.set((s.ax+s.bx)/2,(s.ay+s.by)/2+yOffset,(s.az+s.bz)/2);sc.set(s.width+extraWidth,.08,len+1.5);m.compose(pos,q,sc);im.setMatrixAt(i,m);
-  }
-  im.instanceMatrix.needsUpdate=true;im.receiveShadow=true;im.frustumCulled=false;stateRoadGroup.add(im);return im;
-}
-makeStripInstances(STATE_ROAD_SEGMENTS,12,stateShoulderMat,-.025);
-makeStripInstances(STATE_ROAD_SEGMENTS,0,stateRoadMat,.018);
-// Flat circular joints cover the meeting point of every short curved-road segment.
-// This removes visible gaps and overlapping tilted corners while keeping the roads cheap.
-function makeRoadJointInstances(routes,extraWidth,mat,yOffset){
-  const joints=[];
-  for(const route of routes) for(const p of route.points) joints.push({x:p[0],z:p[1],r:(route.width+extraWidth)*.5});
-  const geo=new THREE.CylinderGeometry(1,1,1,16); geo.userData.shared=true;
-  const im=new THREE.InstancedMesh(geo,mat,joints.length),m=new THREE.Matrix4(),q=new THREE.Quaternion(),pos=new THREE.Vector3(),sc=new THREE.Vector3();
-  for(let i=0;i<joints.length;i++){
-    const j=joints[i]; pos.set(j.x,yOffset,j.z); sc.set(j.r,.08,j.r); m.compose(pos,q,sc); im.setMatrixAt(i,m);
-  }
-  im.instanceMatrix.needsUpdate=true; im.receiveShadow=true; im.frustumCulled=false; stateRoadGroup.add(im);
-}
-makeRoadJointInstances(STATE_ROUTES,12,stateShoulderMat,-.022);
-makeRoadJointInstances(STATE_ROUTES,0,stateRoadMat,.022);
-// Guardrails on mountain grades and meaningful bends; kept sparse and instanced.
-const barrierItems=[];
-for(let ri=0;ri<STATE_ROUTES.length;ri++){
-  const route=STATE_ROUTES[ri],isRisky=/Mountain|Sierra|Pass|Highway|Sweep/.test(route.name);
-  for(let i=1;i<route.points.length-2;i+=2){
-    const a=route.points[i-1],b=route.points[i],c=route.points[i+1],h1=Math.atan2(b[0]-a[0],b[1]-a[1]),h2=Math.atan2(c[0]-b[0],c[1]-b[1]),turn=Math.atan2(Math.sin(h2-h1),Math.cos(h2-h1));
-    if(!isRisky&&Math.abs(turn)<.055)continue;
-    const dx=c[0]-b[0],dz=c[1]-b[1],len=Math.hypot(dx,dz)||1,side=turn>=0?-1:1,off=route.width*.5+2.8;
-    barrierItems.push({x:(b[0]+c[0])/2+dz/len*off*side,y:(b[2]+c[2])/2+.65,z:(b[1]+c[1])/2-dx/len*off*side,dx,dy:c[2]-b[2],dz,len:Math.min(len*.9,34)});
-  }
-}
-if(barrierItems.length){
-  const geo=new THREE.BoxGeometry(1,1,1);geo.userData.shared=true;const im=new THREE.InstancedMesh(geo,stateBarrierMat,barrierItems.length),m=new THREE.Matrix4(),q=new THREE.Quaternion(),from=new THREE.Vector3(0,0,1),dir=new THREE.Vector3(),pos=new THREE.Vector3(),sc=new THREE.Vector3();
-  barrierItems.forEach((o,i)=>{dir.set(o.dx,o.dy,o.dz).normalize();q.setFromUnitVectors(from,dir);pos.set(o.x,o.y,o.z);sc.set(.42,1.05,o.len);m.compose(pos,q,sc);im.setMatrixAt(i,m);});im.instanceMatrix.needsUpdate=true;im.frustumCulled=false;stateRoadGroup.add(im);
-}
-function addStateStrip(ax,az,bx,bz,width,mat,y){
-  const dx=bx-ax,dz=bz-az,len=Math.hypot(dx,dz); if(len<1)return;
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(width,.06,len),mat);mesh.position.set((ax+bx)/2,y,(az+bz)/2);mesh.rotation.y=Math.atan2(dx,dz);mesh.receiveShadow=true;stateRoadGroup.add(mesh);
-}
-const riverMat=new THREE.MeshBasicMaterial({color:0x17475a,transparent:true,opacity:.82});
-for(const river of STATE_RIVERS) for(let i=0;i<river.length-1;i++) addStateStrip(river[i][0],river[i][1],river[i+1][0],river[i+1][1],135,riverMat,-.055);
-const stateOcean=new THREE.Mesh(new THREE.PlaneGeometry(WORLD*12,REGION_HALF_Z*2.4),new THREE.MeshStandardMaterial({color:0x0a3350,roughness:.15,metalness:.5}));
-stateOcean.rotation.x=-Math.PI/2; stateOcean.position.set(COAST_X+WORLD*6,-1.25,0); scene.add(stateOcean);
-function pointSegInfo(px,pz,s){
-  const vx=s.bx-s.ax,vz=s.bz-s.az,l2=vx*vx+vz*vz||1,t=clamp(((px-s.ax)*vx+(pz-s.az)*vz)/l2,0,1),x=s.ax+vx*t,z=s.az+vz*t;
-  return {d:Math.hypot(px-x,pz-z),x,z,y:lerp(s.ay||0,s.by||0,t),t,heading:Math.atan2(vx,vz),pitch:Math.atan2((s.by||0)-(s.ay||0),Math.sqrt(l2))};
-}
-function roadCandidatesAt(px,pz,radiusCells=1){
-  const out=[],seen=new Set(),cx=Math.floor(px/STATE_ROAD_CELL),cz=Math.floor(pz/STATE_ROAD_CELL);
-  for(let x=cx-radiusCells;x<=cx+radiusCells;x++)for(let z=cz-radiusCells;z<=cz+radiusCells;z++)for(const s of STATE_ROAD_GRID.get(roadGridKey(x,z))||[]){if(!seen.has(s)){seen.add(s);out.push(s);}}
-  return out;
-}
-function nearestStateRoad(px,pz){ let best=null; const candidates=roadCandidatesAt(px,pz,1); for(const s of candidates){ const q=pointSegInfo(px,pz,s); if(!best||q.d<best.d)best={...q,seg:s}; } return best; }
-function distanceToStateRoad(px,pz){ const q=nearestStateRoad(px,pz); return q?q.d:1e9; }
-function stateGroundHeightAt(x,z){
-  return 0;
-}
-function stateSurfacePitchAt(x,z,heading){
-  return 0;
-}
-function biomeAt(x,z){
-  if(x>-1700)return Math.abs(z)>HALF?'coast':'suburb';
-  if(z<-2600&&x>-18500)return 'swamp';
-  if(x>-5200)return 'suburb';
-  if(x>-14500)return 'rural';
-  if(x>-26500)return 'mountain';
-  return 'desert';
-}
-const BIOME_COLORS={coast:0x46543c,suburb:0x3c4337,rural:0x3e4a31,swamp:0x233b2d,mountain:0x4b4a42,desert:0x70583b};
-function stateHash(a,b,c=0){ let n=(a*374761393+b*668265263+c*1442695041)|0; n=(n^(n>>>13))*1274126177|0; return (n^(n>>>16))>>>0; }
-function stateRng(seed){ let x=seed||1; return ()=>{ x=(x*1664525+1013904223)>>>0; return x/4294967296; }; }
-const STATE_CHUNK=900, STATE_STREAM_RADIUS=4, STATE_KEEP_RADIUS=6;
-const stateChunks=new Map();
-const stateTreeGeo=new THREE.ConeGeometry(8,26,6), stateRockGeo=new THREE.DodecahedronGeometry(7,0), stateCactusGeo=new THREE.CylinderGeometry(2.2,3.2,18,6), stateMountainGeo=new THREE.ConeGeometry(1,1,7);
-[stateTreeGeo,stateRockGeo,stateCactusGeo,stateMountainGeo].forEach(g=>g.userData.shared=true);
-const stateTreeMats={coast:new THREE.MeshStandardMaterial({color:0x236d3b,roughness:1}),suburb:new THREE.MeshStandardMaterial({color:0x2e7b3e,roughness:1}),rural:new THREE.MeshStandardMaterial({color:0x286638,roughness:1}),swamp:new THREE.MeshStandardMaterial({color:0x1e5a3c,roughness:1}),mountain:new THREE.MeshStandardMaterial({color:0x385335,roughness:1}),desert:new THREE.MeshStandardMaterial({color:0x5d7137,roughness:1})};
-const stateRockMats={mountain:new THREE.MeshStandardMaterial({color:0x77736c,roughness:1}),desert:new THREE.MeshStandardMaterial({color:0x936e49,roughness:1}),default:new THREE.MeshStandardMaterial({color:0x5f6258,roughness:1})};
-const stateMountainMats={mountain:new THREE.MeshStandardMaterial({color:0x686963,roughness:1}),desert:new THREE.MeshStandardMaterial({color:0x8c6543,roughness:1}),default:new THREE.MeshStandardMaterial({color:0x53604d,roughness:1})};
-function pushInstances(group,geo,mat,items){ if(!items.length)return; const im=new THREE.InstancedMesh(geo,mat,items.length),m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pos=new THREE.Vector3();
-  for(let i=0;i<items.length;i++){ const o=items[i]; q.setFromEuler(new THREE.Euler(0,o.r||0,0)); sc.set(o.sx||o.s||1,o.sy||o.s||1,o.sz||o.s||1); pos.set(o.x,o.y||0,o.z); m.compose(pos,q,sc); im.setMatrixAt(i,m); }
-  im.instanceMatrix.needsUpdate=true; im.frustumCulled=false; group.add(im); }
-function addChunkBuilding(group,obstacles,x,z,w,d,h,color){
-  const road=nearestStateRoad(x,z); if(road&&road.d<road.seg.width*.5+18){ const side=stateHash(Math.floor(x),Math.floor(z),7)%2?1:-1,off=road.seg.width*.5+24+Math.max(w,d)*.5; x=road.x+Math.cos(road.heading)*off*side; z=road.z-Math.sin(road.heading)*off*side; }
-  const y=stateGroundHeightAt(x,z),mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:.82,metalness:.08}));
-  mesh.position.set(x,y+h/2,z); mesh.receiveShadow=true; group.add(mesh); obstacles.push({x,z,w,d});
-}
-function addPlaceCluster(group,obstacles,place,rng){
-  const type=place.type,baseY=stateGroundHeightAt(place.x,place.z);
-  if(type==='windfarm'){
-    for(let i=0;i<12;i++){ const x=place.x+(rng()-.5)*700,z=place.z+(rng()-.5)*700,y=stateGroundHeightAt(x,z);
-      const pole=new THREE.Mesh(new THREE.CylinderGeometry(1.2,2.2,70,7),new THREE.MeshStandardMaterial({color:0xc8cbd0,roughness:.55})); pole.position.set(x,y+35,z); group.add(pole);
-      const hub=new THREE.Mesh(new THREE.SphereGeometry(3,8,8),new THREE.MeshBasicMaterial({color:0xffffff})); hub.position.set(x,y+70,z); group.add(hub); }
-  } else if(type==='airport'||type==='graveyard'){
-    const runway=new THREE.Mesh(new THREE.BoxGeometry(type==='airport'?75:45,.12,1300),stateRoadMat); runway.position.set(place.x,baseY+.04,place.z); runway.rotation.y=Math.PI/2; group.add(runway);
-    for(let i=0;i<(type==='airport'?10:18);i++) addChunkBuilding(group,obstacles,place.x+(rng()-.5)*900,place.z+(rng()-.5)*500,rand(18,55),rand(12,35),rand(5,16),type==='airport'?0x66717b:0x6a5d49);
-  } else if(type==='military'){
-    for(let i=0;i<14;i++) addChunkBuilding(group,obstacles,place.x+(rng()-.5)*650,place.z+(rng()-.5)*650,rand(22,58),rand(18,52),rand(8,20),0x59634c);
-  } else {
-    const n=type==='resort'?22:type==='city'?34:type==='industrial'?14:type==='town'||type==='swamptown'?18:9;
-    for(let i=0;i<n;i++){
-      const high=type==='resort'||type==='city',industrial=type==='industrial'||type==='factory';
-      addChunkBuilding(group,obstacles,place.x+(rng()-.5)*(type==='city'?850:650),place.z+(rng()-.5)*(type==='city'?720:650),rand(18,high?62:42),rand(18,industrial?72:48),rand(8,high?(type==='city'?125:95):industrial?30:26),high?0x858b99:industrial?0x5d6264:type==='swamptown'?0x59604e:0x785e50);
-    }
-  }
-}
-
-// ---------- Repeating roadside destination blocks ----------
-// Lightweight procedural adaptations of low-poly Poly Pizza references listed in the document credits.
-const blockMats={
-  asphalt:new THREE.MeshStandardMaterial({color:0x242832,roughness:.96}),
-  concrete:new THREE.MeshStandardMaterial({color:0x777b80,roughness:.92}),
-  concreteDark:new THREE.MeshStandardMaterial({color:0x4b5058,roughness:.92}),
-  wall:new THREE.MeshStandardMaterial({color:0xd4c7a8,roughness:.88}),
-  wallBlue:new THREE.MeshStandardMaterial({color:0x3f718b,roughness:.78}),
-  wallRed:new THREE.MeshStandardMaterial({color:0x9d3f36,roughness:.82}),
-  roof:new THREE.MeshStandardMaterial({color:0x252b36,roughness:.72,metalness:.16}),
-  glass:new THREE.MeshStandardMaterial({color:0x15384b,roughness:.18,metalness:.35,transparent:true,opacity:.82}),
-  neon:new THREE.MeshBasicMaterial({color:0x20e3ff}),
-  neonPink:new THREE.MeshBasicMaterial({color:0xff2d9b}),
-  neonGold:new THREE.MeshBasicMaterial({color:0xffd23f}),
-  pump:new THREE.MeshStandardMaterial({color:0xe8e8e8,roughness:.55}),
-  stripe:new THREE.MeshBasicMaterial({color:0xff4d4d}),
-  green:new THREE.MeshStandardMaterial({color:0x315b3d,roughness:1})
-};
-function blockBox(root,x,y,z,w,h,d,mat,rx=0,ry=0,rz=0){
-  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.rotation.set(rx,ry,rz);m.castShadow=true;m.receiveShadow=true;root.add(m);return m;
-}
-function blockCylinder(root,x,y,z,rt,rb,h,mat,segments=8){
-  const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segments),mat);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;root.add(m);return m;
-}
-function blockLamp(root,x,z,h=18){
-  blockCylinder(root,x,h*.5,z,.32,.55,h,blockMats.concreteDark,7);
-  const lamp=blockBox(root,x,h+.25,z,2.8,.55,1.2,blockMats.neonGold);lamp.castShadow=false;
-}
-function addGasStationBlock(root,rng){
-  blockBox(root,0,.08,0,142,.16,104,blockMats.asphalt);
-  blockBox(root,0,9,31,72,18,30,blockMats.wall);
-  blockBox(root,0,18.6,31,76,1.6,34,blockMats.roof);
-  blockBox(root,0,9.5,14.9,46,8,.45,blockMats.glass);
-  blockBox(root,0,15.2,-12,86,2.2,34,blockMats.roof);
-  for(const x of [-36,36])for(const z of [-24,0])blockCylinder(root,x,7.4,z,.65,.8,14.8,blockMats.concrete,8);
-  for(const x of [-24,-8,8,24]){
-    blockBox(root,x,3.1,-12,4.2,6.2,3.2,blockMats.pump);
-    blockBox(root,x,5.2,-12,3.3,1.1,3.4,blockMats.neonPink);
-  }
-  blockCylinder(root,59,15,24,.8,1.1,30,blockMats.concreteDark,8);
-  blockBox(root,59,30.5,24,13,8,2.2,blockMats.neonGold);
-  for(const x of [-54,54])blockLamp(root,x,-39,16);
-}
-function addParkingGarageBlock(root,rng){
-  blockBox(root,0,.08,0,136,.16,104,blockMats.asphalt);
-  const levels=5;
-  for(let i=0;i<levels;i++)blockBox(root,0,2.2+i*7.2,0,98,1.1,68,blockMats.concrete);
-  for(const x of [-44,-15,15,44])for(const z of [-28,28])blockBox(root,x,18,z,2.4,36,2.4,blockMats.concreteDark);
-  for(let i=0;i<levels-1;i++)blockBox(root,(i%2?18:-18),5.7+i*7.2,0,43,1.0,13,blockMats.concreteDark,0,0,(i%2?-.16:.16));
-  blockBox(root,-50,11,0,3,22,72,blockMats.wallBlue);
-  blockBox(root,50,11,0,3,22,72,blockMats.wallBlue);
-  blockBox(root,0,38.5,0,42,5,3,blockMats.neon);
-  blockLamp(root,-58,-42,18);blockLamp(root,58,-42,18);
-}
-function addDinerBlock(root,rng){
-  blockBox(root,0,.08,0,138,.16,100,blockMats.asphalt);
-  blockBox(root,0,8,18,82,16,32,blockMats.wallRed);
-  blockBox(root,0,16.8,18,88,1.6,38,blockMats.roof);
-  blockBox(root,0,10,1.7,58,8,.5,blockMats.glass);
-  blockBox(root,0,15.1,1.35,84,.8,.8,blockMats.neonPink);
-  blockBox(root,0,17.9,18,45,1.2,3,blockMats.neonGold);
-  blockCylinder(root,51,13,27,.75,1,26,blockMats.concreteDark,8);
-  blockBox(root,51,26.5,27,18,7,2,blockMats.neonPink);
-  for(const x of [-50,-25,0,25,50])blockBox(root,x,.14,-23,1.2,.08,24,blockMats.concrete);
-  blockLamp(root,-59,-38,17);blockLamp(root,59,-38,17);
-}
-function addTownCenterBlock(root,rng){
-  blockBox(root,0,.08,0,148,.16,112,blockMats.concrete);
-  blockBox(root,-45,9,22,42,18,34,blockMats.wallBlue);
-  blockBox(root,0,8,34,38,16,30,blockMats.wall);
-  blockBox(root,45,10,20,42,20,36,blockMats.wallRed);
-  blockBox(root,-45,18.7,22,46,1.5,38,blockMats.roof);
-  blockBox(root,0,16.7,34,42,1.5,34,blockMats.roof);
-  blockBox(root,45,20.7,20,46,1.5,40,blockMats.roof);
-  blockBox(root,-45,9,4.7,25,7,.5,blockMats.glass);
-  blockBox(root,0,8,18.7,24,7,.5,blockMats.glass);
-  blockBox(root,45,10,1.7,26,8,.5,blockMats.glass);
-  blockCylinder(root,0,1.1,-20,11,13,2.2,blockMats.concreteDark,16);
-  blockCylinder(root,0,3.2,-20,4,5,4.2,blockMats.neon,12);
-  for(const [x,z] of [[-58,-42],[58,-42],[-58,44],[58,44]])blockLamp(root,x,z,17);
-  for(let i=0;i<5;i++){
-    const a=i/5*Math.PI*2,x=Math.cos(a)*25,z=-20+Math.sin(a)*25;
-    blockCylinder(root,x,2.2,z,2.8,3.4,4.4,blockMats.green,7);
-  }
-}
-const ROADSIDE_BLOCK_BUILDERS=[addGasStationBlock,addParkingGarageBlock,addDinerBlock,addTownCenterBlock];
-function addRepeatingRoadsideBlock(group,obstacles,cx,cz,centerX,centerZ,rng,biome){
-  if(isCityCore(centerX,centerZ))return;
-  const roll=stateHash(cx,cz,91)%100;
-  if(roll>=42)return; // frequent enough to make long drives feel inhabited, still sparse enough to read at speed
-  let q=null,sx=0,sz=0;
-  for(let tries=0;tries<16;tries++){
-    sx=centerX+(rng()-.5)*STATE_CHUNK*.72;sz=centerZ+(rng()-.5)*STATE_CHUNK*.72;
-    const candidate=nearestStateRoad(sx,sz);
-    if(candidate&&candidate.d<170&&candidate.seg.width>=18){q=candidate;break;}
-  }
-  if(!q)return;
-  const side=(stateHash(cx,cz,33)&1)?1:-1;
-  const off=q.seg.width*.5+102;
-  const bx=q.x+Math.cos(q.heading)*off*side,bz=q.z-Math.sin(q.heading)*off*side;
-  if(Math.abs(bx-centerX)>STATE_CHUNK*.47||Math.abs(bz-centerZ)>STATE_CHUNK*.47)return;
-  const root=new THREE.Group();root.position.set(bx,stateGroundHeightAt(bx,bz),bz);root.rotation.y=q.heading+(side<0?Math.PI:0);group.add(root);
-  const type=stateHash(cx,cz,117)%ROADSIDE_BLOCK_BUILDERS.length;
-  ROADSIDE_BLOCK_BUILDERS[type](root,rng);
-  root.userData.roadsideBlockType=type;
-  root.traverse(o=>{o.frustumCulled=false;});
-  obstacles.push({x:bx,z:bz,w:150,d:122});
-}
-
-function buildStateChunk(cx,cz){
-  const key=cx+','+cz, centerX=(cx+.5)*STATE_CHUNK,centerZ=(cz+.5)*STATE_CHUNK;
-  if(centerX<REGION_MIN_X-STATE_CHUNK||centerX>COAST_X+STATE_CHUNK||centerZ<REGION_MIN_Z-STATE_CHUNK||centerZ>REGION_MAX_Z+STATE_CHUNK)return null;
-  const group=new THREE.Group(),obstacles=[],rng=stateRng(stateHash(cx,cz,15)),biome=biomeAt(centerX,centerZ);
-  const tileGeo=new THREE.PlaneGeometry(STATE_CHUNK+3,STATE_CHUNK+3,10,10),pa=tileGeo.attributes.position;
-  for(let i=0;i<pa.count;i++){const lx=pa.getX(i),ly=pa.getY(i),wx=centerX+lx,wz=centerZ-ly;pa.setZ(i,stateBaseHeight(wx,wz));}pa.needsUpdate=true;tileGeo.computeVertexNormals();
-  const tile=new THREE.Mesh(tileGeo,new THREE.MeshStandardMaterial({color:BIOME_COLORS[biome],roughness:1}));
-  tile.rotation.x=-Math.PI/2; tile.position.set(centerX,-.085,centerZ); tile.receiveShadow=true; group.add(tile);
-  if(!isCityCore(centerX,centerZ)){
-    const trees=[],rocks=[],cacti=[],mountains=[];
-    const counts=biome==='swamp'?[42,5,0]:biome==='rural'?[36,5,0]:biome==='mountain'?[22,30,0]:biome==='desert'?[3,28,18]:biome==='coast'?[24,3,0]:[14,5,0];
-    for(let i=0;i<counts[0]+counts[1]+counts[2];i++){
-      const x=centerX+(rng()-.5)*STATE_CHUNK,z=centerZ+(rng()-.5)*STATE_CHUNK;if(distanceToStateRoad(x,z)<52)continue;const gy=stateBaseHeight(x,z);
-      if(i<counts[0])trees.push({x,y:gy+(biome==='swamp'?10:13),z,s:.65+rng()*.9,r:rng()*6.28});
-      else if(i<counts[0]+counts[1])rocks.push({x,y:gy+3+rng()*3,z,s:.55+rng()*1.4,sx:.7+rng()*.8,sy:.6+rng()*1.4,sz:.7+rng()*.8,r:rng()*6.28});
-      else cacti.push({x,y:gy+8,z,s:.65+rng()*.8,r:rng()*6.28});
-    }
-    // Tree lines outside bends make roads readable without becoming walls.
-    if(['rural','mountain','suburb','coast'].includes(biome))for(let i=0;i<16;i++){
-      const sx=centerX+(rng()-.5)*STATE_CHUNK,sz=centerZ+(rng()-.5)*STATE_CHUNK,q=nearestStateRoad(sx,sz);if(!q||q.d>260)continue;
-      const side=rng()<.5?-1:1,off=q.seg.width*.5+20+rng()*48,x=q.x+Math.cos(q.heading)*off*side,z=q.z-Math.sin(q.heading)*off*side;
-      if(Math.abs(x-centerX)>STATE_CHUNK*.52||Math.abs(z-centerZ)>STATE_CHUNK*.52)continue;trees.push({x,y:stateBaseHeight(x,z)+13,z,s:.65+rng()*.65,r:rng()*6.28});
-    }
-    if(biome==='mountain'||biome==='desert')for(let i=0;i<(biome==='mountain'?4:2);i++){
-      const x=centerX+(rng()-.5)*760,z=centerZ+(rng()-.5)*760;if(distanceToStateRoad(x,z)<150)continue;const h=(biome==='mountain'?95:62)+rng()*(biome==='mountain'?150:90),w=h*(1.25+rng()*.95);
-      mountains.push({x,y:stateBaseHeight(x,z)+h*.5,z,sx:w,sy:h,sz:w*(.72+rng()*.4),r:rng()*6.28});
-    }
-    pushInstances(group,stateTreeGeo,stateTreeMats[biome],trees);pushInstances(group,stateRockGeo,stateRockMats[biome]||stateRockMats.default,rocks);pushInstances(group,stateCactusGeo,stateTreeMats.desert,cacti);pushInstances(group,stateMountainGeo,stateMountainMats[biome]||stateMountainMats.default,mountains);
-    const basicBuildings=biome==='suburb'?6:biome==='rural'?3:biome==='swamp'?1:biome==='mountain'?1:biome==='desert'?1:2;
-    for(let i=0;i<basicBuildings;i++){const x=centerX+(rng()-.5)*700,z=centerZ+(rng()-.5)*700;if(distanceToStateRoad(x,z)>190)continue;addChunkBuilding(group,obstacles,x,z,rand(18,44),rand(18,55),rand(6,biome==='suburb'?28:16),biome==='desert'?0x9a7654:biome==='swamp'?0x4e4738:0x6b5d4d);}
-    if(biome==='swamp')for(let i=0;i<4;i++){const x=centerX+(rng()-.5)*700,z=centerZ+(rng()-.5)*700,wet=new THREE.Mesh(new THREE.CircleGeometry(rand(35,90),18),new THREE.MeshBasicMaterial({color:0x173f38,transparent:true,opacity:.75}));wet.rotation.x=-Math.PI/2;wet.position.set(x,stateBaseHeight(x,z)+.02,z);group.add(wet);}
-  }
-  for(const place of STATE_PLACES)if(Math.abs(place.x-centerX)<STATE_CHUNK/2&&Math.abs(place.z-centerZ)<STATE_CHUNK/2)addPlaceCluster(group,obstacles,place,rng);
-  addRepeatingRoadsideBlock(group,obstacles,cx,cz,centerX,centerZ,rng,biome);
-  legacyGroup.add(group);const chunk={key,cx,cz,group,obstacles,biome};stateChunks.set(key,chunk);return chunk;
-}
-let stateStreamClock=0;
-function updateStateStreaming(px,pz,dt){
-  stateStreamClock-=dt; if(stateStreamClock>0)return; stateStreamClock=.16;
-  const ccx=Math.floor(px/STATE_CHUNK),ccz=Math.floor(pz/STATE_CHUNK),needed=new Set();
-  for(let dx=-STATE_STREAM_RADIUS;dx<=STATE_STREAM_RADIUS;dx++)for(let dz=-STATE_STREAM_RADIUS;dz<=STATE_STREAM_RADIUS;dz++){
-    const cx=ccx+dx,cz=ccz+dz,key=cx+','+cz; needed.add(key); if(!stateChunks.has(key))buildStateChunk(cx,cz);
-  }
-  // legacyGroup.remove, not scene.remove: the chunk is parented to legacyGroup
-  // now, and Object3D.remove on the wrong parent is a silent no-op that would
-  // leak every culled chunk instead of freeing it.
-  for(const [key,ch] of stateChunks){ if(Math.abs(ch.cx-ccx)>STATE_KEEP_RADIUS||Math.abs(ch.cz-ccz)>STATE_KEEP_RADIUS){ legacyGroup.remove(ch.group); ch.group.traverse(o=>{ if(o.geometry&&!o.geometry.userData.shared)o.geometry.dispose?.(); if(o.material&&!Array.isArray(o.material)&&!Object.values(stateTreeMats).includes(o.material)&&!Object.values(stateRockMats).includes(o.material)&&!Object.values(stateMountainMats).includes(o.material)&&!Object.values(blockMats).includes(o.material))o.material.dispose?.(); }); stateChunks.delete(key); } }
-}
-function nearbyStateObstacles(x,z){ const out=[],cx=Math.floor(x/STATE_CHUNK),cz=Math.floor(z/STATE_CHUNK); for(let ix=cx-1;ix<=cx+1;ix++)for(let iz=cz-1;iz<=cz+1;iz++){ const ch=stateChunks.get(ix+','+iz); if(ch)for(const b of ch.obstacles)out.push(b); } return out; }
-function updateStateAtmosphere(x,z){
-  const b=biomeAt(x,z),hex=b==='desert'?0x5d4a3d:b==='swamp'?0x243b38:b==='mountain'?0x343946:b==='rural'?0x263a37:0x18213a;
-  const target=new THREE.Color(hex); scene.background.lerp(target,.018); scene.fog.color.lerp(target,.018);
-}
-
-// Radio tower landmark (center-ish)
-const towerLight=new THREE.Mesh(new THREE.SphereGeometry(2.5,10,10),new THREE.MeshBasicMaterial({color:0xff2222}));
-{ const tx=lerp(RMIN,RMAX,0.3), tz=lerp(RMIN,RMAX,0.72);
-  const pole=new THREE.Mesh(new THREE.CylinderGeometry(1.5,3,180,8),new THREE.MeshStandardMaterial({color:0x334,metalness:.7,roughness:.4}));
-  pole.position.set(tx,90,tz); pole.castShadow=true; scene.add(pole);
-  towerLight.position.set(tx,182,tz); scene.add(towerLight);
-  // into legacyGroup, not the scene: the adoption sweep skips lights so a loose
-  // one stayed lit in NEON and PRAGUE forever. Only moon/hemi/ambient are the
-  // engine's own — every other light belongs to the map that placed it.
-  const tl=new THREE.PointLight(0xff2222,2,120); tl.position.set(tx,182,tz); legacyGroup.add(tl); towerLight.userData.light=tl;
-}
+// ---------- The 40x legacy state (roads, biomes, streaming, destination blocks): removed ----------
+// Its gas stations, diner and town centre live on in NEON (district-services).
 
 // ---------- Car factory (multiple body styles) ----------
 // children order stays: [0]=body always (paint/jack code relies on this)
@@ -1392,7 +901,7 @@ const VEHICLE_TUNES={
 };
 let vehicleTuneKey='proDrift',vehicleTune=VEHICLE_TUNES.proDrift;
 let car=makeCar(vehicleTune.color,false,CAR_STYLES[vehicleTune.style]);
-const carState={x:roadLines[1],z:roadLines[1],heading:0,speed:0,vx:0,vz:0,y:0,vy:0,airborne:false,airtime:0,maxAir:0,rampCd:0,ramp:null,hp:100,burning:false,fuse:0,fire:null};
+const carState={x:0,z:470,heading:0,speed:0,vx:0,vz:0,y:0,vy:0,airborne:false,airtime:0,maxAir:0,rampCd:0,ramp:null,hp:100,burning:false,fuse:0,fire:null};
 let carColor=vehicleTune.color;
 car.position.set(carState.x,0,carState.z);
 function selectPlayerVehicle(key){
@@ -1422,53 +931,17 @@ const stats={cash:0,score:0,wanted:0,health:100,nitro:100,_decay:0};
 
 // ---------- Traffic ----------
 // Each car lives in a lane on one road line, drives along it, and wraps within the grid.
+const trees=[];   // legacy knock-over registry; empty now, loops remain valid
 const traffic=[]; const trafficColors=[0xff4d6d,0x4dff88,0xffd23f,0xff8c42,0xa66bff,0xffffff,0x33d6ff];
 // Solid circles game systems ask the collision resolver to honour (race
 // opponents). Entries: {x, z, y, r?, solid?} — see the resolver walk.
 const extraCollidables=[];
-// Traffic AI: each car has position/heading/speed and actually DRIVES — it steers toward
-// the next waypoint on the road graph, braking into corners, arcing through, and speeding
-// back up on the straight. Picks a route node-to-node; never leaves the grid.
-const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
-const LANE=ROAD*0.24;
-const AI_TURN=11, AI_ACCEL=24, AI_BRAKE=46, AI_STEER=1.9, AI_ARRIVE=16, AI_BRAKEDIST=42;
-function headingFor(d){ return d[0]!==0 ? (d[0]>0?Math.PI/2:-Math.PI/2) : (d[1]>0?0:Math.PI); }
-function validDirs(a,b,fromD){
-  const out=[];
-  for(const d of DIRS){ const na=a+d[0], nb=b+d[1];
-    if(na<0||na>=GRID||nb<0||nb>=GRID) continue;                 // would leave the grid
-    if(fromD && d[0]===-fromD[0] && d[1]===-fromD[1]) continue;  // no U-turn
-    out.push(d);
-  }
-  if(out.length===0 && fromD) out.push([-fromD[0],-fromD[1]]);   // dead end → U-turn allowed
-  return out;
-}
-function pickDir(a,b,fromD){ const opts=validDirs(a,b,fromD);
-  const s=fromD&&opts.find(o=>o[0]===fromD[0]&&o[1]===fromD[1]);
-  return (s&&Math.random()<0.62)?s:pick(opts); }           // ~38% turn where possible
-// world waypoint at node (a,b), offset into the right-hand lane of direction dir
-function laneWP(a,b,dir){ let ox=0,oz=0; if(dir[0]!==0) oz=LANE*dir[0]; else ox=-LANE*dir[1];
-  return {x:roadLines[a]+ox, z:roadLines[b]+oz}; }
-/* Culled cars are recycled, not rebuilt. makeCar allocates 9 geometries and 6
-   materials per car; at the density the population manager now runs, that is
-   ~25 cars/s of pure allocation as traffic streams past you. The pool only ever
-   holds untouched bodies — burning cars and wrecks never come back through here. */
+// (the legacy grid-traffic AI died with its map; regional traffic below serves every world)
+// Shared mesh pool — makeCar allocates ~9 geometries per body, so culled cars
+// are recycled through here rather than rebuilt.
 const trafficPool=[]; const TRAFFIC_POOL_MAX=48;
 function takeCarMesh(){ const m=trafficPool.pop(); if(!m) return makeCar(pick(trafficColors),false,pick(CAR_STYLES));
   m.rotation.set(0,0,0); if(m.parent!==scene) scene.add(m); return m; }
-function spawnTrafficCar(){
-  const a=(Math.random()*GRID)|0, b=(Math.random()*GRID)|0, dir=pick(validDirs(a,b,null));
-  const mesh=takeCarMesh();
-  const t={mesh, x:roadLines[a], z:roadLines[b], heading:headingFor(dir), spd:AI_TURN,
-    cruise:rand(18,30), dir, ta:a+dir[0], tb:b+dir[1], dead:false, hp:100, burning:false};
-  t.nextD=pickDir(t.ta,t.tb,dir);
-  mesh.position.set(t.x,0,t.z); mesh.rotation.y=t.heading;
-  traffic.push(t);
-}
-// Wrapped in a function so switching away from and back to the legacy map can
-// rebuild its grid population instead of leaving orphaned, frozen meshes.
-function populateLegacyGridTraffic(){ for(let i=0;i<90;i++) spawnTrafficCar(); }
-populateLegacyGridTraffic();
 
 // ---------- Pedestrians & crosswalks ----------
 
@@ -1717,59 +1190,17 @@ function updatePedCrowd(px,pz){
 // same rig as the crowd, so it has to wait for the geometry above.
 footChar=makeCharacter();
 const peds=[];
-const cwMat=new THREE.MeshBasicMaterial({color:0xdadada});
-const cwBarX=new THREE.PlaneGeometry(6,2.4), cwBarZ=new THREE.PlaneGeometry(2.4,6);
-function drawCrosswalk(cx,cz,axis){ const half=ROAD/2+SW, n=Math.floor(half*2/6);
-  for(let i=0;i<n;i++){ const t=-half+3+i*6; const m=new THREE.Mesh(axis==='x'?cwBarZ:cwBarX,cwMat); m.rotation.x=-Math.PI/2;
-    // legacyGroup, not scene: populateLegacyGridPeds runs again on every legacy
-    // re-entry and paints crosswalks for keys _cwSeen has not seen yet, so these
-    // are created long after the boot-time adoption sweep. 170 of them were left
-    // lying visible in whatever map you switched to next.
-    if(axis==='x') m.position.set(cx+t,0.05,cz); else m.position.set(cx,0.05,cz+t); legacyGroup.add(m); } }
 // No mesh: a pedestrian is a record, and updatePedCrowd draws the lot of them.
-// spd was a flat 3.4 for all 176 grid walkers, which is half of why they read as
-// clones even before you looked at them.
 /** Is this spot open sea? Used to reject spawn points — being inside a map's
-    bounds does not mean being on land.
-    Must tolerate being called during module init: populateLegacyGridPeds() runs
-    at load, before `activeWorld` is assigned, and touching a `let` in its
-    temporal dead zone throws and takes the whole page down. try/catch rather
-    than a typeof guard, because typeof on a TDZ binding throws as well. */
+    bounds does not mean being on land. Tolerates being called before
+    `activeWorld` is assigned (TDZ-safe via try/catch). */
 function isOnWater(x,z,y){
   try{
     if(!window.GameSea||!GameSea.isWaterAt||!activeWorld) return false;
     return !!GameSea.isWaterAt(activeWorld,x,z,y===undefined?0:y);
   }catch(e){ return false; }
 }
-function addPed(axis,coord,pos,lo,hi){
-  const x=axis==='x'?pos:coord, z=axis==='x'?coord:pos;
-  if(isOnWater(x,z,0))return;
-  peds.push(pedLook({x,z,y:0,axis,coord,pos,lo,hi,dir:Math.random()<0.5?1:-1,
-    spd:rand(2.6,4.5),pause:0,dead:false}));
-}
-const _cwSeen=new Set();
-function populateLegacyGridPeds(){
-  // strollers — bounded to one clear sidewalk segment between two adjacent cross-roads (never step on a road)
-  for(let i=0;i<150;i++){
-    const axis=Math.random()<0.5?'x':'z';
-    const coord=roadLines[(Math.random()*GRID)|0]+(ROAD/2+SW*0.5)*(Math.random()<0.5?1:-1);
-    const k=(Math.random()*(GRID-1))|0, lo=roadLines[k]+ROAD/2+2, hi=roadLines[k+1]-ROAD/2-2;
-    if(hi-lo<6){ i--; continue; }
-    addPed(axis,coord,rand(lo,hi),lo,hi);
-  }
-  // crossers — pace a crosswalk across one road, between the two facing sidewalks
-  for(let n=0;n<26;n++){
-    const axis=Math.random()<0.5?'x':'z';
-    const ca=1+((Math.random()*(GRID-2))|0), cb=1+((Math.random()*(GRID-2))|0);
-    const center=roadLines[axis==='x'?ca:cb], base=roadLines[axis==='x'?cb:ca];
-    const side=Math.random()<0.5?1:-1, coord=base+(ROAD/2+SW*0.5)*side;
-    const cx=axis==='x'?center:coord, cz=axis==='x'?coord:center;
-    const key=axis+ca+'_'+cb+'_'+side; if(!_cwSeen.has(key)){ _cwSeen.add(key); drawCrosswalk(cx,cz,axis); }
-    const lo=center-(ROAD/2+SW), hi=center+(ROAD/2+SW);
-    addPed(axis,coord,rand(lo,hi),lo,hi);
-  }
-}
-populateLegacyGridPeds();
+// (legacy sidewalk strollers/crossers died with their map; the instanced crowd serves every world)
 
 
 // ---------- Streamed county/desert AI ----------
@@ -1852,12 +1283,10 @@ function updateRegionalTraffic(t,dt){
   t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.set(-t.pitch,t.heading,0);
 }
 function spawnRegionalPedNear(px=playerX,pz=playerZ){
-  const legacyMap=activeWorld.id==='legacy';
-  const a=rand(0,Math.PI*2),d=legacyMap?rand(950,2300):rand(160,700);
+  const a=rand(0,Math.PI*2),d=rand(160,700);
   const near=WORLD_nearestRoad(px+Math.cos(a)*d,pz+Math.sin(a)*d);if(!near)return null;
   const side=Math.random()<.5?-1:1,off=near.width*.5+rand(7,20),nx=Math.cos(near.heading),nz=-Math.sin(near.heading),x=near.x+nx*off*side,z=near.z+nz*off*side,y=WORLD_groundHeightAt(x,z,near.y);
   if(!WORLD_inBounds(x,z))return null;
-  if(legacyMap&&isCityCore(x,z))return null;
   // Never put a walker on the sea. In bounds is not the same as on land: NEON's
   // bay between downtown and the docks is open water 3000 units INSIDE its
   // bounds, and `nearestRoad` happily returns a road hundreds of units away, so
@@ -1902,8 +1331,6 @@ function recycleTrafficObject(t){
 // 5 km away keep eating the budget while the street in front of you was empty.
 let densityScale=1;   // GAME_DEBUG knob, so a playtest can sweep density and measure the cost
 function populationTargets(px,pz){
-  if(activeWorld.id==='legacy'){ const core=isCityCore(px,pz);
-    return {cars:core?6:34,peds:core?6:42,keep:5400,pedKeep:4400,burst:2}; }
   // A car body is 9 draw calls, so the phone gets a thinner street. Measured at
   // the NEON spawn: 72 cars render in 3.1ms/frame and 320 draw calls against
   // 0.9ms and 104 at the old effective target of 6; 108 cars pushed it to 5.1ms.
@@ -1947,131 +1374,12 @@ function spawnCop(){ const ang=rand(0,6.28),d=rand(180,320); const mesh=makeCar(
   cops.push({mesh,x,y,z,heading:mesh.rotation.y,vx:0,vz:0,ramCd:0,
     spdMul:rand(.93,1.07),turnRate:rand(2.4,3.4),tie:rand(0,6.28)}); }
 
-// ---------- Ambient pickups ----------
-const pickups=[]; const pickupGeo=new THREE.OctahedronGeometry(3);
-function spawnPickup(x,z){ const m=new THREE.Mesh(pickupGeo,new THREE.MeshStandardMaterial({color:0xffd23f,emissive:0xffaa00,emissiveIntensity:1.2,metalness:.8,roughness:.2}));
-  // Pickups sit on roadPoint(), i.e. the legacy street grid, so they are legacy
-  // content and belong in its group. refillPickups fires mid-game (line ~2900,
-  // "All packages!"), well after the boot adoption sweep, and its six meshes
-  // plus six point lights used to end up loose on the scene.
-  m.position.set(x,4,z); legacyGroup.add(m); const light=new THREE.PointLight(0xffd23f,1.5,34); light.position.set(x,6,z); legacyGroup.add(light);
-  return {m,light,x,z,got:false,spin:rand(0,6.28)}; }
-function refillPickups(){ pickups.forEach(p=>{p.m.parent?.remove(p.m);p.light.parent?.remove(p.light);}); pickups.length=0;
-  for(let i=0;i<6;i++){ const rp=roadPoint(); pickups.push(spawnPickup(rp.x,rp.z)); } }
-refillPickups();
-
-// ---------- Beacons (mission markers, givers, shops) ----------
-function spawnBeacon(x,z,color,ringR=8){
-  const g=new THREE.Group();
-  const beam=new THREE.Mesh(new THREE.CylinderGeometry(2,2,90,14,1,true),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.22,side:THREE.DoubleSide}));
-  beam.position.y=45; g.add(beam);
-  const ring=new THREE.Mesh(new THREE.RingGeometry(ringR-2,ringR,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.85}));
-  ring.rotation.x=-Math.PI/2; ring.position.y=.25; g.add(ring);
-  const light=new THREE.PointLight(color,1.4,70); light.position.y=8; g.add(light);
-  // Every beacon marks a legacy-grid location (givers, shops, safehouses and the
-  // mission markers all come off roadPoint()), so it lives in legacyGroup. The
-  // boot ones were already adopted into it; mission markers are spawned in play
-  // and were not, leaving a lit beam standing in NEON.
-  g.position.set(x,0,z); legacyGroup.add(g);
-  return {g,x,z,ring,color,r:ringR};
-}
-function removeBeacon(b){ if(b&&b.g&&b.g.parent) b.g.parent.remove(b.g); }
-
-// Mission givers — at interior road intersections
-const givers=[];
-const _gmid=Math.floor(GRID/2);
-[[roadLines[1],roadLines[1]],[roadLines[GRID-2],roadLines[1]],[roadLines[1],roadLines[GRID-2]],[roadLines[_gmid],roadLines[_gmid]]].forEach(p=>{
-  givers.push(spawnBeacon(p[0],p[1],0xff2d9b,7));
-});
-// Shops
-const shops=[];
-function addShop(x,z,color,kind){ const b=spawnBeacon(x,z,color,9); b.kind=kind; b.cd=0; shops.push(b); }
-addShop(roadLines[2], roadLines[GRID-2], 0x3bff8b,'spray'); // repair
-addShop(roadLines[GRID-2], roadLines[2], 0x20e3ff,'garage'); // paint+nitro
-
-// ---------- Safehouses (save points) ----------
-const safehouses=[];
-function addSafehouse(bx,bz,hx,hz){
-  // decorative house sits outside the play area so it never blocks the road
-  const base=new THREE.Mesh(new THREE.BoxGeometry(15,11,15),new THREE.MeshStandardMaterial({color:0x2a2340,roughness:.7,metalness:.2}));
-  base.position.set(hx,5.5,hz); base.castShadow=true; scene.add(base);
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(12,6,4),new THREE.MeshStandardMaterial({color:0x7a3a80,roughness:.6}));
-  roof.position.set(hx,14,hz); roof.rotation.y=Math.PI/4; scene.add(roof);
-  const door=new THREE.Mesh(new THREE.BoxGeometry(3,5,.4),new THREE.MeshBasicMaterial({color:0xffd23f})); door.position.set(hx,2.5,hz+7.6); scene.add(door);
-  spawnBeacon(bx,bz,0xffd23f,7); // gold save beacon on the road
-  safehouses.push({x:bx,z:bz});
-}
-{ const c0=RMIN, c1=RMAX, m=roadLines[Math.floor(GRID/2)], B=ROAD/2+SW+16;  // set the building back past the sidewalk
-  addSafehouse(c0,m, c0-B,m); addSafehouse(c1,m, c1+B,m);
-  addSafehouse(m,c0, m,c0-B); addSafehouse(m,c1, m,c1+B); }
-
-// ---------- Hospitals (respawn points) ----------
+// ---------- Pickups, beacons, safehouses, hospitals, ramps: legacy content, removed ----------
+// Packages/beacons/givers sat on the legacy street grid; body shops and the
+// event layer replaced them. Stunt ramps are world-authored now (NEON quarry/
+// links provide rampsNear). hospitals[] stays as a registry any world may
+// fill; respawnAtHospital falls back to the active world spawn when empty.
 const hospitals=[];
-function addHospital(sx,sz,hx,hz,heading){
-  const base=new THREE.Mesh(new THREE.BoxGeometry(18,15,18),new THREE.MeshStandardMaterial({color:0xdfe6ee,roughness:.85}));
-  base.position.set(hx,7.5,hz); base.castShadow=true; scene.add(base);
-  const cmat=new THREE.MeshBasicMaterial({color:0xff2b2b});   // red cross
-  const cv=new THREE.Mesh(new THREE.BoxGeometry(2.4,8,.6),cmat); cv.position.set(hx,16,hz); scene.add(cv);
-  const ch=new THREE.Mesh(new THREE.BoxGeometry(8,2.4,.6),cmat); ch.position.set(hx,16,hz); scene.add(ch);
-  spawnBeacon(sx,sz,0xff3b3b,7);
-  hospitals.push({x:sx,z:sz,heading});
-}
-{ const c0=RMIN, c1=RMAX, B=ROAD/2+SW+18;     // set the building back past the sidewalk
-  addHospital(c1,c1, c1+B,c1+B, Math.PI);      // NE corner
-  addHospital(c0,c1, c0-B,c1+B, Math.PI);      // NW corner
-  addHospital(c1,c0, c1+B,c0-B, 0); }          // SE corner
-
-// ---------- Ramps ----------
-const ramps=[];
-const RAMP_W=16, RAMP_L=22, RAMP_H=7; // width, length(along drive dir), launch height
-// true wedge: thin edge on the ground at the near (-Z) end, rising to full height at the far (+Z) end
-function makeRampGeo(){
-  const hw=RAMP_W/2, hl=RAMP_L/2, H=RAMP_H;
-  const A=[-hw,0,-hl],B=[-hw,0,hl],C=[-hw,H,hl],D=[hw,0,-hl],E=[hw,0,hl],F=[hw,H,hl];
-  const tris=[A,B,C, D,E,F, A,D,E, A,E,B, B,E,F, B,F,C, A,C,F, A,F,D];
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute([].concat(...tris),3));
-  geo.computeVertexNormals(); return geo;
-}
-const rampGeo=makeRampGeo();
-function addRamp(x,z,dx,dz){
-  const heading=Math.atan2(dx,dz);
-  const g=new THREE.Group();
-  const wedge=new THREE.Mesh(rampGeo,new THREE.MeshStandardMaterial({color:0xff6b3b,roughness:.6,metalness:.3,side:THREE.DoubleSide}));
-  wedge.castShadow=true; g.add(wedge);
-  // yellow hazard stripe lying on the slope surface
-  const slopeLen=Math.hypot(RAMP_L,RAMP_H), ang=Math.atan2(RAMP_H,RAMP_L);
-  const stripe=new THREE.Mesh(new THREE.BoxGeometry(RAMP_W*0.6,0.2,slopeLen),new THREE.MeshBasicMaterial({color:0xffd23f}));
-  stripe.position.set(0,RAMP_H/2+0.15,0); stripe.rotation.x=-ang; g.add(stripe);
-  g.position.set(x,0,z); g.rotation.y=heading; scene.add(g);
-  // fx,fz = direction you must drive to launch; ex,ez = world-aligned half-footprint
-  ramps.push({x,z,fx:dx,fz:dz,ex:Math.abs(dx)>0.5?RAMP_L/2:RAMP_W/2,ez:Math.abs(dz)>0.5?RAMP_L/2:RAMP_W/2,len:RAMP_L,height:RAMP_H,width:RAMP_W});
-}
-// place each ramp centered on a road, aligned with it, so you drive straight up it
-for(let i=0;i<5;i++){
-  const line=roadLines[(Math.random()*GRID)|0], along=rand(RMIN+50,RMAX-50), d=Math.random()<.5?1:-1;
-  if(Math.random()<0.5) addRamp(along,line, d,0);   // on an east-west road → launch along X
-  else                  addRamp(line,along, 0,d);   // on a north-south road → launch along Z
-}
-
-
-// State-scale stunt ramps: long enough to hit at several hundred MPH.
-function makeStateRampGeo(w,l,h){
-  const hw=w/2,hl=l/2,A=[-hw,0,-hl],B=[-hw,0,hl],C=[-hw,h,hl],D=[hw,0,-hl],E=[hw,0,hl],F=[hw,h,hl];
-  const tris=[A,B,C,D,E,F,A,D,E,A,E,B,B,E,F,B,F,C,A,C,F,A,F,D],geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute([].concat(...tris),3)); geo.computeVertexNormals(); return geo;
-}
-function addStateRamp(x,z,dx,dz,w=28,l=75,h=18){
-  const g=new THREE.Group(),wedge=new THREE.Mesh(makeStateRampGeo(w,l,h),new THREE.MeshStandardMaterial({color:0xe96a32,roughness:.65,metalness:.25,side:THREE.DoubleSide})); g.add(wedge);
-  const stripe=new THREE.Mesh(new THREE.BoxGeometry(w*.58,.22,Math.hypot(l,h)),new THREE.MeshBasicMaterial({color:0xffd23f})); stripe.position.set(0,h/2+.16,0); stripe.rotation.x=-Math.atan2(h,l); g.add(stripe);
-  const baseY=stateGroundHeightAt(x,z); g.position.set(x,baseY,z); g.rotation.y=Math.atan2(dx,dz); scene.add(g);
-  ramps.push({x,z,baseY,fx:dx,fz:dz,ex:Math.abs(dx)>.5?l/2:w/2,ez:Math.abs(dz)>.5?l/2:w/2,len:l,height:h,width:w});
-}
-[
-  [-3400,620,-1,0],[-7800,1040,-1,0],[-12600,820,-1,0],[-19180,900,-1,0],[-26000,-180,-1,0],[-35150,-520,-1,0],[-43200,950,-1,0],
-  [-9500,-5050,-1,0],[-15750,-4700,-1,0],[-21700,400,-1,0],[-27800,2400,-1,0],[-35800,-3600,-1,0],
-  [-7100,3150,0,1],[-14200,4200,0,-1],[-36500,3000,0,1]
-].forEach((r,i)=>addStateRamp(r[0],r[1],r[2],r[3],i%5===0?42:30,i%5===0?115:78,i%5===0?30:18));
 
 // ---------- FX ----------
 const sparks=[]; const sparkGeo=new THREE.BoxGeometry(.8,.8,.8);
@@ -2355,7 +1663,7 @@ function explodePlayerCar(){
   if(car) scene.remove(car); car=null;
   // eject the player on foot and hurt them
   onFoot=true; footChar.visible=true;
-  foot.x=clamp(x+4,-HALF+3,HALF-3); foot.z=clamp(z,-HALF+3,HALF-3); foot.heading=carState.heading; foot.walk=0;
+  const _ej=WORLD_clampToBounds(x+4,z); foot.x=_ej.x; foot.z=_ej.z; foot.heading=carState.heading; foot.walk=0;
   explosionAt(x,z); stats.health-=35;
   addToast('💥 Your ride blew up! Find a new one.','#ff3b3b'); }
 
@@ -2529,7 +1837,6 @@ function explodePlayerNow(reason,title){
   breakDriftCombo();
   engineBlown=true; playerHealth=0; stats.health=0; carState.hp=0;
   dying=true; dyingTimer=DEATH_BURN; dyingSmokeClock=0; dyingPopClock=.18;
-  if(mission.active) failMission('You got wasted');
   if(car&&!carState.fire){ carState.fire=makeFire(); car.add(carState.fire); }
   carState.burning=false;   // the generic burner fuse must not also fire
   boom(carState.x,carState.z,0xff6a00,26,carState.y+2.2); doFlash(.6); playCrash();
@@ -2848,100 +2155,10 @@ const bannerEl=document.getElementById('banner'), bannerT=bannerEl.querySelector
 let bannerTimer=0;
 function setBanner(title,sub,color='#20e3ff'){ bannerT.textContent=title; bannerT.style.color=color; bannerS.textContent=sub||''; bannerEl.classList.add('show'); bannerTimer=2.2; }
 
-// ---------- Missions ----------
-
-const CAMPAIGN=[
-  {type:'courier',title:'FIRST DAY',desc:'Grab the parcel, make the drop',time:55,reward:600},
-  {type:'race',   title:'HOT WHEELS',desc:'Blast through 5 checkpoints',time:52,reward:900,need:5},
-  {type:'rampage',title:'DEMOLITION MAN',desc:'Total 6 cars before time runs out',time:50,reward:1100,need:6},
-  {type:'getaway',title:'HEAT',desc:'3-star escape — reach the safehouse',time:45,reward:1600},
-  {type:'bigscore',title:'THE BIG SCORE',desc:'Snatch all 8 cash drops',time:70,reward:3000,need:8},
-];
-const SIDE=[
-  {type:'courier',title:'SIDE JOB: DELIVERY',desc:'Grab the parcel, make the drop',time:50,reward:700},
-  {type:'race',   title:'STREET RACE',desc:'Hit 6 checkpoints',time:55,reward:1000,need:6},
-  {type:'rampage',title:'INSURANCE FRAUD',desc:'Wreck 8 cars',time:55,reward:1300,need:8},
-  {type:'bigscore',title:'CASH GRAB',desc:'Collect 8 drops',time:65,reward:1500,need:8},
-];
-let campaignIndex=0, missionLock=0;
-const mission={active:false, type:null, timeLeft:0, reward:0, need:0, progress:0, leg:0, markers:[], p1:null, p2:null, isCampaign:false, title:''};
-
-function clearMissionMarkers(){ mission.markers.forEach(m=>{ if(m.pickup){scene.remove(m.pickup.m);scene.remove(m.pickup.light);} else removeBeacon(m); }); mission.markers.length=0; }
-
-function startMission(def,isCampaign){
-  mission.active=true; mission.type=def.type; mission.timeLeft=def.time; mission.reward=def.reward;
-  mission.need=def.need||0; mission.progress=0; mission.leg=0; mission.isCampaign=isCampaign; mission.title=def.title;
-  clearMissionMarkers();
-  if(def.type==='courier'){ mission.p1=roadPoint(); mission.p2=roadPoint(); mission.markers.push(spawnBeacon(mission.p1.x,mission.p1.z,0x20e3ff,8)); }
-  else if(def.type==='race'){ let prev=roadPoint(); for(let i=0;i<mission.need;i++){ const rp=roadPoint(); const b=spawnBeacon(rp.x,rp.z,i===0?0x20e3ff:0x2b3a5a,8); mission.markers.push(b); prev=rp; } }
-  else if(def.type==='rampage'){ /* no markers */ }
-  else if(def.type==='getaway'){ stats.wanted=3; const rp=roadPoint(); mission.p1=rp; mission.markers.push(spawnBeacon(rp.x,rp.z,0x3bff8b,10)); }
-  else if(def.type==='bigscore'){ for(let i=0;i<mission.need;i++){ const rp=roadPoint(); const pk=spawnPickup(rp.x,rp.z); mission.markers.push({pickup:pk,x:rp.x,z:rp.z,got:false}); } }
-  setBanner(def.title,def.desc,'#ff2d9b'); chord([392,523,659],60);
-}
-function completeMission(){ stats.cash+=mission.reward; setBanner('MISSION COMPLETE','+$'+mission.reward,'#3bff8b'); playSuccess();
-  if(mission.type==='getaway') stats.wanted=0;
-  if(mission.isCampaign){ campaignIndex++; if(campaignIndex===CAMPAIGN.length){ setBanner('CITY IS YOURS','Campaign complete — side jobs endless','#ffd23f'); } }
-  clearMissionMarkers(); mission.active=false; missionLock=2.5; }
-function failMission(reason){ setBanner('MISSION FAILED',reason,'#ff3b3b'); playFail(); clearMissionMarkers(); mission.active=false; missionLock=2.5; }
-
-function updateMission(dt){
-  if(!mission.active) return;
-  mission.timeLeft-=dt;
-  if(mission.timeLeft<=0){ failMission('Out of time'); return; }
-  // ring pulse
-  const s=1+Math.sin(performance.now()/200)*0.15;
-  mission.markers.forEach(m=>{ if(m.ring) m.ring.scale.setScalar(s); });
-  const cx=playerX, cz=playerZ;
-  if(mission.type==='courier'){
-    const m=mission.markers[0]; if(!m) return;
-    if(dist2(cx,cz,m.x,m.z)<8){
-      if(mission.leg===0){ mission.leg=1; removeBeacon(m); mission.markers[0]=spawnBeacon(mission.p2.x,mission.p2.z,0xffd23f,8); addToast('Parcel secured — deliver it!','#ffd23f'); playPickup(); }
-      else completeMission();
-    }
-  } else if(mission.type==='race'){
-    const m=mission.markers[mission.progress]; if(!m) return;
-    if(dist2(cx,cz,m.x,m.z)<8){ removeBeacon(m); playPickup(); mission.progress++;
-      if(mission.progress>=mission.need) completeMission();
-      else { const nx=mission.markers[mission.progress]; if(nx&&nx.ring){ nx.ring.material.color.setHex(0x20e3ff); nx.g.children[0].material.color.setHex(0x20e3ff); nx.g.children[2].color.setHex(0x20e3ff); } addToast('Checkpoint '+mission.progress+'/'+mission.need,'#20e3ff'); }
-    }
-  } else if(mission.type==='rampage'){
-    if(mission.progress>=mission.need) completeMission();
-  } else if(mission.type==='getaway'){
-    const m=mission.markers[0]; if(m&&dist2(cx,cz,m.x,m.z)<10) completeMission();
-  } else if(mission.type==='bigscore'){
-    for(const m of mission.markers){ if(m.got) continue; m.pickup.spin+=dt*3; m.pickup.m.rotation.y=m.pickup.spin; m.pickup.m.position.y=4+Math.sin(m.pickup.spin)*1.2;
-      if(dist2(cx,cz,m.x,m.z)<7){ m.got=true; m.pickup.m.visible=false; m.pickup.light.visible=false; mission.progress++; playPickup(); addToast('Drop '+mission.progress+'/'+mission.need,'#ffd23f'); } }
-    if(mission.progress>=mission.need) completeMission();
-  }
-}
-// ---------- Interaction (opt-in missions + safehouse save/load) ----------
-const promptEl=document.getElementById('prompt');
-let offeredDef=null;        // {def, camp} currently offered at a giver
-let interactCtx=null;       // 'mission' | 'safe'
-function updateInteraction(){
-  if(mission.active){ offeredDef=null; interactCtx=null; promptEl.style.display='none'; return; }
-  // near a mission giver?
-  let gv=null; if(missionLock<=0){ for(const g of givers){ if(dist2(playerX,playerZ,g.x,g.z)<9){ gv=g; break; } } }
-  if(gv){
-    if(!offeredDef){ offeredDef = campaignIndex<CAMPAIGN.length ? {def:CAMPAIGN[campaignIndex],camp:true} : {def:pick(SIDE),camp:false}; }
-    interactCtx='mission';
-    promptEl.innerHTML=`▶ <b>${offeredDef.def.title}</b> · reward $${offeredDef.def.reward.toLocaleString()}<br><span class="key">ENTER</span> to start the job`;
-    promptEl.style.display='block'; return;
-  }
-  offeredDef=null;
-  // near a safehouse?
-  let sh=null; for(const s of safehouses){ if(dist2(playerX,playerZ,s.x,s.z)<11){ sh=s; break; } }
-  if(sh){ interactCtx='safe';
-    promptEl.innerHTML=`🏠 <b>Safehouse</b><br><span class="key">ENTER</span> to save`;
-    promptEl.style.display='block'; return;
-  }
-  interactCtx=null; promptEl.style.display='none';
-}
-function doInteract(){
-  if(interactCtx==='mission'&&offeredDef){ startMission(offeredDef.def, offeredDef.camp); offeredDef=null; }
-  else if(interactCtx==='safe'){ saveGame(); }
-}
+// ---------- Missions: removed with the legacy map ----------
+// The campaign/side-job system placed everything on the legacy street grid
+// (roadPoint/spawnBeacon) and was already hard-disabled at start. Races,
+// drift zones, coins and body shops are the activity layer now.
 
 // ---------- Save / Load ----------
 const SAVE_KEY='gta6vc_save';
@@ -2949,7 +2166,7 @@ function hasSave(){ try{ return !!localStorage.getItem(SAVE_KEY); }catch(e){ ret
 function readSave(){ try{ return JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){ return null; } }
 function saveGame(){
   const idx=car?CAR_STYLES.indexOf(car.userData.style):1;
-  const data={ v:1, cash:stats.cash, health:stats.health, nitro:stats.nitro, carHp:carState.hp, campaignIndex,
+  const data={ v:1, cash:stats.cash, health:stats.health, nitro:stats.nitro, carHp:carState.hp, campaignIndex:0,
     carStyle:idx<0?1:idx, carColor, x:carState.x, z:carState.z, heading:carState.heading, ts:new Date().toLocaleString() };
   try{ localStorage.setItem(SAVE_KEY,JSON.stringify(data)); setBanner('GAME SAVED',data.ts,'#3bff8b'); playSuccess(); }
   catch(e){ addToast('Save failed — storage blocked','#ff3b3b'); }
@@ -2957,9 +2174,7 @@ function saveGame(){
 function loadGame(){
   const data=readSave(); if(!data){ addToast('No save found','#ff3b3b'); return false; }
   stats.cash=data.cash|0; stats.health=100; playerHealth=100; engineBlown=false; resetEngineHeat(); overRevTimer=0; powerShiftTimer=0; pendingPowerShift=false; powerShiftReady=false; postShiftPullTimer=0; postShiftPullDuration=0; postShiftPullFrom=1; driveGear=1; driveMode='D'; manualModeTimer=0; manualModeHardTimer=0; shiftHoldTimer=0; reverseEngaged=false; reverseHoldTimer=0; brakeReverseTimer=0; stats.nitro=data.nitro==null?100:data.nitro; stats.wanted=0; stats._decay=0;
-  campaignIndex=data.campaignIndex|0;
   cops.forEach(c=>scene.remove(c.mesh)); cops.length=0;
-  if(mission.active){ clearMissionMarkers(); mission.active=false; } missionLock=1;
   carColor=data.carColor||0x1ea7ff;
   if(carState.fire&&car) car.remove(carState.fire); carState.fire=null; carState.burning=false; carState.hp=data.carHp==null?100:data.carHp;
   if(car) scene.remove(car); car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]); car.userData.vehicleTuneKey=vehicleTuneKey;
@@ -2970,20 +2185,9 @@ function loadGame(){
   return true;
 }
 
-// ---------- Shops ----------
-function updateShops(dt){
-  for(const sh of shops){ sh.cd-=dt; if(sh.cd<0)sh.cd=0;
-    sh.ring.scale.setScalar(1+Math.sin(performance.now()/240)*0.12);
-    if(dist2(playerX,playerZ,sh.x,sh.z)<9 && sh.cd<=0){
-      if(sh.kind==='spray'){ const needs=stats.health<100||stats.wanted>0||(!onFoot&&(carState.hp<100||carState.burning));
-        if(needs){ if(stats.cash>=100){ stats.cash-=100; stats.health=100; playerHealth=100; stats.wanted=0; cops.forEach(c=>scene.remove(c.mesh)); cops.length=0;
-          if(!onFoot){ carState.hp=100; if(carState.burning){ if(carState.fire&&car) car.remove(carState.fire); carState.fire=null; carState.burning=false; } }
-          addToast('🔧 Pay\'n\'Spray — repaired & clean (-$100)','#3bff8b'); playSuccess(); sh.cd=3; } else { addToast('Need $100 for Pay\'n\'Spray','#ff3b3b'); sh.cd=2; } } }
-      else if(sh.kind==='garage'){ stats.nitro=100; carColor=pick(trafficColors.concat([0x1ea7ff,0xff2d9b])); car.children[0].material.color.setHex(carColor); addToast('🎨 New paint + nitro refilled','#20e3ff'); playPickup(); sh.cd=2.5; }
-    }
-  }
-}
-
+// ---------- Shops: legacy Pay'n'Spray removed with its map ----------
+// Body shops (src/game/bodyshop.js) own repair/paint now, through the
+// vdamage repair channel and the interact layer.
 
 // ---------- Steering wheel + pedal input (Web Gamepad API) ----------
 const WHEEL_SAVE_KEY='destroy_kill_wheel_v1';
@@ -3188,7 +2392,6 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   // whichever two keys sit under your hand, one pair of them shifts.
   if(!e.repeat&&(k==='x'||k==='u')) requestManualShift(1);
   if(!e.repeat&&(k==='y'||k==='z')) requestManualShift(-1);
-  if((k==='enter')&&started) doInteract();
 });
 addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 function resetCar(){
@@ -3222,7 +2425,7 @@ function startSink(px,pz,dt){
   // Distance out from the shoreline. NEON and Prague get it from the sea's own
   // shore field; the legacy coast is a straight line at COAST_X so it is simple
   // subtraction there.
-  const fromShore=activeWorld.id==='legacy'?(px-(COAST_X+10)):GameSea.shoreDistance(activeWorld,px,pz);
+  const fromShore=GameSea.shoreDistance(activeWorld,px,pz);
   if(!waterEntered){
     waterEntered=true;
     boom(px,pz,0x2f6b9c,28,.4);beep(70,.35,'sine',.14);
@@ -3257,13 +2460,16 @@ function die(linger=3.8){
   const px=onFoot?foot.x:carState.x, pz=onFoot?foot.z:carState.z;
   stats.cash=Math.max(0,stats.cash-500);
   boom(px,pz,0xff3b3b,44,(onFoot?0:carState.y)+3);
-  if(mission.active) failMission('You got wasted');
   wastedEl.classList.add('show'); renderer.domElement.classList.add('bw'); playFail();
 }
 function respawnAtHospital(){
   dead=false; dying=false; clearCarDebris(); document.body.classList.remove('dying'); wastedEl.classList.remove('show'); renderer.domElement.classList.remove('bw');
   const px=onFoot?foot.x:carState.x, pz=onFoot?foot.z:carState.z;
-  let best=hospitals[0], bd=1e9; for(const h of hospitals){ const d=dist2(px,pz,h.x,h.z); if(d<bd){ bd=d; best=h; } }
+  // Nearest registered hospital, or the active world's spawn. This also fixes
+  // the old cross-map bug where dying on NEON respawned you at a hospital that
+  // only ever existed on the legacy grid.
+  let best=null, bd=1e9; for(const h of hospitals){ const d=dist2(px,pz,h.x,h.z); if(d<bd){ bd=d; best=h; } }
+  if(!best){ const sp=(activeWorld&&activeWorld.spawn)||{x:0,z:0,heading:0}; best={x:sp.x,z:sp.z,heading:sp.heading||0}; }
   stats.health=100; playerHealth=100; engineBlown=false; overRevTimer=0; powerShiftTimer=0; pendingPowerShift=false; powerShiftReady=false; driveGear=1; driveMode='D'; manualModeTimer=0; manualModeHardTimer=0; shiftHoldTimer=0; reverseEngaged=false; reverseHoldTimer=0; brakeReverseTimer=0; pendingGear=0; shiftKick=0; gearElapsed=0; autoDownshiftTimer=0; autoShiftLock=0; limiterAbuseTimer=0; rpmSettleTimer=0; rpmSettleDuration=0; rpmSettleFrom=900; shiftTorqueCarryTimer=0; shiftTorqueCarry=0; postShiftPullTimer=0; postShiftPullDuration=0; postShiftPullFrom=1; resetEngineHeat(); turboSpool=0; turboPsi=0; stats.wanted=0; stats._decay=0; cops.forEach(c=>scene.remove(c.mesh)); cops.length=0;
   carState.burning=false; if(carState.fire&&car){ car.remove(carState.fire); } carState.fire=null;
   onFoot=false; footChar.visible=false;
@@ -3283,7 +2489,7 @@ function exitCar(){
   if(carState.burning){ detachBurningCar(); car=null; }   // leave the flaming wreck behind — it'll still blow
   onFoot=true; footChar.visible=true; carState.speed=0; carState.vx=0; carState.vz=0; resetDriftPhysics();
   const rx=Math.cos(carState.heading), rz=-Math.sin(carState.heading);
-  foot.x=clamp(carState.x+rx*4.5,REGION_MIN_X+3,COAST_X-3); foot.z=clamp(carState.z+rz*4.5,REGION_MIN_Z+3,REGION_MAX_Z-3);
+  const _fp=WORLD_clampToBounds(carState.x+rx*4.5,carState.z+rz*4.5); foot.x=_fp.x; foot.z=_fp.z;
   foot.heading=carState.heading; foot.walk=0;
   addToast('On foot — walk to any car and press E','#20e3ff');
 }
@@ -3395,43 +2601,16 @@ function update(dt){
   if(waterTimer>0) leaveWater();   // made it back to dry land in time
   WORLD_updateStreaming(PX,PZ,dt); manageRegionalPopulation(PX,PZ,dt); WORLD_updateAtmosphere(PX,PZ);
 
-  // traffic — city graph nearby; streamed route AI everywhere else
+  // traffic — the regional route AI serves every world (the legacy city-grid
+  // half of the population died with its map)
   for(const t of traffic){ if(t.dead||t.burning) continue;
-    if(t.regional){ updateRegionalTraffic(t,dt); continue; }
-    if(!isCityCore(PX,PZ)&&dist2(t.x,t.z,PX,PZ)>3200) continue;
-    const wp=laneWP(t.ta,t.tb,t.dir);
-    const dx=wp.x-t.x, dz=wp.z-t.z, dist=Math.hypot(dx,dz);
-    let err=Math.atan2(dx,dz)-t.heading; err=Math.atan2(Math.sin(err),Math.cos(err));   // steer toward waypoint
-    t.heading+=clamp(err,-AI_STEER*dt,AI_STEER*dt);
-    const turningNext=!(t.nextD[0]===t.dir[0]&&t.nextD[1]===t.dir[1]);
-    let want=t.cruise;
-    if(Math.abs(err)>0.2) want=AI_TURN;                                   // mid-corner → hold turn speed
-    else if(turningNext && dist<AI_BRAKEDIST) want=AI_TURN;               // corner ahead → brake for it
-    t.spd+=clamp(want-t.spd,-AI_BRAKE*dt,AI_ACCEL*dt);
-    t.x+=Math.sin(t.heading)*t.spd*dt; t.z+=Math.cos(t.heading)*t.spd*dt;
-    if(dist<AI_ARRIVE){ t.dir=t.nextD; t.ta+=t.dir[0]; t.tb+=t.dir[1];    // reached node → advance the route
-      t.ta=clamp(t.ta,0,GRID-1); t.tb=clamp(t.tb,0,GRID-1); t.nextD=pickDir(t.ta,t.tb,t.dir); }
-    // Same fix as the cops below: city-grid traffic was pinned at y=0 and drove
-    // through hillsides. The regional traffic already tracked t.y; this half of
-    // the population never did.
-    t.y=WORLD_groundHeightAt(t.x,t.z,t.y===undefined?0:t.y);
-    t.mesh.position.set(t.x,t.y,t.z); t.mesh.rotation.y=t.heading; }
+    if(t.regional){ updateRegionalTraffic(t,dt); continue; } }
   // (player vs traffic collision is handled in updateDrive's resolver)
 
-  // pedestrians — streamed walkers outside the capital, city walkers only while nearby
+  // pedestrians — every walker is a regional streamer now
   for(const p of peds){ if(p.dead) continue;
-    if(p.regional){ updateRegionalPed(p,dt); const dp=dist2(p.x,p.z,PX,PZ); if(!onFoot&&dp<5&&Math.abs(carState.speed)>18){ killCivilian(p); stats.wanted=Math.min(5,stats.wanted+1); } continue; }
-    if(!isCityCore(PX,PZ)&&dist2(p.x,p.z,PX,PZ)>2600) continue;
-    if(p.pause>0){ p.pause-=dt; }
-    else { p.pos+=p.dir*p.spd*dt;
-      if(p.pos>p.hi||p.pos<p.lo){ p.pos=clamp(p.pos,p.lo,p.hi); p.dir=-p.dir; }
-      if(Math.random()<0.003) p.pause=rand(0.5,2.0);
-      if(Math.random()<0.002) p.dir=-p.dir;
-    }
-    p.x=p.axis==='x'?p.pos:p.coord; p.z=p.axis==='x'?p.coord:p.pos;
-    p.y=WORLD_groundHeightAt(p.x,p.z,p.y===undefined?0:p.y);
-    p.face=p.axis==='x'?(p.dir>0?Math.PI/2:-Math.PI/2):(p.dir>0?0:Math.PI);
-    advancePedWalk(p,dt,p.pause<=0);
+    if(!p.regional) continue;
+    updateRegionalPed(p,dt);
     const dp=dist2(p.x,p.z,PX,PZ);
     if(!onFoot&&dp<5&&Math.abs(carState.speed)>18){ killCivilian(p); stats.wanted=Math.min(5,stats.wanted+1); } }
   // One pass over the whole list writing instance transforms — no pedestrian
@@ -3455,15 +2634,8 @@ function update(dt){
     }
   }
 
-  // Ambient pickups — legacy-map content only. They sit on roadPoint(), i.e. the
-  // legacy street grid, and now live in legacyGroup so they are hidden on the
-  // other maps. NEON's coordinate space overlaps that grid, so without this gate
-  // you could still drive through and bank a package you could not see.
-  if(activeWorld===legacyWorld){
-  for(const pk of pickups){ if(pk.got) continue; pk.spin+=dt*3; pk.m.rotation.y=pk.spin; pk.m.position.y=4+Math.sin(pk.spin)*1.2;
-    if(dist2(pk.x,pk.z,PX,PZ)<7){ pk.got=true; pk.m.visible=false; pk.light.visible=false; stats.cash+=250; boom(pk.x,pk.z,0xffd23f,20,4); playPickup(); } }
-  if(pickups.every(p=>p.got)){ stats.cash+=1000; addToast('All packages! +$1000 bonus','#ffd23f'); doFlash(.25); refillPickups(); }
-  }
+  // (Ambient packages died with the legacy map — the coin routes are the
+  // collectible line now.)
 
   // cops
   while(cops.length<stats.wanted) spawnCop();
@@ -3586,7 +2758,7 @@ function update(dt){
       // Hand the body to the wreck list and drop the AI entry. Leaving it in
       // traffic was a slow leak: the population cull skips anything burning, and
       // burning is never cleared, so every car you torched stayed in the array.
-      if(b.t){ scoreVehicle(b.t); b.t.dead=true; releaseTrafficMesh(b.t); leavePersistentWreck(b.mesh,b.x,b.z); setTimeout(()=>b.t&&b.t.regional?spawnRegionalTrafficNear(playerX,playerZ):spawnTrafficCar(),350); } else if(b.mesh) leavePersistentWreck(b.mesh,b.x,b.z);
+      if(b.t){ scoreVehicle(b.t); b.t.dead=true; releaseTrafficMesh(b.t); leavePersistentWreck(b.mesh,b.x,b.z); setTimeout(()=>{if(b.t)spawnRegionalTrafficNear(playerX,playerZ);},350); } else if(b.mesh) leavePersistentWreck(b.mesh,b.x,b.z);
       burners.splice(i,1); } }
 
   // health / death (character)
@@ -3599,15 +2771,9 @@ function update(dt){
 
   updatePersistentWrecks(PX,PZ);
 
-  // radio tower blink
-  { const on=(performance.now()/500|0)%2; towerLight.material.color.setHex(on?0xff2222:0x330000); if(towerLight.userData.light) towerLight.userData.light.intensity=on?2:0.2; }
 
   // subsystems (mission/shop/giver logic reads PX,PZ)
   playerX=PX; playerZ=PZ;
-  missionLock=Math.max(0,missionLock-dt);
-  updateInteraction();
-  updateMission(dt);
-  updateShops(dt);
 
   // Engine is deliberately exhaust-heavy rather than a high-pitched oscillator whine.
   if(engineOsc){ const sp=onFoot?0:Math.abs(carState.speed), nOn=!onFoot&&keys['shift']&&stats.nitro>0, t=audioCtx.currentTime;
@@ -3942,8 +3108,7 @@ function updateBlastedVehicles(dt){
       leavePersistentWreck(m,b.x,b.z,b.y,true);
       blasted.splice(i,1);
       if(!b.isCop){
-        if(mission.active&&mission.type==='rampage'){ mission.progress++; addToast('💥 Wrecked '+mission.progress+'/'+mission.need,'#ff6b3b'); }
-        setTimeout(()=>obj.regional?spawnRegionalTrafficNear(playerX,playerZ):spawnTrafficCar(),300);
+        setTimeout(()=>spawnRegionalTrafficNear(playerX,playerZ),300);
       }
     }
   }
@@ -4377,7 +3542,7 @@ function updateDrive(dt){
             const force=(closing-TRAFFIC_BASH_SPEED)/(TRAFFIC_BLAST_SPEED-TRAFFIC_BASH_SPEED);
             t.hp-=8+Math.pow(force,1.4)*62; boom(t.x,t.z,0xffaa30,6,2); playCrash();
             if(t.hp<=0){ igniteTraffic(t); doFlash(.2);
-              if(mission.active&&mission.type==='rampage'){ mission.progress++; addToast('💥 Wrecked '+mission.progress+'/'+mission.need,'#ff6b3b'); } else stats.wanted=Math.min(5,stats.wanted+1);
+              stats.wanted=Math.min(5,stats.wanted+1);
             }
           }
         }
@@ -4434,10 +3599,6 @@ function updateDrive(dt){
       if(carState.x>B.maxX+OUT){carState.x=B.maxX+OUT;vel.x=-Math.abs(vel.x)*.22;}
       if(carState.z<B.minZ-OUT){carState.z=B.minZ-OUT;vel.z=Math.abs(vel.z)*.22;}
       if(carState.z>B.maxZ+OUT){carState.z=B.maxZ+OUT;vel.z=-Math.abs(vel.z)*.22;}
-    }else{
-      if(carState.x<REGION_MIN_X+18){carState.x=REGION_MIN_X+18;vel.x=Math.abs(vel.x)*.22;}
-      if(carState.z<REGION_MIN_Z+18){carState.z=REGION_MIN_Z+18;vel.z=Math.abs(vel.z)*.22;}
-      if(carState.z>REGION_MAX_Z-18){carState.z=REGION_MAX_Z-18;vel.z=-Math.abs(vel.z)*.22;}
     }
   }
   vx=vel.x; vz=vel.z;
@@ -4593,7 +3754,7 @@ let showFullMap=false;
 // after that: drawMap runs every frame and Prague is thousands of segments.
 const mapLayers=new Map();
 function mapLayerFor(world){
-  if(!world||world===legacyWorld)return null;              // the legacy map is accurate as it is
+  if(!world)return null;
   if(mapLayers.has(world.id))return mapLayers.get(world.id);
   const b=world.bounds,segs=world.roadsRef&&world.roadsRef.segs;
   if(!b||!segs||!segs.length){ mapLayers.set(world.id,null); return null; }
@@ -4634,7 +3795,7 @@ function renderMap(g,size,detailed){
   const layer=mapLayerFor(activeWorld);
   let minX,maxX,minZ,maxZ,scale,ox,oz;
   if(detailed){
-    const b=layer?layer.bounds:{minX:REGION_MIN_X,maxX:REGION_MAX_X,minZ:REGION_MIN_Z,maxZ:REGION_MAX_Z};
+    const b=layer?layer.bounds:(activeWorld&&activeWorld.bounds)||{minX:-4200,maxX:4200,minZ:-3200,maxZ:4200};
     minX=b.minX; maxX=b.maxX; minZ=b.minZ; maxZ=b.maxZ;
     scale=Math.min((width-pad*2)/(maxX-minX),(height-pad*2)/(maxZ-minZ));
     ox=(width-(maxX-minX)*scale)/2; oz=(height-(maxZ-minZ)*scale)/2;
@@ -4650,20 +3811,9 @@ function renderMap(g,size,detailed){
   if(layer){
     const b=layer.bounds;
     g.drawImage(layer.canvas,x2(b.minX),z2(b.minZ),(b.maxX-b.minX)*scale,(b.maxZ-b.minZ)*scale);
-  }else{
-  g.fillStyle='#374534'; g.fillRect(x2(REGION_MIN_X),z2(REGION_MIN_Z),(REGION_MAX_X-REGION_MIN_X)*scale,(REGION_MAX_Z-REGION_MIN_Z)*scale);
-  if(detailed){
-    const zones=[[-1700,'#3d5146'],[-5200,'#444a3a'],[-14500,'#3c5037'],[-26500,'#56524a'],[REGION_MIN_X,'#74593d']];
-    for(let i=0;i<zones.length;i++){ const x0=zones[i][0],x1=i===0?REGION_MAX_X:zones[i-1][0]; g.fillStyle=zones[i][1];g.fillRect(x2(x0),z2(REGION_MIN_Z),(x1-x0)*scale,(REGION_MAX_Z-REGION_MIN_Z)*scale); }
-    g.fillStyle='#244036';g.fillRect(x2(-18500),z2(-6200),(-1700+18500)*scale,3600*scale);
   }
-  g.strokeStyle='#25708b';g.lineCap='round';g.lineWidth=Math.max(1,85*scale);
-  for(const river of STATE_RIVERS){g.beginPath();river.forEach((p,i)=>i?g.lineTo(x2(p[0]),z2(p[1])):g.moveTo(x2(p[0]),z2(p[1])));g.stroke();}
-  for(const route of STATE_ROUTES){g.strokeStyle=route.width>30?'#d2c29b':'#9e947f';g.lineWidth=Math.max(detailed?1.1:1.6,route.width*scale);g.beginPath();route.points.forEach((p,i)=>i?g.lineTo(x2(p[0]),z2(p[1])):g.moveTo(x2(p[0]),z2(p[1])));g.stroke();}
-  g.strokeStyle='rgba(160,180,210,.5)';g.lineWidth=Math.max(1,2*k);
-  for(let i=0;i<GRID;i++){const c=roadLines[i];g.beginPath();g.moveTo(x2(c),z2(RMIN));g.lineTo(x2(c),z2(RMAX));g.stroke();g.beginPath();g.moveTo(x2(RMIN),z2(c));g.lineTo(x2(RMAX),z2(c));g.stroke();}
-  if(detailed){g.font='bold 10px sans-serif';g.textAlign='center';for(const p of STATE_PLACES){g.fillStyle='#ffd23f';g.beginPath();g.arc(x2(p.x),z2(p.z),2.5,0,6.3);g.fill();g.fillStyle='#dbe5ef';g.fillText(p.name,x2(p.x),z2(p.z)-5);}g.textAlign='left';}
-  }
+  // (the hand-drawn legacy-state fallback died with the legacy map — every
+  // remaining world publishes roadsRef and gets a baked layer)
   // ramps came from the legacy global list, so NEON and PRAGUE got a scatter of
   // orange markers for jumps that are not in the world you are driving
   for(const r of WORLD_rampsNear(playerX,playerZ)){g.fillStyle='#ff6b3b';g.fillRect(x2(r.x)-2,z2(r.z)-2,4,4);}
@@ -4735,50 +3885,15 @@ function hud(){stats.cash=999999999999;stats.health=playerHealth;
 // ============================================================================
 // legacyGroup itself is declared up with the lights — the streaming and pickup
 // code has to be able to add into it, and that runs before this point.
-{ // adopt whatever the legacy map built loose on the scene during boot.
-  // This sweep is a backstop for boot-time code only; anything created after it
-  // must add into legacyGroup itself or it will never be hidden on a map change.
-  const keep=new Set([legacyGroup,car,footChar,spotL.target,spotR.target]);
-  for(const child of scene.children.slice()){
-    if(keep.has(child)||child.isLight||child.isCamera) continue;
-    legacyGroup.add(child);
-  }
-}
-// Created here, not up with the renderer: the adoption loop above swallows
-// anything loose in scene.children, and a sea inside legacyGroup would vanish
-// the moment you picked another map.
 GameSea.create(THREE,scene,camera);
 
-const legacyWorld={
-  id:'legacy', name:'LEGACY STATE', group:legacyGroup,
-  // The registered maps declare `fog` on their world definition; the legacy map
-  // has no definition to read, so it carries its own. activateWorld snaps the
-  // sky and fog to this on entry — see the handover there.
-  fog:0x18213a,
-  spawn:{x:roadLines[1],z:roadLines[1],heading:0},
-  groundHeightAt:(x,z)=>isCityCore(x,z)?0:stateGroundHeightAt(x,z),
-  surfacePitchAt:(x,z,h)=>stateSurfacePitchAt(x,z,h),
-  obstaclesNear:(x,z)=>{ const out=nearbyBuildings(x,z).slice();
-    for(const b of nearbyStateObstacles(x,z)) out.push(b);
-    for(const b of stateBoundaryWalls) out.push(b);
-    return out; },
-  rampsNear:()=>ramps,
-  // normalise to the world contract: callers read .width, not .seg.width
-  nearestRoad:(x,z)=>{ const q=nearestStateRoad(x,z); if(q&&q.width===undefined)q.width=q.seg.width; return q; },
-  // The capital's core is kerb-to-kerb pavement; between its grid lines is
-  // plaza, not grass. Everything outside the core resolves by road distance.
-  surfaceTypeAt:(x,z)=>isCityCore(x,z)?'paved':null,
-  isDrowningAt:(x,z)=>isOceanAt(x,z),
-  inBounds:(x,z)=>insideState(x,z),
-  clampToBounds:(x,z)=>clampToState(x,z),
-  updateStreaming:(px,pz,dt)=>updateStateStreaming(px,pz,dt),
-  updateAtmosphere:(x,z)=>updateStateAtmosphere(x,z),
-  stats:()=>({chunks:stateChunks.size}),
-  dispose(){}
-};
-
-let activeWorld=legacyWorld;
-const worldInstances=new Map([['legacy',legacyWorld]]);
+// The legacy state was removed by user directive (its roadside services were
+// ported into NEON first — district-services.js). The original v31 build stays
+// runnable as its own HTML file. activeWorld is null only until the boot block
+// at the end of this script activates NEON, which happens before the first
+// animation frame can run.
+let activeWorld=null;
+const worldInstances=new Map();
 
 // --- atmosphere tint (day/night) --------------------------------------------
 // Worlds lerp scene.background / scene.fog toward their authored colours every
@@ -4839,7 +3954,7 @@ function WORLD_updateAtmosphere(x,z){ ATMOS.restore(); activeWorld.updateAtmosph
 /** Build (once) and activate a map by id. Returns true on success. */
 function activateWorld(id){
   const def=window.GameWorlds?window.GameWorlds.get(id):null;
-  if(id!=='legacy'&&!def){ console.error('[world] unknown map:',id); return false; }
+  if(!def){ console.error('[world] unknown map:',id); return false; }
   let inst=worldInstances.get(id);
   if(!inst){
     const t0=performance.now();
@@ -4860,7 +3975,6 @@ function activateWorld(id){
   activeWorld=inst;
   if(inst.group){ if(!inst.group.parent) scene.add(inst.group); inst.group.visible=true; }
   // the legacy map's grid traffic/peds are built once at boot — rebuild them
-  if(inst===legacyWorld){ populateLegacyGridTraffic(); populateLegacyGridPeds(); }
   const sp=inst.spawn||{x:0,z:0,heading:0};
   carState.x=sp.x; carState.z=sp.z; carState.heading=sp.heading||0;
   carState.y=WORLD_groundHeightAt(sp.x,sp.z,0);
@@ -4886,7 +4000,7 @@ function activateWorld(id){
   if(window.GameSystems)GameSystems.worldChanged(inst);
   return true;
 }
-let currentMapId='legacy';
+let currentMapId=null;   // set by the boot activation below (NEON is the default world)
 
 // ---------- Debug / perf hook ----------
 // Exposed deliberately: the game runs inside an IIFE, and both the perf overlay
@@ -5027,7 +4141,7 @@ function openVehicleSelection(){
   showMapStage();
 }
 function begin(){
-  const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();WORLD_updateStreaming(carState.x,carState.z,1);givers.forEach(g=>g.g.visible=false);missionLock=1e12;}
+  const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();WORLD_updateStreaming(carState.x,carState.z,1);}
   carSelectionOpen=false;document.body.classList.remove('car-select-open');overlay.classList.add('fade');cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
 }
 // ---------- Map selection ----------
@@ -5039,13 +4153,14 @@ const MAP_CARDS=[
    desc:'Dense neon downtown, dockside drift yards, hill switchbacks, a retail strip and a quarry stunt zone. Built for flow.'},
   {id:'prague',name:'PRAGUE CENTRE',accent:'#e8b44c', icon:'🏛️', sub:'REAL GEOGRAPHY · OSM',
    desc:'8.4 km² of the real centre from OpenStreetMap: Staré Město, Josefov, Nové Město, Malá Strana and Hradčany. 5953 buildings, packaged locally. Tight, unforgiving, real.'},
-  {id:'legacy',name:'LEGACY STATE', accent:'#ffd23f', icon:'🛣️', sub:'THE ORIGINAL MAP',
-   desc:'The original coast-to-desert procedural state, preserved exactly as it was. Huge, open and empty by design.'}
+  // The LEGACY STATE card is gone by user directive — its gas stations, diner
+  // and town centre were ported into NEON (district-services) first, and the
+  // original v31 build remains runnable as its own HTML file.
 ];
 function buildMapCards(){
   mapSelectEl.innerHTML='';
   for(const m of MAP_CARDS){
-    if(m.id!=='legacy'&&!window.GameWorlds.get(m.id))continue;   // never show a map that isn't there
+    if(!window.GameWorlds.get(m.id))continue;   // never show a map that isn't there
     const b=document.createElement('button');
     b.className='vehicleCard';b.dataset.map=m.id;b.style.setProperty('--card',m.accent);
     b.innerHTML='<div class="carIcon">'+m.icon+'</div><h2>'+m.name+'</h2><div class="drive">'+m.sub+'</div><p>'+m.desc+'</p>';
@@ -5198,7 +4313,13 @@ if(window.GameSystems){
   die=function(){GameSystems.events.emit('player:died',{x:playerX,z:playerZ});return _origDie.apply(this,arguments);};
   const _origSave=saveGame;
   saveGame=function(){const r=_origSave.apply(this,arguments);GameSystems.events.emit('game:saved',{});return r;};
+  // NEON is the home world now that the legacy state is gone. Build it before
+  // the systems boot so their init() sees a real world, then boot, then replay
+  // worldChanged so systems that build per-world state in that hook (graph,
+  // coast, POIs, events) get the same call sequence a map pick produces.
+  activateWorld('neon');
   const boot=GameSystems.boot(gameCtx);
+  GameSystems.worldChanged(activeWorld);
   if(boot.dead.length)addToast('⚠ '+boot.dead.length+' game system(s) failed — see console','#ff6b6b');
 }
 

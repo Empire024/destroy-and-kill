@@ -169,7 +169,18 @@ GameSystems.api('bodyshop')
 ```
 
 Events **consumed**: `race:finish {won, reward}`, `zone:record {reward}`,
-`coin:collected {value}`, `save:reset`.
+`coin:collected {value}`, `coinroute:complete {reward}`, `save:reset`.
+
+`coinroute:complete` credits the bonus and moves **no counter** — every coin in
+the route was already counted by `coin:collected`, and events owns the banner and
+toast. It matters that a listener exists at all: events' `payReward` only falls
+back to `ctx.engine.addScore` when `api('progression')` is **absent**, so with
+this system present a missing listener means the bonus silently pays nothing.
+The same holds for any future `payReward` event name.
+
+`spend(n, reason)` takes an optional reason (events passes `'race:<id>'`); it is
+kept on `GAME_DEBUG_PROG.state().lastSpend` and is the hook a spend ledger would
+hang off. It is not persisted.
 Events **emitted**: `shop:enter`, `shop:exit {confirmed}`, `shop:closed
 {id,name,until,reason}`, `shop:opened`, `vehicle:purchased {id,cost}`.
 
@@ -298,6 +309,16 @@ $200, van owned, selected, scale `1.02/1/1.02`, banner **CAR PURCHASED**.
 "🔧 STRIP CUSTOMS is closed — 180s to go". `GAME_DEBUG_SHOPS.advanceCooldowns(190)`
 → `shop:opened`, mechanic upright, prompt back to ENTER, toast "is open again".
 The cooldown is an absolute epoch in the save, and survived a reload.
+
+**Coin-route bonus** (the gap the lead found integrating events) — from a reset
+save: synthetic `coinroute:complete {routeId:'nc-downtown-line', coins:12,
+reward:1400}` → **wallet $0 → $1,400 with `stats.coins` still 0**; a following
+`coin:collected {value:10}` → wallet $1,410, `coins: 1`, i.e. the bonus pays and
+only the individual coins count. `spend(400,'race:nr-city-sprint')` returned true
+and recorded `lastSpend {amount:400, reason:'race:nr-city-sprint'}`; wallet
+$1,010 was on disk after `flush()` and read back as **$1,010 after a reload**.
+(The `dk_save_v2` value moved to 1210 seconds later — a different agent's tab
+writing, the known multi-tab clobber, not this system.) No failures.
 
 **Workshop solidity** (after the lead's `WORLD_obstaclesNear` merge) — in NEON,
 `obstaclesNear(635,300)` now returns the workshop box `{x:635, z:306, w:28, d:14,

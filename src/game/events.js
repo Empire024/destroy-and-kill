@@ -1209,9 +1209,12 @@
       // entire field to the player's rear bumper at whatever speed the player
       // was doing, so a skill-0.20 autopilot held up a skill-0.78 field for a
       // whole lap. The cooldown is what keeps one shunt from being 60 shunts.
+      // 8.6, not 7.4: the engine's resolver now holds the two circles 8.2 apart
+      // (4.2 + r), so a tighter test would almost never see the contact it is
+      // supposed to price.
       const bx = ctx.player.x - o.x, bz = ctx.player.z - o.z;
       const d2 = bx * bx + bz * bz;
-      if (d2 < 7.4 * 7.4 && Math.abs(ctx.player.y - o.y) < 6) {
+      if (d2 < 8.6 * 8.6 && Math.abs(ctx.player.y - o.y) < 6) {
         const d = Math.sqrt(d2) || 1, nx = -bx / d, nz = -bz / d;      // player -> opponent
         const toward = Math.sin(ctx.player.heading) * ctx.player.speed * nx +
                        Math.cos(ctx.player.heading) * ctx.player.speed * nz;
