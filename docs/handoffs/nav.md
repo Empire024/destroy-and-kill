@@ -259,6 +259,13 @@ of it: 12 systems live, 0 disabled, 0 failures.
   the compass goes with it. The engine's own `m` fallback still opens the map.
 - POIs are drawn unclustered. A few dozen is fine; a few hundred on the minimap
   would need a radius cull beyond the existing canvas-bounds check.
+- **Build time varies by machine and boot** — NEON measured 45 ms here and 80 ms
+  on the lead's, Prague 140–205 ms against a 250 ms budget. Parked for the perf
+  cycle, deliberately not chased now, two unprofiled candidates in the crossing
+  pass (neither changes results): reject a pair on an expanded-AABB overlap test
+  before the intersection maths, and replace the `tested` Set of `i*N+j` keys —
+  which takes hundreds of thousands of composite-key inserts on Prague — with a
+  per-segment stamp array. Profile before assuming either is the hot one.
 
 ---
 

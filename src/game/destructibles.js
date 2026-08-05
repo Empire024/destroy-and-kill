@@ -348,6 +348,16 @@
         // the street is worse than no lamp post.
         const gy = world.groundHeightAt(px, pz, ry);
         if (Math.abs(gy - ry) > DECK_TOL) continue;
+        // Clearing the kerb of the segment we are placing on is not enough: a
+        // side street's shoulder can be the middle of the 96-wide arterial it
+        // joins, and at a junction it is the junction. Measured before this
+        // test: 34 of 380 props stood in a carriageway, the worst 45 units in.
+        // The height gate keeps a lamp under an overpass from being blamed on
+        // the deck above it — nearestRoad is a 2D query.
+        if (world.nearestRoad) {
+          const nr = world.nearestRoad(px, pz);
+          if (nr && Math.abs(nr.y - gy) < 6 && nr.d < nr.width * 0.5 + 3) continue;
+        }
         if (sea && sea.isWaterAt && sea.isWaterAt(world, px, pz, 0)) continue;
         if (coastApi && coastApi.isBeachAt && coastApi.isBeachAt(px, pz)) continue;
         if (blockedHere(world, px, pz, gy)) continue;
@@ -443,10 +453,16 @@
     return false;
   }
 
+  /** `fallen` is what is LYING THERE (capped at FALLEN_CAP); `retired` is what
+   *  was pushed off the end of that cap and zero-scaled while it waits out its
+   *  respawn. Lumping the two together makes the cap impossible to verify. */
   function countOf(props) {
-    let intact = 0, fallen = 0;
-    for (let i = 0; i < props.length; i++) { if (props[i].state === 0) intact++; else fallen++; }
-    return { intact: intact, fallen: fallen };
+    let intact = 0, fallen = 0, retired = 0;
+    for (let i = 0; i < props.length; i++) {
+      const s = props[i].state;
+      if (s === 0) intact++; else if (s === 3) retired++; else fallen++;
+    }
+    return { intact: intact, fallen: fallen, retired: retired };
   }
 
   /**
@@ -682,7 +698,7 @@
         return out;
       },
 
-      count() { return active ? countOf(active.props) : { intact: 0, fallen: 0 }; },
+      count() { return active ? countOf(active.props) : { intact: 0, fallen: 0, retired: 0 }; },
 
       /** Explosions and gunfire call this. Anything inside `radius` whose class
        *  can be broken by `mph` goes over. Returns how many fell. */

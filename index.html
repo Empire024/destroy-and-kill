@@ -5091,7 +5091,7 @@ if(window.GameSystems){
     },
 
     actors:{traffic,peds,cops,makeCar,makeCharacter,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,killCivilian,
-            removeTrafficObject,removePedObject,
+            igniteTraffic,removeTrafficObject,removePedObject,
             get densityScale(){return densityScale;},set densityScale(v){densityScale=clamp(+v||1,.2,3);}},
 
     vehicles:{
@@ -5126,7 +5126,15 @@ if(window.GameSystems){
       toggleFullMap,get fullMapOpen(){return showFullMap;},
       // Death path for the damage system: the full cinematic burn+bang.
       explodePlayer(reason){explodePlayerNow(reason||'VEHICLE DESTROYED');},
-      ignitePlayerVehicle(){igniteVehicle();}
+      ignitePlayerVehicle(){igniteVehicle();},
+      // On-foot harm (officer fire). Same idiom as the engine's cop-ram hit:
+      // hearts are the real health pool, hud() derives stats.health from them,
+      // and the update loop's stats.health<=0 check runs die() for us.
+      hurtPlayer(hearts){
+        if(dead||dying)return;
+        playerHearts=Math.max(0,playerHearts-(hearts==null?1:hearts));
+        stats.health=playerHearts/3*100;heartFlashTimer=.7;doFlash(.35);
+      }
     },
 
     // Everything the camera module needs to fully replace updateCamera.

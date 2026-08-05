@@ -138,7 +138,12 @@
       '#vdPanel .vdBar i.on{background:var(--vd,#ffd23f);box-shadow:0 0 8px var(--vd,#ffd23f)}' +
       '#vdPanel.crit{animation:vdPulse .5s steps(2,end) infinite}' +
       '@keyframes vdPulse{50%{filter:brightness(1.75)}}' +
-      '@media(max-width:900px),(pointer:coarse){#vdPanel{left:12px;bottom:158px;padding:5px 9px 6px;font-size:10px}' +
+      // Position keys off body.mobile-ui, NOT a width media query: that is the
+      // class the engine's own touch controls use, and a wide touchscreen laptop
+      // gets the steering buttons at bottom-left while a media query on width
+      // would still be leaving this panel underneath them.
+      'body.mobile-ui #vdPanel{left:12px;bottom:158px}' +
+      '@media(max-width:900px),(pointer:coarse){#vdPanel{padding:5px 9px 6px;font-size:10px}' +
       '#vdPanel .vdBar i{width:10px;height:6px}}';
     document.head.appendChild(css);
     ui = document.createElement('div');
@@ -171,21 +176,27 @@
     ctx.events.emit('vehicle:stage', Object.assign({ target: 'player', stage: next, integrity: integrityOf() }, extra || {}));
   }
 
-  /** Hand the car to the engine's burn. Returns false when there is nobody in
-      the driving seat to hand it to — igniteVehicle() only fires for the car the
-      player is sitting in, so a parked wreck of ours cannot be lit from here. */
+  /** Hand the car to the engine's burn through `ctx.engine.ignitePlayerVehicle`.
+      Returns false when there is nobody in the driving seat to hand it to — the
+      engine's ignition only fires for the car the player is sitting in, so a
+      parked wreck of ours cannot be lit from here; it is remembered instead and
+      lights the moment the player gets back in. */
   function enterBurning(ctx) {
     const cs = ctx.carState;
-    if (ctx.player.onFoot || !ctx.player.carMesh) {
-      if (!warnedNoHook) { console.log('[vdamage] explosion pending engine hook'); warnedNoHook = true; }
-      player.pendingBurn = true;
-      return false;
-    }
-    if (cs.hp > 0) cs.hp = 0;          // the one carState.hp write this system owns
+    if (ctx.player.onFoot || !ctx.player.carMesh) { player.pendingBurn = true; return false; }
     player.pendingBurn = false;
     player.fuseTaken = false;
     player.klaxon = 0;
+    if (ctx.engine.ignitePlayerVehicle) ctx.engine.ignitePlayerVehicle();
+    else if (cs.hp > 0) cs.hp = 0;     // pre-hook fallback: the engine ignites at hp 0
+    if (!cs.burning && !warnedNoHook) { console.warn('[vdamage] ignition did not take — the car will not burn'); warnedNoHook = true; }
     return true;
+  }
+
+  /** What killed it, for the death banner. */
+  function deathReason() {
+    return (BALLISTIC_POOL - player.ballistic) >= (100 - player.collision)
+      ? 'SHOT TO PIECES' : 'WRECKED';
   }
 
   function resetPlayer(ctx, why) {
@@ -212,11 +223,14 @@
     if (obj._bDead) return;
     obj._bDead = true;
     const x = obj.x, z = obj.z, y = obj.y === undefined ? 0 : obj.y;
-    // explosionAt is the engine's own chain-reaction entry point: it ignites any
-    // traffic car inside 30 units (fused burn -> wreck -> pool recycle -> score)
-    // and deletes any cop car. Calling it AT the target both kills it and gives
-    // the neighbours the cascade they would get from any other blast.
-    ctx.fx.explosionAt(x, z, false, y);
+    // A car shot to pieces should catch fire and cook off a few seconds later,
+    // not detonate on the last bullet. ctx.actors.igniteTraffic gives exactly
+    // that (fused burn -> wreck -> pool recycle -> score) — see the handoff; the
+    // fallback is explosionAt at the target's own position, which is the engine's
+    // chain-reaction entry point and ignites it via the same route, at the cost
+    // of one instant blast that can catch the player at point-blank range.
+    if (ctx.actors.igniteTraffic && ctx.actors.traffic.indexOf(obj) >= 0) ctx.actors.igniteTraffic(obj);
+    else ctx.fx.explosionAt(x, z, false, y);
     // Anything the blast could not take (already dying, already burning) is
     // handed to the population cull rather than left driving around at 0 hp.
     if (ctx.actors.traffic.indexOf(obj) >= 0 && !obj.burning) obj.dead = true;
@@ -294,7 +308,13 @@
       if (hp >= 99.5 && hp > player.collision + 0.5) resetPlayer(ctx, 'newcar');
       else player.collision = hp;
 
-      /* 2. The burn, once the engine has taken the ignition. */
+      /* 2. The burn. The 6s fuse IS the escape window: bail out with E and the
+            engine keeps the wreck burning behind you on its own fuse, exactly as
+            it always did. Still in the seat when it runs out and you go up with
+            it — ctx.engine.explodePlayer runs the full cinematic death, which is
+            a different outcome from the engine's own fused explodePlayerCar()
+            (that one only ejects you). We fire fractionally early so ours is the
+            one that lands. */
       if (cs.burning) {
         if (!player.fuseTaken) { cs.fuse = BURN_WINDOW; player.fuseTaken = true; }
         player.klaxon -= dt;
@@ -304,9 +324,17 @@
           ctx.audio.chord([760, 570], 85, 'square');
           player.klaxon = .34 + t * .58;
         }
+        if (cs.fuse <= .18 && !ctx.player.onFoot && ctx.player.carMesh && ctx.engine.explodePlayer) {
+          player.stage = 'exploded';
+          if (ui) { ui.classList.remove('show'); uiShown = false; }   // body.dying does not reach into systemsUI
+          ctx.events.emit('vehicle:stage', { target: 'player', stage: 'exploded', integrity: 0, x: ctx.player.x, z: ctx.player.z });
+          ctx.engine.explodePlayer(deathReason());
+          player.wasBurning = false;
+          return;
+        }
       } else if (player.wasBurning) {
         if (cs.fuse <= 0.0001) {
-          // explodePlayerCar() has run: the car is gone, the player is on foot.
+          // The engine's own explodePlayerCar() got there: car gone, player on foot.
           ctx.events.emit('vehicle:stage', { target: 'player', stage: 'exploded', integrity: 0, x: ctx.player.x, z: ctx.player.z });
           ctx.fx.flash(.5);
         }

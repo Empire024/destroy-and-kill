@@ -36,21 +36,22 @@
      else's module has a reason to edit them. */
   const WEAPONS = {
     melee: {
-      id: 'melee', slot: 1, name: 'BAT', icon: '🏏',
-      range: 3.5, arc: 1.15, damage: 22, vehicleDamage: 6,
+      id: 'melee', name: 'BAT', icon: '🏏',
+      range: 3.5, damage: 22, vehicleDamage: 6,
       interval: .52, auto: false, mag: Infinity, reserve: Infinity, inCar: false
     },
     pistol: {
-      id: 'pistol', slot: 2, name: 'PISTOL', icon: '🔫',
+      id: 'pistol', name: 'PISTOL', icon: '🔫',
       range: 120, damage: 18, vehicleDamage: 18,
       interval: .28, auto: false, mag: 12, reserve: 60, reload: 1.15, inCar: true
     },
     rifle: {
-      id: 'rifle', slot: 3, name: 'RIFLE', icon: '🎯',
+      id: 'rifle', name: 'RIFLE', icon: '🎯',
       range: 120, damage: 14, vehicleDamage: 14,
       interval: .125, auto: true, mag: 30, reserve: 120, reload: 1.9, inCar: false
     }
   };
+  // The swing is short and wide, a bullet long and thin — see fireRay's softR/hardR.
   const CYCLE = [null, 'melee', 'pistol', 'rifle'];
   const BY_SLOT = { '1': 'melee', '2': 'pistol', '3': 'rifle' };
 
@@ -408,7 +409,10 @@
       '#cbSwap{width:58px;height:36px;font-size:11px;color:var(--cyan,#20e3ff)}' +
       // On touch the right-hand column belongs to the pedals and the fire stack,
       // so the readout moves to the left rail, clear above the damage panel.
-      '@media(max-width:900px),(pointer:coarse){#cbWeapon{left:12px;bottom:206px;font-size:11px;padding:6px 12px 7px 11px}}';
+      // Same reasoning as the damage panel: body.mobile-ui is the signal the
+      // engine's touch controls use, so it is the signal that has to move this.
+      'body.mobile-ui #cbWeapon{left:12px;bottom:206px}' +
+      '@media(max-width:900px),(pointer:coarse){#cbWeapon{font-size:11px;padding:6px 12px 7px 11px}}';
     document.head.appendChild(css);
 
     wUI = document.createElement('div');
@@ -694,7 +698,10 @@
         of.heading = Math.atan2(px - of.x, pz - of.z);
         poseOfficer(of, dt, false, true);
         if (!warnedAim) { warnedAim = true; ctx.fx.toast('⚠ POLICE: taking aim — move!', '#ff3b3b'); }
-        if (st.t >= AIM_TIME) { st.state = 'FIRING'; st.t = 0; st.firingTime = 0; st.shotCd = 0; }
+        // Stagger the first round: two officers who got out together were
+        // measured firing 0.05s apart, over and over, which reads as a volley
+        // from one gun rather than as two people shooting at you.
+        if (st.t >= AIM_TIME) { st.state = 'FIRING'; st.t = 0; st.firingTime = 0; st.shotCd = Math.random() * .7; }
       } else if (st.state === 'FIRING') {
         st.firingTime += dt;
         of.heading = Math.atan2(px - of.x, pz - of.z);
@@ -747,7 +754,14 @@
         const dd = dist2d(t.x, t.z, x, z);
         if (dd > 26) continue;
         const f = 1 - dd / 26;
-        if (vd) vd.damage(t, { amount: 34 * f, channel: 'explosion', from: 'blast' });
+        // Softens neighbours but never finishes one off: a blast that kills
+        // outright can kill four cars in ONE frame, and four explosionAt calls
+        // in one frame is enough on-foot blast damage to kill the player before
+        // the next frame resets it. The engine's own 30-unit chain ignite
+        // already caught these cars — let its 3-5s fuses pace the cascade.
+        const pool = t._bHp === undefined ? 100 : t._bHp;
+        const amount = Math.min(34 * f, Math.max(0, pool - 1));
+        if (vd && amount > 0) vd.damage(t, { amount: amount, channel: 'explosion', from: 'blast' });
         const nx = (t.x - x) / (dd || 1), nz = (t.z - z) / (dd || 1);
         ctx.actors.shoveTraffic(t, nx, nz, Math.min(40, 46 * f));   // capped arcade impulse
       }
@@ -767,7 +781,11 @@
       buildWeaponUI(ctx);
       paintWeaponUI();
       ctx.events.on('vehicle:stage', d => onVehicleStage(ctx, d));
-      ctx.events.on('player:died', () => { inv.fireHeld = false; clearFootPolice(ctx); clearFx(); });
+      ctx.events.on('player:died', () => {
+        inv.fireHeld = false; clearFootPolice(ctx); clearFx();
+        if (wUI) wUI.classList.remove('show');
+        if (mobileWrap) mobileWrap.classList.remove('show');
+      });
       // The engine swallows its keydown once a system consumes the key, so the
       // held state for auto fire is tracked here rather than read off ctx.input.
       window.addEventListener('keyup', e => { if ((e.key || '').toLowerCase() === 'f') inv.fireHeld = false; });
@@ -786,6 +804,9 @@
         else paintWeaponUI();
       }
       const w = inv.equipped && WEAPONS[inv.equipped];
+      // The readout lives in #systemsUI, which body.dying does not fade, so a
+      // death would leave it hanging over the WASTED screen. One compare a frame.
+      if (wUI && wUI.classList.contains('show') !== !!w) paintWeaponUI();
       if (w && w.auto && inv.fireHeld) tryFire(ctx);
       updateFootPolice(dt, ctx);
       updateFx(dt);

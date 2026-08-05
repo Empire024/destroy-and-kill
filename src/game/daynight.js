@@ -98,6 +98,7 @@
   var celestialRot = null;       // the ANCHOR rotation (built in init)
   var authoredKeyDir = null;     // the engine's own key-light axis, normalised
   var scratchDir = null, scratchKey = null, scratchColor = null, scratchTarget = null;
+  var rawSky = null;             // the active world's own sky colour, tint removed
 
   /* ---------- cached engine state ---------- */
 
@@ -380,14 +381,24 @@
    * the sky tint solver (see the file header for why it works this way)
    * ========================================================================*/
 
-  function applyAtmosphere(d, tw) {
+  /* Recover the active world's own (untinted) sky colour by undoing the tint we
+   * last applied. This may ONLY be called once per rendered frame — between our
+   * write and the engine's next ATMOS.apply() the displayed colour still carries
+   * the previous tint, so reading it twice would divide by the wrong number and
+   * walk the sky off. So it lives here, called from update() and worldChanged()
+   * only, and everything else works off the cached value. That is also what
+   * makes GAME_DEBUG_TIME.set() safe to call in a tight sweep with no frames in
+   * between, which is precisely how a 0..24 QA sweep drives it. */
+  function sampleRawSky() {
     var bg = ctx.scene && ctx.scene.background;
     if (!bg || bg.isColor !== true) return;
+    rawSky.setRGB(bg.r / Math.max(0.001, lastTint.r),
+                  bg.g / Math.max(0.001, lastTint.g),
+                  bg.b / Math.max(0.001, lastTint.b));
+  }
 
-    // Undo the tint we applied last frame to recover the world's own colour.
-    var rawR = bg.r / Math.max(0.001, lastTint.r);
-    var rawG = bg.g / Math.max(0.001, lastTint.g);
-    var rawB = bg.b / Math.max(0.001, lastTint.b);
+  function applyAtmosphere(d, tw) {
+    var rawR = rawSky.r, rawG = rawSky.g, rawB = rawSky.b;
 
     scratchTarget.setRGB(rawR, rawG, rawB);
     scratchTarget.lerp(scratchColor.setHex(SKY_DAY), d);
@@ -554,6 +565,7 @@
       scratchKey = new THREE.Vector3();
       scratchColor = new THREE.Color();
       scratchTarget = new THREE.Color();
+      rawSky = new THREE.Color(0x18213a);
 
       makeAnchor(ctx.lights && ctx.lights.key);
 
@@ -567,12 +579,14 @@
       phase = phaseFor(hour);
 
       buildSky();
+      sampleRawSky();     // tint is still 1,1,1 here, so this reads the world exactly
       refresh(true);
       console.log('[daynight] ready — ' + api.clock() + ' (' + phase + '), ' +
         DAY_REAL_SECONDS + 's per in-game day');
     },
 
     update: function (dt) {
+      sampleRawSky();     // exactly once per frame — see the comment on it
       if (speed > 0) {
         hour = wrap24(hour + dt * speed * 24 / DAY_REAL_SECONDS);
         checkPhase();
@@ -599,6 +613,7 @@
       // scene.background right now is (new raw × the tint we set last frame).
       // Zeroing lastTint here would misread it and flash the sky for a frame.
       emissiveApplied = -1;
+      sampleRawSky();
       refresh(true);
     },
 
