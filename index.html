@@ -1596,7 +1596,7 @@ let audioCtx=null,engineOsc=null,engineOsc2=null,engineHarmonicGain=null,engineF
   // page for long stretches and the engine loop is genuinely unpleasant to sit
   // next to; this also gives players a quiet-launch option.
   muted=/[?&]mute/.test(location.search);
-let driveGear=1, fakeRpm=900, shiftKick=0, pendingGear=0, gearDragTimer=0, gearElapsed=0, turboWasOn=false, nitroWasOn=false, turboSpool=0, turboPsi=0, limiterActive=false, limiterPhase=0, limiterSoundTimer=0;
+let driveGear=1, fakeRpm=900, audioRpm=900, shiftKick=0, pendingGear=0, gearDragTimer=0, gearElapsed=0, turboWasOn=false, nitroWasOn=false, turboSpool=0, turboPsi=0, limiterActive=false, limiterPhase=0, limiterSoundTimer=0;
 let driveMode='D', manualModeTimer=0, manualModeHardTimer=0, shiftHoldTimer=0, shiftPromptTimer=0, shiftNeeded=false, overRevTimer=0, limiterAbuseTimer=0, autoDownshiftTimer=0, autoShiftLock=0, engineBlown=false,reverseHoldTimer=0,brakeReverseTimer=0,reverseEngaged=false;
 let playerHearts=3, copRamCooldown=0, heartFlashTimer=0;
 let pendingPowerShift=false, powerShiftTimer=0, powerShiftReady=false, rpmSettleTimer=0, rpmSettleDuration=0, rpmSettleFrom=900, shiftTorqueCarryTimer=0, shiftTorqueCarry=0, postShiftPullTimer=0, postShiftPullDuration=0, postShiftPullFrom=1;
@@ -2401,9 +2401,13 @@ function update(dt){
 
   // Engine is deliberately exhaust-heavy rather than a high-pitched oscillator whine.
   if(engineOsc){ const sp=onFoot?0:Math.abs(carState.speed), nOn=!onFoot&&keys['shift']&&stats.nitro>0, t=audioCtx.currentTime;
+    // Smoothed rpm for anything tonal. The limiter chops fakeRpm every frame;
+    // feeding that straight into the turbo oscillator and the filter cutoff is
+    // what made the limiter sound like an alarm rather than an engine.
+    audioRpm+=(fakeRpm-audioRpm)*clamp(dt*(limiterActive?7:26),0,1);
     const baseFreq=onFoot?27:31+fakeRpm/118;
     const health=enginePowerHealth(),vol=muted?0:(onFoot?0.0035:(0.021+fakeRpm/285000))*Math.max(.16,health);
-    const cutoff=235+fakeRpm*.115+(nOn?250:0)+turboSpool*145;
+    const cutoff=235+audioRpm*.115+(nOn?250:0)+turboSpool*145;
     engineOsc.frequency.setTargetAtTime(baseFreq,t,shiftKick>0?.015:.05);
     engineOsc2.frequency.setTargetAtTime(baseFreq*.505,t,shiftKick>0?.015:.05);
     if(engineHarmonicGain)engineHarmonicGain.gain.setTargetAtTime(.27+Math.min(.10,turboSpool*.08),t,.08);
@@ -2411,9 +2415,9 @@ function update(dt){
     engineGain.gain.setTargetAtTime(engineSeized?0:(shiftKick>0?vol*.20:vol),t,shiftKick>0?.012:.06);
     if(heatAirGain&&heatAirFilter){const heatSeverity=engineOverheated?clamp((engineHeatSeconds-15)/18,0,1):0;heatAirFilter.frequency.setTargetAtTime(390+heatSeverity*360+Math.sin(performance.now()*.003)*70,t,.12);heatAirGain.gain.setTargetAtTime(muted?0:heatSeverity*(.016+engineDamage*.00022),t,.18);}
     if(turboOsc&&turboGain){
-      turboOsc.frequency.setTargetAtTime(820+fakeRpm*.23+turboPsi*620,t,0.028);
+      turboOsc.frequency.setTargetAtTime(820+audioRpm*.23+turboPsi*620,t,0.028);
       turboGain.gain.setTargetAtTime(muted?0:(turboSpool*.038),t,turboSpool>.1?.035:.13);
-      if(turboAirGain&&turboAirFilter){turboAirFilter.frequency.setTargetAtTime(1350+fakeRpm*.38+turboPsi*1250,t,.04);turboAirGain.gain.setTargetAtTime(muted?0:turboSpool*.052,t,turboSpool>.12?.035:.15);}
+      if(turboAirGain&&turboAirFilter){turboAirFilter.frequency.setTargetAtTime(1350+audioRpm*.38+turboPsi*1250,t,.04);turboAirGain.gain.setTargetAtTime(muted?0:turboSpool*.052,t,turboSpool>.12?.035:.15);}
     }
     if(squealGain&&squealFilter){
       const squeal=clamp(tireEffectIntensity-.18,0,.82),mph=Math.abs(carState.speed)*1.6;
@@ -2533,7 +2537,7 @@ function updateDrive(dt){
       const oldGear=driveGear,wasPowerShift=pendingPowerShift,preShiftRpm=fakeRpm;
       driveGear=pendingGear;pendingGear=0;pendingPowerShift=false;gearDragTimer=0;gearElapsed=0;shiftPromptTimer=0;shiftNeeded=false;autoDownshiftTimer=0;autoShiftLock=1.15;limiterAbuseTimer=0;overRevTimer=0;
       const upshift=driveGear>oldGear;shiftKick=upshift?(wasPowerShift?.20:.31):.18;
-      const predictedRpm=clamp(rpmForGearAtMph(mphBefore,driveGear),900,8400),dropTarget=preShiftRpm*(wasPowerShift?.67:.63);
+      const predictedRpm=clamp(rpmForGearAtMph(mphBefore,driveGear),900,8400),dropTarget=preShiftRpm*(wasPowerShift?.58:.50);   // deeper drop per upshift
       rpmSettleFrom=upshift?clamp(Math.min(predictedRpm,dropTarget),1050,6100):predictedRpm;
       rpmSettleDuration=upshift?(wasPowerShift?.82:1.08):.22;rpmSettleTimer=rpmSettleDuration;fakeRpm=rpmSettleFrom;
       shiftTorqueCarry=upshift?(wasPowerShift?.90:.70):0;shiftTorqueCarryTimer=upshift?(wasPowerShift?.62:.82):0;
@@ -2573,7 +2577,13 @@ function updateDrive(dt){
   limiterActive=limiterEntry||limiterHold;
   const pureWSpam=forwardInput&&!reverseEngaged&&!backInput&&serviceBrakeAmount<.03&&Math.abs(steerIn)<.03&&!braking&&!nitroOn;
   if(limiterActive){
-    limiterPhase+=dt*82;fakeRpm=8860+Math.sin(limiterPhase)*310;limiterSoundTimer-=dt;if(limiterSoundTimer<=0){playLimiterHit();limiterSoundTimer=.078;}
+    // Fuel cut, not a siren. The swing is small and sawtooth-shaped (sharp
+    // drop, quick recovery) like a real limiter chopping injection, instead of
+    // a +/-310 sine that turned the turbo whistle into a warbling alarm.
+    limiterPhase+=dt*46;
+    const cutPhase=(limiterPhase/(Math.PI*2))%1;
+    fakeRpm=8830-Math.pow(cutPhase,0.45)*95;
+    limiterSoundTimer-=dt;if(limiterSoundTimer<=0){playLimiterHit();limiterSoundTimer=.125;}
     limiterAbuseTimer+=dt;
     // D deliberately bounces the limiter for about one second before taking the next gear.
     // Lifting or steering lets the driver keep balancing the car at redline without an instant shift.
@@ -3024,7 +3034,8 @@ window.GAME_DEBUG={
   get mapId(){return currentMapId;},
   get world(){return activeWorld;},
   get car(){return {x:carState.x,y:carState.y,z:carState.z,heading:carState.heading,speed:carState.speed,
-                    mph:Math.abs(carState.speed)*1.6,airborne:carState.airborne,gear:driveGear,onRamp:!!carState.ramp};},
+                    mph:Math.abs(carState.speed)*1.6,airborne:carState.airborne,gear:driveGear,onRamp:!!carState.ramp,
+                    rpm:Math.round(fakeRpm),audioRpm:Math.round(audioRpm),limiter:limiterActive,turbo:+turboPsi.toFixed(2)};},
   get camera(){return {x:camera.position.x,y:camera.position.y,z:camera.position.z};},
   get nitro(){return +stats.nitro.toFixed(1);},
   hud(){hud();return this.nitro;},
