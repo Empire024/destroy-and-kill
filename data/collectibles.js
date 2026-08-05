@@ -37,13 +37,14 @@ window.COLLECTIBLES = {
       anchors: [{ x: -1000, z: -1900, y: 30 }, { x: 1500, z: -1900, y: 30 }, { x: 3400, z: -1900, y: 30 }, { x: 4060, z: -200, y: 30 }]
     },
 
-    // Docks service roads, straight over the container-yard kickers around
-    // (-30,2940) and (250,3130) — the high-value line the brief asked for.
-    // rampsNear() is where those coordinates came from.
+    // Quayside, across the yard, and out along the x=-30 service spur — which
+    // is a dead end with a 15-unit kicker at its tip (rampsNear reports it at
+    // (-30,2940), dead centre of the carriageway). The line ENDS on the ramp,
+    // so the last coins are collected in the air. Dense and expensive for it.
     {
       id: 'nc-docks-slalom', worldId: 'neon', name: 'DOCKS SLALOM',
-      value: 25, bonus: 1600, spacing: 45,
-      anchors: [{ x: -30, z: 2500 }, { x: -30, z: 3560 }, { x: 530, z: 3580 }]
+      value: 25, bonus: 1600, spacing: 30,
+      anchors: [{ x: 530, z: 3580 }, { x: 530, z: 2860 }, { x: -30, z: 2860 }, { x: -30, z: 2940 }]
     },
 
     // Every hairpin of the hill climb, bottom to summit.
@@ -54,20 +55,28 @@ window.COLLECTIBLES = {
                 { x: -2672, z: -900 }, { x: -3052, z: -1246 }, { x: -3418, z: -1450 }]
     },
 
-    // The retail strip: boulevard out, back road home.
+    // The retail strip: out on the northern carriageway of the boulevard, home
+    // on the southern one. The back road at z=-760 looks like the better return
+    // leg on a map and is not: the only link between the two doubles back on
+    // itself twice, and coins would land on the same tarmac twice over.
     {
       id: 'nc-strip-run', worldId: 'neon', name: 'STRIP RUN',
-      value: 15, bonus: 1000, spacing: 120,
-      anchors: [{ x: 1750, z: -60 }, { x: 3780, z: -60 }, { x: 3600, z: -760 }, { x: 1800, z: -760 }]
+      value: 15, bonus: 1000, spacing: 100,
+      anchors: [{ x: 1750, z: -60 }, { x: 3780, z: -60 }, { x: 3780, z: 0 }, { x: 1800, z: 0 }]
     },
 
-    // Rim to pit floor down the haul road. The most valuable coins on the map,
-    // because getting back out is the hard part.
+    // Rim to pit floor down the whole haul-road spiral. Each bench-to-bench
+    // drop is ONE short ramp and the anchors sit on its ends, because a few
+    // metres either side is thin air: (2500,2100)→(2500,2168) is the y0→y-20
+    // descent, and (2500,2400) — the obvious-looking anchor — validated at 155
+    // units from any road and excluded the whole route until it was moved.
+    // Bench B at z=-46 runs straight over the kicker at (3050,3417).
     {
       id: 'nc-quarry-descent', worldId: 'neon', name: 'QUARRY DESCENT',
-      value: 30, bonus: 2000, spacing: 150,
-      anchors: [{ x: 2000, z: 2100, y: 0 }, { x: 2245, z: 3000, y: -20 }, { x: 3000, z: 3630, y: -20 },
-                { x: 3300, z: 3417, y: -46 }, { x: 2712, z: 3000, y: -70 }, { x: 2950, z: 3000, y: -90 }]
+      value: 30, bonus: 2000, spacing: 110,
+      anchors: [{ x: 2400, z: 1900, y: 0 }, { x: 2500, z: 2100, y: 0 }, { x: 2500, z: 2168, y: -20 },
+                { x: 3300, z: 2245, y: -20 }, { x: 3620, z: 3000, y: -20 }, { x: 3300, z: 3417, y: -46 },
+                { x: 2700, z: 3417, y: -46 }, { x: 2644, z: 3060, y: -70 }, { x: 2840, z: 2860, y: -90 }]
     },
 
     // -------------------------------------------------------------- PRAGUE

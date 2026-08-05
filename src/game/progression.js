@@ -259,7 +259,10 @@
       unlocks[e.id] = true;
       const cost = num(e.purchaseCost, 0);
       if (cost > 0) {
-        if (!wasUnlocked && announce) {
+        // A for-sale car stays "unlocked but not owned" forever, so this branch
+        // runs on every evaluation — announce and log only on the transition.
+        if (wasUnlocked) continue;
+        if (announce) {
           ctx.fx.banner('NEW CAR AVAILABLE', e.displayName, hex(e.baseColor));
           toast('🔓 ' + e.displayName + ' — ' + nf(cost) + ' at any body shop', hex(e.baseColor));
         }

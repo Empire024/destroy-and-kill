@@ -92,6 +92,13 @@
         prompts.delete(id);
         if (activePrompt && activePrompt.id === id) { activePrompt = null; if (el) el.style.display = 'none'; }
       },
+      /** Update a live prompt's label without re-registering it (countdowns). */
+      setLabel(id, text) {
+        const p = prompts.get(id);
+        if (!p) return;
+        p.label = text;
+        if (activePrompt === p && el) el.textContent = '⏎  ' + text;
+      },
       active() { return activePrompt; }
     }
   });

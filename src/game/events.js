@@ -183,6 +183,26 @@
 
   function exclude(kind, id, why) { excluded.push({ kind: kind, id: id, why: why }); }
 
+  /**
+   * Put the player's car down at (x,z) ON A GIVEN LEVEL.
+   *
+   * `ctx.engine.teleportCar` resolves its own height with
+   * `groundHeightAt(x, z, carState.y)` — the CURRENT height as the level hint —
+   * so teleporting from the street onto the freeway deck 30 units up lands the
+   * car under the deck instead. On COASTAL FREEWAY that is open water: measured
+   * before this, the grid placed the player at y = -9 and it drowned during the
+   * countdown, every time.
+   *
+   * carState is a co-owned live object and this writes exactly one field of it —
+   * the same field teleportCar is about to overwrite — purely to seed that hint.
+   * The clean fix is `teleportCar(x, z, heading, atY)`, which GAME_DEBUG.teleport
+   * already has and the seam does not; it is in the handoff as a ctx request.
+   */
+  function placeCar(x, z, heading, levelY) {
+    if (levelY != null) ctx.carState.y = ctx.world.groundHeightAt(x, z, levelY);
+    ctx.engine.teleportCar(x, z, heading);
+  }
+
   // -------------------------------------------------------------- save i/o ---
   const sv = () => api('save');
   function saveGet(path, def) { const s = sv(); return s ? s.get(path, def) : def; }
@@ -666,7 +686,9 @@
       if (inter) inter.addPrompt({
         id: 'race-' + def.id, worldId: worldId, x: r.start.x, z: r.start.z, radius: 17,
         label: 'JOIN RACE — ' + (def.name || def.id), color: '#ffd23f', maxSpeedMph: 15,
-        when: () => races.state === 'idle' && !ctx.player.onFoot,
+        // The height test is what stops the COASTAL FREEWAY prompt being offered
+        // to a car parked on the street 30 units under its start line.
+        when: () => races.state === 'idle' && !ctx.player.onFoot && Math.abs(ctx.player.y - r.start.y) < 15,
         onTrigger: () => openSummary(r)
       });
       if (nav) nav.addPOI({
@@ -883,7 +905,7 @@
 
     const px = r.start.x + rx * playerSlot.lat + sx * playerSlot.back;
     const pz = r.start.z + rz * playerSlot.lat + sz * playerSlot.back;
-    ctx.engine.teleportCar(px, pz, h);
+    placeCar(px, pz, h, r.start.y);
 
     races.active = {
       r: r, opponents: ops, laps: d.laps || 1, cpIndex: 0, lap: 0, t: 0, countdown: 3.999,
@@ -978,6 +1000,14 @@
     let want = Math.atan2(tx - o.x, tz - o.z);
 
     // Two whiskers, ONE obstacle query. Budget matters more than fidelity here.
+    // A hit sets a flag that scales the TARGET later; it must never touch
+    // o.speed directly. A per-frame `o.speed *= 0.985` looks harmless and is
+    // not: against a linear accel it is a drag term, and its fixed point
+    // (accel·dt / 0.015) capped the whole COASTAL FREEWAY field at ~67 u/s
+    // whatever their skill — the deck barriers' AABBs bulge into the
+    // carriageway on the ring's corners, so the whiskers were firing most
+    // frames and every car, from skill 0.60 to 0.86, ran the same lap.
+    let blocked = false;
     if (!cheap) {
       const boxes = ctx.world.obstaclesNear(o.x, o.z);
       if (boxes.length) {
@@ -987,10 +1017,13 @@
           const wx = o.x + Math.sin(wh) * probe, wz = o.z + Math.cos(wh) * probe;
           for (let i = 0; i < boxes.length; i++) {
             const b = boxes[i];
-            if (b.baseY != null && (o.y > b.baseY + (b.h || 20) || o.y < b.baseY - 6)) continue;
+            // Same rule the engine's resolver uses: a collider you are above or
+            // below is not in your way (deck barriers vs the street underneath).
+            const base = b.baseY == null ? 0 : b.baseY;
+            if (o.y > base + (b.h == null ? 40 : b.h) + 1 || o.y < base - 6) continue;
             if (Math.abs(wx - b.x) <= b.w * 0.5 + 2 && Math.abs(wz - b.z) <= b.d * 0.5 + 2) {
               want -= sgn * 0.5;
-              o.speed *= 0.985;
+              blocked = true;
               break;
             }
           }
@@ -1022,6 +1055,7 @@
     let target = (AI_BASE_SPEED * (0.80 + sk * 0.36) * tuneMul) / (1 + turn * (2.9 - sk * 1.1));
     if (o.mistakeT > 0) target *= 0.55;
     if (o.off > 25) target *= 0.75;
+    if (blocked) target *= 0.72;
     // Rubber band: bounded ±8% by the gap, and nothing else. Documented, small
     // enough to feel like a driver reacting and not like the race cheating.
     target *= 1 + clamp((a.playerProgress - (o.lap * total + o.s)) / 900, -1, 1) * RUBBER_BAND;
@@ -1034,6 +1068,7 @@
     }
     o.lane += clamp(o.laneTarget - o.lane, -8 * dt, 8 * dt);
 
+    o.target = target; o.turn = turn;          // telemetry for GAME_DEBUG_RACE.status()
     o.speed += clamp(target - o.speed, -58 * dt, (26 + sk * 12) * dt);
     if (o.speed < 0) o.speed = 0;
 
@@ -1122,7 +1157,7 @@
     }
     if (a.autopilot) {
       driveAgent(a.autopilot, a, dt, false);
-      ctx.engine.teleportCar(a.autopilot.x, a.autopilot.z, a.autopilot.heading);
+      placeCar(a.autopilot.x, a.autopilot.z, a.autopilot.heading, a.autopilot.y);
     }
 
     updateRaceHud(ui);
@@ -1146,8 +1181,10 @@
   }
 
   function standings(a) {
-    const rows = [{ name: 'YOU', prog: a.playerProgress, you: true, finished: a.finished, t: a.finishTime }];
-    for (const o of a.opponents) rows.push({ name: o.name, prog: o.lap * a.r.length + o.s, finished: o.finished, t: o.finishTime });
+    const rows = [{ name: 'YOU', prog: a.playerProgress, you: true, finished: a.finished, t: a.finishTime,
+                    speed: a.autopilot ? a.autopilot.speed : Math.abs(ctx.player.speed), skill: a.autopilot ? a.autopilot.def.skill : null }];
+    for (const o of a.opponents) rows.push({ name: o.name, prog: o.lap * a.r.length + o.s, finished: o.finished, t: o.finishTime,
+                                             speed: o.speed, skill: o.def.skill, off: o.off, target: o.target, turn: o.turn });
     rows.sort((x, y) => {
       if (x.finished !== y.finished) return x.finished ? -1 : 1;
       if (x.finished && y.finished) return x.t - y.t;
@@ -1326,7 +1363,11 @@
         return {
           state: races.state, raceId: a.r.def.id, t: +a.t.toFixed(2), lap: a.lap, laps: a.laps,
           cp: a.cpIndex, cps: a.r.cps.length,
-          standings: standings(a).map(r => ({ name: r.name, prog: Math.round(r.prog), finished: r.finished, t: r.t ? +r.t.toFixed(2) : null }))
+          standings: standings(a).map(r => ({
+            name: r.name, prog: Math.round(r.prog), finished: r.finished, t: r.t ? +r.t.toFixed(2) : null,
+            mph: Math.round((r.speed || 0) * 1.6), skill: r.skill, off: r.off == null ? null : Math.round(r.off),
+            target: r.target == null ? null : +r.target.toFixed(1), turn: r.turn == null ? null : +r.turn.toFixed(3)
+          }))
         };
       },
       zoneMult() { return zones.multSet; },

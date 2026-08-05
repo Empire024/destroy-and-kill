@@ -37,7 +37,6 @@
   let panel = null, root = null, ui = {}, openShop = null;
   let keyHandler = null;
   let pendingPaint = null, pendingPreset = null, entryVehicle = null, entryPresets = null;
-  let clock = 0;
 
   const nf = n => '$' + Math.round(n).toLocaleString('en-US');
   const hexs = n => '#' + (n >>> 0 & 0xffffff).toString(16).padStart(6, '0');
@@ -231,16 +230,19 @@
     });
   }
 
-  /** interact caches the label on the prompt object and only repaints when the
-   *  ACTIVE prompt changes identity, so a live countdown means re-registering.
-   *  Done at most once a second and only while the player is near the shop. */
+  /** Keep the "CLOSED — REOPENS IN 42S" countdown live. Only fires when the
+   *  displayed second actually changes, and only while the player is near.
+   *  `interact.setLabel` does it in place; the remove/re-add path is the
+   *  fallback for a build whose interact predates it. */
   function refreshPrompt(rec) {
     if (!interact) return;
     const closed = isClosed(rec.def.id);
     const sec = closed ? secondsLeft(rec.def.id) : -1;
     if (closed === rec.promptClosed && sec === rec.promptSec) return;
-    interact.removePrompt('shop-' + rec.def.id);
-    registerPrompt(rec);
+    rec.promptClosed = closed;
+    rec.promptSec = sec;
+    if (interact.setLabel) interact.setLabel('shop-' + rec.def.id, promptLabel(rec));
+    else { interact.removePrompt('shop-' + rec.def.id); registerPrompt(rec); }
   }
 
   /* ----------------------------------------------------------- the panel */
@@ -707,7 +709,6 @@ body.shop-open #mobileControls{display:none!important}
     worldChanged() { syncWorld(); },
 
     update(dt, context) {
-      clock += dt;
       const px = context.player.x, pz = context.player.z;
       for (const rec of shops) {
         if (rec.def.worldId !== context.world.id || rec.broken) continue;
@@ -729,8 +730,8 @@ body.shop-open #mobileControls{display:none!important}
             updateMechanic(rec, dt);
             if (!isClosed(rec.def.id) && carHitsMechanic(rec.mech)) runOverMechanic(rec);
           }
-        } else if (rec.mech && (rec.mech.down > 0 || rec.mech.down < 1)) {
-          updateMechanic(rec, Math.min(dt, .05));   // still settle the pose off-screen
+        } else if (rec.mech && (closedNow ? rec.mech.down < 1 : rec.mech.down > 0)) {
+          updateMechanic(rec, Math.min(dt, .05));   // let the pose finish settling off-screen
         }
       }
       if (openShop) ui.wallet.textContent = 'WALLET ' + nf(prog.wallet());

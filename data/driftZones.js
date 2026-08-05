@@ -47,12 +47,13 @@ window.DRIFT_ZONES = [
     anchors: [{ x: -310, z: -870 }, { x: 810, z: -870 }, { x: 810, z: 250 }, { x: -310, z: 250 }, { x: -310, z: -870 }]
   },
 
-  // Down the haul road on loose dirt: bench A, bench B, and out along the pit.
+  // Three quarters of the bench A ring on loose dirt, 20 units down inside the
+  // pit with the wall on one side and the drop on the other.
   {
     id: 'nz-quarry-spiral', worldId: 'neon', name: 'PIT SPIRAL', style: 'descending spiral',
     corridorWidth: 42, reward: 1100, color: 0xffd23f,
-    anchors: [{ x: 2245, z: 2400, y: -20 }, { x: 2245, z: 3300, y: -20 }, { x: 3000, z: 3630, y: -20 },
-              { x: 3620, z: 3000, y: -20 }, { x: 3300, z: 3417, y: -46 }, { x: 2700, z: 3417, y: -46 }]
+    anchors: [{ x: 2245, z: 2400, y: -20 }, { x: 2245, z: 3300, y: -20 },
+              { x: 3000, z: 3690, y: -20 }, { x: 3620, z: 2700, y: -20 }]
   },
 
   // ----------------------------------------------------------------- PRAGUE

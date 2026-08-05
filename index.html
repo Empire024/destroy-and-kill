@@ -4797,11 +4797,14 @@ function WORLD_obstaclesNear(x,z){
   const coast=(window.GameSea&&GameSea.coastObstaclesNear)?GameSea.coastObstaclesNear(activeWorld,x,z):null;
   const dsys=window.GameSystems?GameSystems.api('destructibles'):null;
   const props=(dsys&&dsys.obstaclesNear)?dsys.obstaclesNear(x,z):null;
-  if((!coast||!coast.length)&&(!props||!props.length)) return base;
+  const bsys=window.GameSystems?GameSystems.api('bodyshop'):null;
+  const shopsB=(bsys&&bsys.obstaclesNear)?bsys.obstaclesNear(x,z):null;
+  if((!coast||!coast.length)&&(!props||!props.length)&&(!shopsB||!shopsB.length)) return base;
   _obsMerge.length=0;
   for(let i=0;i<base.length;i++)_obsMerge.push(base[i]);
   if(coast)for(let i=0;i<coast.length;i++)_obsMerge.push(coast[i]);
   if(props)for(let i=0;i<props.length;i++)_obsMerge.push(props[i]);
+  if(shopsB)for(let i=0;i<shopsB.length;i++)_obsMerge.push(shopsB[i]);
   return _obsMerge;
 }
 function WORLD_rampsNear(x,z){ return activeWorld.rampsNear(x,z); }

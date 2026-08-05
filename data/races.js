@@ -89,13 +89,15 @@ window.RACES = [
     ]
   },
 
-  // Rim, bench A, bench B and back up, over the haul-road kicker at (2060,3400).
-  // Dirt, drops and a field that knows the pit better than you do.
+  // North rim, down the x=2500 haul ramp to bench A, three quarters of the
+  // bench ring 20 units inside the pit, then back out up the x=3100 ramp. Dirt,
+  // drops and a field that knows the pit better than you do.
   {
     id: 'nr-quarry-mixed', worldId: 'neon', name: 'QUARRY RUN', laps: 1,
     reward: 2200, entryFee: 0,
-    anchors: [{ x: 2400, z: 1800, y: 0 }, { x: 2000, z: 2700, y: 0 }, { x: 2245, z: 3300, y: -20 },
-              { x: 3000, z: 3630, y: -20 }, { x: 3620, z: 3000, y: -20 }, { x: 3300, z: 2245, y: -20 }],
+    anchors: [{ x: 2100, z: 1900, y: 0 }, { x: 2500, z: 2100, y: 0 }, { x: 2500, z: 2168, y: -20 },
+              { x: 2245, z: 3300, y: -20 }, { x: 3000, z: 3690, y: -20 }, { x: 3620, z: 2700, y: -20 },
+              { x: 3100, z: 2168, y: -20 }, { x: 3100, z: 2100, y: 0 }, { x: 3600, z: 1900, y: 0 }],
     opponents: [
       { name: 'SPOIL', skill: 0.48, aggression: 0.40, mistakes: 0.45, tuneKey: 'commuter', color: 0x8a5433 },
       { name: 'DRAGLINE', skill: 0.62, aggression: 0.50, mistakes: 0.30, tuneKey: 'streetDrift', color: 0xffd23f },

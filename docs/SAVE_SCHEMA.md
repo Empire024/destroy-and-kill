@@ -84,8 +84,18 @@ Behaviour you must know:
 | `tuneByVehicle` | object | `{tuneKey: {…}}` — per-vehicle upgrades/tuning chosen in the body shop. Shape owned by the progression system. |
 | `raceResults` | object | `{raceId: {best: seconds, wins: n, runs: n}}`. Use `recordBest('progression.raceResults.<id>.best', t, false)`. |
 | `driftZoneBests` | object | `{zoneId: score}` — best drift score per zone. `recordBest(..., true)`. |
-| `coinsCollected` | object | `{worldId: [coinId, …]}` — collectibles already picked up, per map. |
+| `coinsCollected` | object | `{worldId: [coinId, …]}` — the **identity set** of collectibles already picked up, per map. Owned by the events system; it answers "may this specific coin still be collected?" and must stay a set of ids. |
 | `shopCooldowns` | object | `{shopId: epochMs}` — when a shop becomes usable again. Absolute ms so it survives a reload. |
+| `stats` | object | `{raceWins, zoneRecords, coins}` — lifetime **counters** for display (career screen, totals). Owned by the progression system. |
+
+> **Do not merge `stats.coins` with `coinsCollected`.** They look redundant and
+> are not: `coinsCollected` is a per-world set of ids that gates re-collection,
+> `stats.coins` is a single lifetime tally that keeps counting after a world's
+> coins are exhausted and is not reset by re-entering a map. Deriving either from
+> the other loses information — the tally cannot say *which* coins, and the sets
+> cannot count a coin collected before a world's collectible list changed.
+> Same split applies to `stats.raceWins` vs `raceResults[id].wins` (per-race) and
+> `stats.zoneRecords` vs `driftZoneBests` (per-zone).
 
 ### `prefs` — survives `resetProgression()`
 
