@@ -7,16 +7,12 @@ LOW-POLY ROADSIDE BLOCK CREDITS / DESIGN REFERENCES
 "Town Center" by Quaternius — https://poly.pizza/m/CoERW5nFdE — CC0
 The in-game versions are heavily simplified, procedural adaptations optimized for this single-file Three.js game.
 
-PRAGUE 3D DATA
-Official IPR Praha “Budovy 3D / Buildings 3D model” WebScene, ArcGIS item 7e6316e95cfe4f36ae06bbfb687bf34b.
-The launcher includes a local ArcGIS proxy. The game resolves the current building SceneLayer from the official WebScene at runtime, then routes non-CORS IPR service requests through localhost.
-Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-size iframe with a visible player car and building collision probes.
 -->
 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:,">
-<title>DESTROY AND KILL — PRAGUE 1 v31</title>
+<title>DESTROY AND KILL — NEON CITY</title>
 <style>
   :root{--neon:#ff2d9b;--cyan:#20e3ff;--gold:#ffd23f;--danger:#ff3b3b;--green:#3bff8b;}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -181,28 +177,6 @@ Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-
   @keyframes driftLevelPop{45%{transform:translateX(-50%) scale(1.09);filter:brightness(1.7)}}
 
 
-  /* Official Prague 1 live scene — v31 camera-only ArcGIS renderer */
-  #pragueView{position:absolute;inset:0;display:block;visibility:hidden;width:100vw;height:100vh;min-width:320px;min-height:240px;border:0;pointer-events:none;z-index:0;background:#07101a}
-  #pragueView.active{visibility:visible;pointer-events:none}
-  #pragueCarMarker{position:absolute;left:50%;bottom:7.5%;z-index:16;display:none;width:88px;height:144px;transform:translateX(-50%);transform-origin:50% 78%;pointer-events:none;filter:drop-shadow(0 19px 15px rgba(0,0,0,.8)) drop-shadow(0 0 18px rgba(32,227,255,.42))}
-  #pragueCarMarker .body{position:absolute;inset:4px 11px 5px;border:3px solid rgba(235,251,255,.96);border-radius:23px 23px 13px 13px;background:linear-gradient(180deg,#d4f8ff 0 8%,#4dd2f7 9% 24%,#0874aa 25% 74%,#073a5a 75%);box-shadow:inset 0 -13px 0 rgba(0,0,0,.2),inset 0 8px 0 rgba(255,255,255,.2)}
-  #pragueCarMarker .glass{position:absolute;left:23px;right:23px;top:30px;height:37px;border:2px solid rgba(255,255,255,.74);border-radius:11px 11px 5px 5px;background:linear-gradient(180deg,#bfeeff,#132738 75%)}
-  #pragueCarMarker .wheel{position:absolute;width:11px;height:35px;border-radius:5px;background:#040608;box-shadow:inset 0 0 0 2px #343a42}
-  #pragueCarMarker .fl{left:2px;top:25px}.pragueCarMarker .fr{right:2px;top:25px}
-  #pragueCarMarker .fr{right:2px;top:25px}#pragueCarMarker .rl{left:2px;bottom:20px}#pragueCarMarker .rr{right:2px;bottom:20px}
-  #pragueCarMarker .lamp{position:absolute;left:24px;top:5px;width:12px;height:7px;border-radius:5px;background:#fff5b8;box-shadow:28px 0 0 #fff5b8,0 0 10px #fff3a0}
-  body.prague-mode #pragueCarMarker{display:block}
-  #pragueBonnet{position:absolute;left:50%;bottom:-18px;z-index:16;display:none;width:min(620px,78vw);height:170px;transform:translateX(-50%);pointer-events:none;clip-path:polygon(16% 100%,25% 22%,39% 3%,61% 3%,75% 22%,84% 100%);background:linear-gradient(90deg,#052d47,#0a6d9e 34%,#31bce7 50%,#0a6d9e 66%,#052d47);border-top:3px solid rgba(255,255,255,.72);filter:drop-shadow(0 -8px 20px rgba(0,0,0,.72))}
-  body.prague-mode.first-person-prague #pragueCarMarker{display:none}
-  body.prague-mode.first-person-prague #pragueBonnet{display:block}
-  #pragueToggle{position:absolute;top:148px;right:22px;z-index:21;display:none;min-height:44px;padding:9px 15px;border:1px solid rgba(32,227,255,.72);border-radius:8px;background:rgba(5,8,14,.88);color:#20e3ff;font:900 12px/1.1 "Segoe UI",sans-serif;letter-spacing:1.4px;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.55);touch-action:manipulation}
-  #pragueToggle:hover{background:#20e3ff;color:#07101a}
-  #pragueStatus{position:absolute;top:199px;right:22px;z-index:20;display:none;max-width:270px;padding:8px 11px;border-radius:7px;background:rgba(5,8,14,.84);color:#b9c8d8;font-size:11px;line-height:1.35;text-align:right;pointer-events:none}
-  #pragueCredit{position:absolute;bottom:7px;left:8px;z-index:20;display:none;padding:5px 8px;border-radius:5px;background:rgba(0,0,0,.64);color:#d7e2ef;font-size:10px;pointer-events:none}
-  body.prague-mode #pragueCredit,body.prague-mode #pragueStatus{display:block}
-  body.prague-mode #map{display:none}
-  body.prague-mode #vig{box-shadow:inset 0 0 120px rgba(0,0,0,.32)}
-  body.prague-mode>canvas:not(.hud){display:none!important}
 
   /* Mobile controls — touch buttons plus phone-tilt steer-by-wire */
   #mobileControls{position:absolute;inset:0;z-index:60;display:none;pointer-events:none;user-select:none;-webkit-user-select:none}
@@ -228,8 +202,8 @@ Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-
     #cash{font-size:25px;top:62px;left:12px}#stars{top:92px;left:12px;font-size:17px}#heartHealth{top:116px;left:11px;font-size:32px}#engineWarning{top:157px;left:12px}
     #speed{top:62px;right:13px}#speed .mph{font-size:52px;letter-spacing:-4px}
     #gaugeCluster{bottom:-42px;transform:translateX(-50%) scale(.54);transform-origin:50% 100%}
-    #driftBonus{top:116px;width:min(72vw,430px)}#map{display:none!important}#pragueToggle{display:none!important}#pragueStatus{top:112px;right:8px;max-width:210px;font-size:9px}
-    #pragueCredit{bottom:112px}.toast{font-size:12px;max-width:92vw;white-space:normal;text-align:center}
+    #driftBonus{top:116px;width:min(72vw,430px)}#map{display:none!important}
+    .toast{font-size:12px;max-width:92vw;white-space:normal;text-align:center}
   }
   @media(max-width:430px){
     .mobileTop{gap:5px}.mobileTop button{min-width:54px;padding:0 8px;font-size:10px}.mobileSteer{grid-template-columns:repeat(2,62px)}.mobileRound{width:62px;height:62px}
@@ -239,15 +213,9 @@ Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-
 </style>
 </head>
 <body>
-<iframe id="pragueView" title="Official IPR Prague 3D model" src="about:blank" referrerpolicy="no-referrer-when-downgrade"></iframe>
-<div id="pragueCarMarker" aria-hidden="true"><i class="body"></i><i class="glass"></i><i class="wheel fl"></i><i class="wheel fr"></i><i class="wheel rl"></i><i class="wheel rr"></i><i class="lamp"></i></div>
-<div id="pragueBonnet" aria-hidden="true"></div>
-<button id="pragueToggle" type="button">PRAGUE 1 · P</button>
-<div id="pragueStatus">Official Prague scene is idle.</div>
-<div id="pragueCredit">3D buildings © IPR Praha · official ArcGIS SceneLayer</div>
 <div id="mobileControls" aria-label="Mobile driving controls">
   <div class="mobileTop">
-    <button id="mobileMenu" type="button">MENU</button><button id="mobileCamera" type="button">CAM</button><button id="mobileReset" type="button">RESET</button><button id="mobilePrague" type="button">PRAGUE</button><button id="mobileTilt" type="button">TILT</button><button id="mobileTiltFlip" type="button">FLIP</button>
+    <button id="mobileMenu" type="button">MENU</button><button id="mobileCamera" type="button">CAM</button><button id="mobileReset" type="button">RESET</button><button id="mobileTilt" type="button">TILT</button><button id="mobileTiltFlip" type="button">FLIP</button>
   </div>
   <div id="mobileTiltState">TOUCH STEERING</div>
   <div class="mobileSteer"><button id="mobileLeft" class="mobileRound" type="button" aria-label="Steer left">◀</button><button id="mobileRight" class="mobileRound" type="button" aria-label="Steer right">▶</button></div>
@@ -472,92 +440,10 @@ function bindMobileHold(id,name,onPress){const button=document.getElementById(id
 bindMobileHold('mobileLeft','left');bindMobileHold('mobileRight','right');bindMobileHold('mobileGas','gas');bindMobileHold('mobileBrake','brake');bindMobileHold('mobileHandbrake','handbrake');bindMobileHold('mobileNitro','nitro');
 bindMobileHold('mobileShiftUp','shiftUp',()=>{if(started&&!carSelectionOpen)requestManualShift(1);});bindMobileHold('mobileShiftDown','shiftDown',()=>{if(started&&!carSelectionOpen)requestManualShift(-1);});
 document.getElementById('mobileMenu')?.addEventListener('click',()=>openVehicleSelection());
-document.getElementById('mobileCamera')?.addEventListener('click',()=>{camMode=(camMode+1)%4;cameraSmoothingReady=false;if(pragueMode)updatePragueScene(1/60,true);});
+document.getElementById('mobileCamera')?.addEventListener('click',()=>{camMode=(camMode+1)%4;cameraSmoothingReady=false;});
 document.getElementById('mobileReset')?.addEventListener('click',()=>resetCar());
-document.getElementById('mobilePrague')?.addEventListener('click',()=>{if(started)togglePragueMode();});
 mobileTiltBtn?.addEventListener('click',enableOrCenterMobileTilt);mobileTiltFlipBtn?.addEventListener('click',()=>{mobileTiltInvert=!mobileTiltInvert;localStorage.setItem('mobileTiltInvert',mobileTiltInvert?'1':'0');updateMobileTiltLabel();});
 updateMobileTiltLabel();
-
-// ---------- Official IPR Prague 1 — camera-only streamed renderer v31 ----------
-const PRAGUE_ORIGIN={lon:14.42076,lat:50.08745};
-const PRAGUE_METERS_LAT=111320;
-const PRAGUE_METERS_LON=111320*Math.cos(PRAGUE_ORIGIN.lat*Math.PI/180);
-const PRAGUE_LOCAL_PROXY=location.protocol==='http:'&&(location.hostname==='127.0.0.1'||location.hostname==='localhost'||location.hostname==='0.0.0.0'||/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(location.hostname));
-const pragueViewEl=document.getElementById('pragueView'),pragueToggleEl=document.getElementById('pragueToggle'),pragueStatusEl=document.getElementById('pragueStatus'),pragueCarMarkerEl=document.getElementById('pragueCarMarker'),pragueBonnetEl=document.getElementById('pragueBonnet');
-let pragueMode=false,pragueLoading=false,pragueReady=false,pragueFrameStarted=false,pragueSavedState=null;
-let pragueGroundZ=195,pragueYawRate=0,pragueSteerVisual=0,pragueCollisionCooldown=0,pragueLastCameraPost=0,pragueLastProbePost=0,pragueProbeSeq=0,pragueLastCollisionNotice=0;
-let pragueLastSafe={x:0,z:0,heading:0};
-const pragueCam={x:0,z:-20,y:205};
-function pragueLocalToGeo(x,z,elevation=pragueGroundZ){return {longitude:PRAGUE_ORIGIN.lon+x/PRAGUE_METERS_LON,latitude:PRAGUE_ORIGIN.lat+z/PRAGUE_METERS_LAT,z:elevation};}
-function setPragueStatus(text,color='#b9c8d8'){pragueStatusEl.textContent=text;pragueStatusEl.style.color=color;}
-function resetPragueLoader(reason){pragueReady=false;pragueLoading=false;if(reason)setPragueStatus(reason,'#ff6b6b');}
-window.addEventListener('message',event=>{
-  if(event.source!==pragueViewEl.contentWindow||!event.data||typeof event.data!=='object')return;const data=event.data;
-  if(data.type==='prague-status')setPragueStatus(String(data.text||'Prague is loading…'),data.color||'#ffd23f');
-  else if(data.type==='prague-ready'){pragueReady=true;pragueLoading=false;setPragueStatus('PRAGUE 1 · STREAM READY','#3bff8b');updatePragueScene(1/60,true);}
-  else if(data.type==='prague-error'){console.error('Prague iframe failed',data.error);resetPragueLoader('Prague failed: '+String(data.error||'unknown renderer error'));}
-  else if(data.type==='prague-collision-state'&&pragueMode){
-    if(data.blocked&&pragueCollisionCooldown<=0){
-      carState.x=pragueLastSafe.x;carState.z=pragueLastSafe.z;carState.heading=pragueLastSafe.heading;carState.speed=0;carState.vx=0;carState.vz=0;pragueYawRate*=.25;pragueCollisionCooldown=.34;
-      if(performance.now()-pragueLastCollisionNotice>950){pragueLastCollisionNotice=performance.now();setBanner('BLOCKED','PRAGUE BUILDING EDGE','#ff6b3b');}
-    }else if(!data.blocked&&data.player&&Number.isFinite(data.player.x)&&Number.isFinite(data.player.z)){
-      pragueLastSafe={x:data.player.x,z:data.player.z,heading:Number.isFinite(data.player.heading)?data.player.heading:carState.heading};
-    }
-  }
-});
-function initPragueModel(){
-  if(pragueReady||pragueLoading)return;if(!PRAGUE_LOCAL_PROXY){resetPragueLoader('Prague requires the v31 package and START_GAME.bat.');return;}
-  const rect=pragueViewEl.getBoundingClientRect();if(rect.width<2||rect.height<2){setPragueStatus('PRAGUE · waiting for renderer surface…','#ffd23f');requestAnimationFrame(()=>initPragueModel());return;}
-  pragueLoading=true;setPragueStatus('PRAGUE · starting streamlined renderer…','#ffd23f');
-  if(!pragueFrameStarted){pragueFrameStarted=true;pragueViewEl.src='prague_scene_v31.html?v=31';}else pragueViewEl.contentWindow?.postMessage({type:'prague-reload'},'*');
-}
-function enterPragueMode(){
-  if(pragueMode)return;pragueSavedState={x:carState.x,z:carState.z,heading:carState.heading,vx:carState.vx,vz:carState.vz,speed:carState.speed,y:carState.y,vy:carState.vy,airborne:carState.airborne};
-  carState.x=0;carState.z=0;carState.heading=0;carState.vx=0;carState.vz=0;carState.speed=0;carState.y=0;carState.vy=0;carState.airborne=false;driveGear=1;fakeRpm=900;turboSpool=0;turboPsi=0;pragueYawRate=0;pragueSteerVisual=0;pragueCollisionCooldown=0;pragueLastSafe={x:0,z:0,heading:0};resetDriftPhysics?.();
-  pragueMode=true;document.body.classList.add('prague-mode');pragueViewEl.classList.add('active');pragueToggleEl.textContent='RETURN TO STATE · P';cameraSmoothingReady=false;
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{initPragueModel();if(pragueReady)updatePragueScene(1/60,true);}));setBanner('PRAGUE 1','STREAMED VISUAL DRIVE','#20e3ff');
-}
-function exitPragueMode(){
-  if(!pragueMode)return;pragueMode=false;document.body.classList.remove('prague-mode','first-person-prague');pragueViewEl.classList.remove('active');pragueCarMarkerEl.style.display='none';pragueBonnetEl.style.display='none';pragueToggleEl.textContent='PRAGUE 1 · P';
-  pragueViewEl.contentWindow?.postMessage({type:'prague-visible',visible:false},'*');if(pragueSavedState)Object.assign(carState,pragueSavedState);pragueSavedState=null;playerX=carState.x;playerZ=carState.z;cameraSmoothingReady=false;if(car)car.visible=true;setBanner('BACK TO THE STATE','','#ffd23f');
-}
-function togglePragueMode(){pragueMode?exitPragueMode():enterPragueMode();}
-function updatePragueGround(_now){}
-function updatePragueDrive(dt){
-  const controlsLocked=wheelSetupOpen||carSelectionOpen,wheelActive=!controlsLocked&&wheelConfig.enabled&&wheelState.connected;
-  const touchSteer=!controlsLocked&&MOBILE_UI?mobileSteerInput(dt):0;
-  const gas=Math.max(!controlsLocked&&(keys['w']||keys['arrowup']||mobileInput.gas)?1:0,wheelActive?wheelState.throttle:0),brake=Math.max(!controlsLocked&&(keys['s']||keys['arrowdown']||mobileInput.brake)?1:0,wheelActive?wheelState.brake:0);
-  const keyboardSteer=!controlsLocked?(((keys['a']||keys['arrowleft'])?1:0)-((keys['d']||keys['arrowright'])?1:0)):0;
-  const steer=Math.abs(keyboardSteer)>.001?keyboardSteer:Math.abs(touchSteer)>.001?touchSteer:(wheelActive?wheelState.steer:0);
-  pragueSteerVisual=lerp(pragueSteerVisual,steer,clamp(dt*12,0,1));pragueCollisionCooldown=Math.max(0,pragueCollisionCooldown-dt);
-  const nitro=!controlsLocked&&(keys['shift']||mobileInput.nitro)&&gas>.02,handbrake=!controlsLocked&&(!!keys[' ']||mobileInput.handbrake);
-  const mph=Math.abs(carState.speed)*1.6,nearStopped=Math.abs(carState.speed)<2.3;
-  if(!reverseEngaged&&gas<.02&&nearStopped&&brake>.62){brakeReverseTimer+=dt;if(brakeReverseTimer>.68)selectReverse(false);}else if(!reverseEngaged)brakeReverseTimer=Math.max(0,brakeReverseTimer-dt*3);
-  const forward=reverseEngaged?-gas:gas;gearElapsed+=forward>0?dt:0;autoShiftLock=Math.max(0,autoShiftLock-dt);shiftKick=Math.max(0,shiftKick-dt);
-  const shiftHeld=!!(keys['x']||keys['y']||wheelState.shiftUp||wheelState.shiftDown||mobileInput.shiftUp||mobileInput.shiftDown),manualActivity=Math.abs(steer)>.03||handbrake||nitro||brake>.10||reverseEngaged;
-  shiftHoldTimer=shiftHeld?shiftHoldTimer+dt:0;if(driveMode==='M'){manualModeHardTimer=Math.max(0,manualModeHardTimer-dt);manualModeTimer=Math.max(0,manualModeTimer-dt*(manualActivity?.34:1.15));if(shiftHoldTimer>.82||manualModeTimer<=0||manualModeHardTimer<=0)setDriveMode();}
-  if(pendingGear){gearDragTimer-=dt;if(gearDragTimer<=0){const old=driveGear,wasPowerShift=pendingPowerShift,preShiftRpm=fakeRpm;driveGear=pendingGear;pendingGear=0;pendingPowerShift=false;gearElapsed=0;autoShiftLock=1.15;shiftKick=driveGear>old?(wasPowerShift?.20:.31):.12;const predicted=clamp(rpmForGearAtMph(mph,driveGear),900,8350),isUp=driveGear>old,dropTarget=preShiftRpm*(wasPowerShift?.67:.63);rpmSettleFrom=isUp?clamp(Math.min(predicted,dropTarget),1050,5800):predicted;rpmSettleDuration=isUp?(wasPowerShift?.82:1.08):.20;rpmSettleTimer=rpmSettleDuration;fakeRpm=rpmSettleFrom;shiftTorqueCarry=isUp?(wasPowerShift?.90:.70):0;shiftTorqueCarryTimer=isUp?(wasPowerShift?.72:.92):0;postShiftPullFrom=isUp?(wasPowerShift?.82:.54):1;postShiftPullDuration=isUp?(wasPowerShift?.76:1.05):0;postShiftPullTimer=postShiftPullDuration;turboSpool*=isUp?(wasPowerShift?.76:.50):.65;playShiftSound(driveGear,isUp);if(wasPowerShift)powerShiftTimer=.95;}}
-  const basePragueRpm=clamp(rpmForGearAtMph(mph,driveGear)+forward*110,850,9200);let targetRpm=basePragueRpm;if(rpmSettleTimer>0){rpmSettleTimer=Math.max(0,rpmSettleTimer-dt);const p=1-rpmSettleTimer/Math.max(.001,rpmSettleDuration);targetRpm=lerp(rpmSettleFrom,basePragueRpm,smooth01(p));}fakeRpm=lerp(fakeRpm,targetRpm,clamp(dt*(shiftKick>0?6.6:4.7),0,1));
-  const pragueAutoShiftRpm=vehicleTune.drive==='AWD'?6900:vehicleTuneKey==='streetDrift'?7000:vehicleTune.drive==='RWD'?7200:6750;if(driveMode==='D'&&driveGear<MAX_GEAR&&forward>.1&&!pendingGear&&shiftKick<=0&&gearElapsed>=MIN_GEAR_TIMES[driveGear]&&fakeRpm>=pragueAutoShiftRpm&&autoShiftLock<=0){shiftPromptTimer+=dt;if(shiftPromptTimer>.08){beginGearShift(driveGear+1,false,.19);shiftPromptTimer=0;}}else if(fakeRpm<pragueAutoShiftRpm-250)shiftPromptTimer=0;
-  limiterActive=forward>.1&&!pendingGear&&fakeRpm>8840;limiterAbuseTimer=limiterActive?limiterAbuseTimer+dt:Math.max(0,limiterAbuseTimer-dt*3);if(limiterActive){fakeRpm=8860+Math.sin(performance.now()*.08)*260;if(driveMode==='D'&&driveGear<MAX_GEAR&&limiterAbuseTimer>.35&&!pendingGear)beginGearShift(driveGear+1,false,.22);}if(!reverseEngaged&&driveMode==='D'&&driveGear>1&&fakeRpm<1120&&!pendingGear)beginGearShift(driveGear-1,false,.10);
-  let spoolTarget=0;if(forward>.02&&fakeRpm>1450&&vehicleTune.maxPsi>0)spoolTarget=clamp((.16+.55*smooth01((fakeRpm-1500)/1000)+.29*smooth01((fakeRpm-2500)/1500))*forward,0,1);if(pendingGear||shiftKick>0)spoolTarget*=.1;turboSpool=lerp(turboSpool,spoolTarget,clamp(dt*(spoolTarget>turboSpool?7.5:6.5),0,1));turboPsi=turboSpool*vehicleTune.maxPsi;
-  updateEngineHeat(dt,forward);shiftTorqueCarryTimer=Math.max(0,shiftTorqueCarryTimer-dt);postShiftPullTimer=Math.max(0,postShiftPullTimer-dt);const pullRamp=postShiftPullDuration>0&&postShiftPullTimer>0?lerp(postShiftPullFrom,1,smooth01(1-postShiftPullTimer/postShiftPullDuration)):1,curve=enginePowerCurve(fakeRpm),carriedCurve=shiftTorqueCarryTimer>0?Math.max(curve,shiftTorqueCarry):curve,health=enginePowerHealth(),gearAccel=vehicleTune.gearAccel[driveGear]*vehicleTune.power,accel=(gearAccel*carriedCurve*(.38+.62*forward)+gearAccel*turboSpool*vehicleTune.turboPush+(nitro?gearAccel*.7:0))*forward*health*pullRamp;
-  carState.speed+=(reverseEngaged?-Math.abs(accel):accel)*dt;carState.speed*=Math.max(0,1-(.08+brake*3.8+(handbrake?.7:0))*dt);const maxSpeed=(GEAR_CEILS[driveGear]||GEAR_CEILS[MAX_GEAR])*vehicleTune.topSpeed/1.6;carState.speed=clamp(carState.speed,-18,maxSpeed);
-  const speedN=clamp(Math.abs(carState.speed)/(GEAR_CEILS[MAX_GEAR]/1.6),0,1),authority=clamp(Math.abs(carState.speed)/10,0,1),motionSign=carState.speed<0?-1:1,maxYawRate=lerp(.82,.12,smooth01(speedN))*vehicleTune.steer,targetYaw=steer*maxYawRate*authority*motionSign;
-  pragueYawRate=lerp(pragueYawRate,targetYaw,clamp(dt*(Math.abs(targetYaw)>Math.abs(pragueYawRate)?4.8:8.4),0,1));carState.heading+=pragueYawRate*dt;const dirx=Math.sin(carState.heading),dirz=Math.cos(carState.heading);carState.vx=dirx*carState.speed;carState.vz=dirz*carState.speed;carState.x+=carState.vx*dt;carState.z+=carState.vz*dt;
-  const r=Math.hypot(carState.x,carState.z);if(r>3600){const f=3600/r;carState.x*=f;carState.z*=f;carState.speed*=.65;}playerX=carState.x;playerZ=carState.z;animatePlayerWheelMeshes(steer,carState.speed,dt);updatePragueScene(dt,false);
-  if(audioCtx&&engineOsc){const t=audioCtx.currentTime;engineOsc.frequency.setTargetAtTime(35+fakeRpm/110,t,.035);engineOsc2.frequency.setTargetAtTime(37+fakeRpm/108,t,.035);engineGain.gain.setTargetAtTime(muted?0:.025+Math.abs(forward)*.025,t,.05);}
-}
-function updatePragueScene(dt,force){
-  if(!pragueMode||!pragueViewEl.contentWindow)return;document.body.classList.toggle('first-person-prague',camMode===1);
-  pragueCarMarkerEl.style.display=camMode===1?'none':'block';pragueBonnetEl.style.display=camMode===1?'block':'none';
-  const visualLean=clamp(-pragueSteerVisual*7-driftAngle*180/Math.PI*.12,-13,13),visualSway=clamp(driftAngle*18,-18,18);pragueCarMarkerEl.style.transform=`translateX(calc(-50% + ${visualSway}px)) rotate(${visualLean}deg)`;pragueBonnetEl.style.transform=`translateX(calc(-50% + ${visualSway*.35}px)) rotate(${visualLean*.16}deg)`;
-  const fx=Math.sin(carState.heading),fz=Math.cos(carState.heading),rx=Math.cos(carState.heading),rz=-Math.sin(carState.heading);let desiredX,desiredZ,desiredY,tilt;
-  if(camMode===0){desiredX=carState.x-fx*20;desiredZ=carState.z-fz*20;desiredY=pragueGroundZ+7.8;tilt=80;}else if(camMode===1){desiredX=carState.x+fx*2.8;desiredZ=carState.z+fz*2.8;desiredY=pragueGroundZ+2.15;tilt=88;}else if(camMode===2){desiredX=carState.x-fx*18+rx*10;desiredZ=carState.z-fz*18+rz*10;desiredY=pragueGroundZ+9.4;tilt=79;}else{desiredX=carState.x-fx*38;desiredZ=carState.z-fz*38;desiredY=pragueGroundZ+19;tilt=73;}
-  const a=camMode===1?1:(force?1:1-Math.exp(-dt*5.8));pragueCam.x=lerp(pragueCam.x,desiredX,a);pragueCam.z=lerp(pragueCam.z,desiredZ,a);pragueCam.y=lerp(pragueCam.y,desiredY,a);
-  const now=performance.now();if(force||now-pragueLastCameraPost>33){pragueLastCameraPost=now;const cameraGeo=pragueLocalToGeo(pragueCam.x,pragueCam.z,pragueCam.y),heading=((carState.heading+(camMode===1?driftAngle*.20:0))*180/Math.PI+360)%360;pragueViewEl.contentWindow.postMessage({type:'prague-visible',visible:true},'*');pragueViewEl.contentWindow.postMessage({type:'prague-camera',camera:{...cameraGeo,heading,tilt,fov:camMode===1?76+clamp(Math.abs(driftAngle)*6,0,8):camMode===3?58:64}},'*');}
-  if(pragueReady&&Math.abs(carState.speed)>.35&&(force||now-pragueLastProbePost>180)){pragueLastProbePost=now;const player=pragueLocalToGeo(carState.x,carState.z,pragueGroundZ+.4);pragueViewEl.contentWindow.postMessage({type:'prague-probe',seq:++pragueProbeSeq,player:{...player,x:carState.x,z:carState.z,heading:carState.heading}},'*');}
-}
 
 // ---------- Renderer / Scene ----------
 const renderer=new THREE.WebGLRenderer({antialias:true});
@@ -1698,7 +1584,7 @@ function updateEngineHeat(dt,throttle){
   if(engineOverheated){
     const severity=clamp((engineHeatSeconds-15)/18,0,1);
     if(stressed)engineDamage=clamp(engineDamage+dt*(1.0+severity*2.15),0,100);
-    if(!pragueMode&&car){engineSmokeClock-=dt;if(engineSmokeClock<=0){spawnEngineSmoke(.45+severity*.55);engineSmokeClock=lerp(.18,.055,severity);}}
+    if(car){engineSmokeClock-=dt;if(engineSmokeClock<=0){spawnEngineSmoke(.45+severity*.55);engineSmokeClock=lerp(.18,.055,severity);}}
     heatWhooshClock-=dt;if(heatWhooshClock<=0){playHeatWhoosh(.45+severity*.55);heatWhooshClock=lerp(2.6,1.05,severity);}
     if(engineDamage>=100)seizeEngineFromHeat();
   }else{engineSmokeClock=0;heatWhooshClock=Math.min(heatWhooshClock,.5);}
@@ -1847,7 +1733,7 @@ function bankDriftCombo(crashed=false){
 }
 function breakDriftCombo(){if(driftComboActive||driftComboGrace>0)bankDriftCombo(true);}
 function updateDriftCombo(dt,throttle,handbrake){
-  if(onFoot||dead||engineBlown||pragueMode){if(driftComboActive)bankDriftCombo(false);return;}
+  if(onFoot||dead||engineBlown){if(driftComboActive)bankDriftCombo(false);return;}
   const mph=Math.abs(carState.speed)*1.6,angle=Math.abs(driftAngle),valid=mph>26&&angle>.105&&angle<1.28&&(gripLost||rearSlip>.48||handbrake)&&!carState.airborne;
   if(valid){
     driftComboActive=true;driftComboGrace=1.05;const angleFactor=clamp((angle-.09)/.62,.18,1.35),speedFactor=clamp((mph-20)/150,.25,1.65),controlFactor=.72+Math.min(.35,Math.max(0,throttle))+(handbrake?.12:0);
@@ -2168,8 +2054,7 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   keys[k]=true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright','tab'].includes(k)) e.preventDefault();
   if(dead) return;   // no controls on the WASTED screen
-  if(k==='c'){camMode=(camMode+1)%4;cameraSmoothingReady=false;if(pragueMode)updatePragueScene(1/60,true);}
-  if(k==='p'&&started){e.preventDefault();togglePragueMode();return;}
+  if(k==='c'){camMode=(camMode+1)%4;cameraSmoothingReady=false;}
   if(k==='r') resetCar();
   if(k==='m'){ muted=!muted; addToast(muted?'🔇 Muted':'🔊 Sound on','#9ab'); }
   if(k==='tab') toggleFullMap();
@@ -2295,7 +2180,6 @@ let started=false;
 function update(dt){
   if(!started) return;
   if(carSelectionOpen){if(engineGain&&audioCtx)engineGain.gain.setTargetAtTime(0,audioCtx.currentTime,.08);return;}
-  if(pragueMode){updatePragueDrive(dt);return;}
   if(dead){ if(engineOsc) engineGain.gain.setTargetAtTime(0,audioCtx.currentTime,0.15); deadTimer-=dt; if(deadTimer<=0) respawnAtHospital(); return; }   // frozen on the WASTED screen
   copRamCooldown=Math.max(0,copRamCooldown-dt); heartFlashTimer=Math.max(0,heartFlashTimer-dt);
   if(sinking){ sinkTimer-=dt;
@@ -3028,7 +2912,7 @@ let last=performance.now();
 function loop(now){ const dt=Math.min(.045,(now-last)/1000); last=now;
   updateWheelSystem(dt); update(dt); hud(); drawMap();
   if(bannerTimer>0){ bannerTimer-=dt; if(bannerTimer<=0) bannerEl.classList.remove('show'); }
-  if(!pragueMode)renderer.render(scene,camera); requestAnimationFrame(loop); }
+  renderer.render(scene,camera); requestAnimationFrame(loop); }
 camera.position.set(carState.x,20,carState.z-30); camera.lookAt(carState.x,0,carState.z);
 requestAnimationFrame(loop);
 
@@ -3036,14 +2920,14 @@ requestAnimationFrame(loop);
 const overlay=document.getElementById('overlay');
 updateWheelControlsUI();refreshWheelDevices();
 function openVehicleSelection(){
-  if(wheelSetupOpen)closeWheelSetup();if(pragueMode)exitPragueMode();if(showFullMap)toggleFullMap();
+  if(wheelSetupOpen)closeWheelSetup();if(showFullMap)toggleFullMap();
   carSelectionOpen=true;document.body.classList.add('car-select-open');Object.keys(keys).forEach(k=>keys[k]=false);Object.keys(mobileInput).forEach(k=>mobileInput[k]=false);carState.speed=0;carState.vx=0;carState.vz=0;pendingGear=0;shiftKick=0;limiterActive=false;breakDriftCombo?.();
-  overlay.classList.remove('fade');pragueToggleEl.style.display='none';
+  overlay.classList.remove('fade');
   showMapStage();
 }
 function begin(){
   const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();WORLD_updateStreaming(carState.x,carState.z,1);givers.forEach(g=>g.g.visible=false);missionLock=1e12;}
-  carSelectionOpen=false;document.body.classList.remove('car-select-open');overlay.classList.add('fade');pragueToggleEl.style.display='block';cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
+  carSelectionOpen=false;document.body.classList.remove('car-select-open');overlay.classList.add('fade');cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
 }
 // ---------- Map selection ----------
 const mapSelectEl=document.getElementById('mapSelect'),overlayTitleEl=document.getElementById('overlayTitle');
@@ -3098,7 +2982,6 @@ showMapStage();
 document.querySelectorAll('.vehicleCard').forEach(card=>card.addEventListener('click',()=>{
   if(!card.dataset.vehicle)return;
   selectPlayerVehicle(card.dataset.vehicle);resetCar();begin();}));
-pragueToggleEl.addEventListener('click',togglePragueMode);
 const unlockAudio=()=>{if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();};
 addEventListener('pointerdown',unlockAudio,{passive:true});addEventListener('keydown',unlockAudio);
 
