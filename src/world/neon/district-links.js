@@ -234,6 +234,66 @@
   }
 
   /**
+   * An elevated carriageway: ribbon, soffit, fascias, piers and a correct deck
+   * chain.
+   *
+   * Deliberately does NOT use `road({deck:true})`. That path adds its own deck
+   * rectangles with the broken rotation described above; on an east-west grade
+   * they cover the right ground but interpolate the slope BACKWARDS, so the car
+   * gets a choice between the true surface and a mirrored one and latches onto
+   * whichever happens to be nearer. On the jump kicker that put the car two
+   * units low, which in turn made a support pier solid and stopped it dead at
+   * 150mph. Passing explicit heights with `deck:false` gives the same ribbon
+   * with none of the automatic geometry, so everything below is ours.
+   */
+  function viaduct(b, THREE, pts, width, o) {
+    o = o || {};
+    b.road(pts, {
+      width: width, color: o.color || C_DECK, curbColor: C_CURB,
+      lineColor: o.lineColor || C_LINE, markings: o.markings !== false
+    });
+    deckChain(b, pts, width);
+    deckPatches(b, pts, width);
+
+    const hw = width / 2 + 2.6, SOFF = 1.9;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const dx = c[0] - a[0], dz = c[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.01) continue;
+      const nx = dz / len * hw, nz = -dx / len * hw;           // left normal
+      const a0 = [a[0] + nx, a[2], a[1] + nz], a1 = [a[0] - nx, a[2], a[1] - nz];
+      const c0 = [c[0] + nx, c[2], c[1] + nz], c1 = [c[0] - nx, c[2], c[1] - nz];
+      const d = (p) => [p[0], p[1] - SOFF, p[2]];
+      b.quad(d(a1), d(c1), d(c0), d(a0), 0x1a1f2e);           // soffit (faces down)
+      b.quad(a0, c0, d(c0), d(a0), 0x232a3b);                 // fascias
+      b.quad(d(a1), d(c1), c1, a1, 0x232a3b);
+    }
+
+    const every = o.pierEvery || 3;
+    for (let i = 0; i < pts.length; i += every) {
+      const p = pts[i];
+      const gy = b.terrain.heightAt(p[0], p[1]);
+      const h = p[2] - gy - SOFF;
+      if (h < 9) continue;
+      // The visual pier reaches the soffit, but its COLLIDER stops 5 units
+      // short: a collider is only ignored above `baseY + h - 0.6`, and the car's
+      // height lags the deck slightly on a climb — a full-height pier would go
+      // solid underneath its own carriageway.
+      b.box({ x: p[0], y: gy, z: p[1], w: 7.5, h: h, d: 7.5, color: 0x333a4d, noCollide: true });
+      b.collider(p[0], p[1], 8, 8, Math.max(2, h - 5), gy);
+      b.instance('fwPierCap',
+        () => new THREE.BoxGeometry(13, 2.6, 13),
+        () => new THREE.MeshStandardMaterial({ color: 0x2b3244, roughness: 0.9 }),
+        { x: p[0], y: p[2] - SOFF - 1.3, z: p[1] });
+      b.instance('fwPierFoot',
+        () => new THREE.BoxGeometry(14, 2.0, 14),
+        () => new THREE.MeshStandardMaterial({ color: 0x1d2230, roughness: 0.95 }),
+        { x: p[0], y: gy + 1.0, z: p[1] });
+    }
+  }
+
+  /**
    * Crash barrier along one side of a deck polyline.
    *   side: +1 = left normal of travel (the OUTSIDE of the clockwise ring),
    *         -1 = right normal (the inside).
@@ -373,26 +433,6 @@
       { x, y: H - 0.4, z, ry: rot });
   }
 
-  /**
-   * Cosmetic pier detail on the pillars `road({deck:true})` drops every third
-   * vertex (it only builds them where the deck is more than 6 units up).
-   */
-  function pierDetail(b, THREE, pts) {
-    for (let i = 0; i < pts.length - 1; i += 3) {
-      const a = pts[i];
-      const gy = b.terrain.heightAt(a[0], a[1]);
-      if (a[2] - gy <= 6) continue;
-      b.instance('fwPierCap',
-        () => new THREE.BoxGeometry(13, 2.6, 13),
-        () => new THREE.MeshStandardMaterial({ color: 0x2b3244, roughness: 0.9 }),
-        { x: a[0], y: a[2] - 3.2, z: a[1] });
-      b.instance('fwPierFoot',
-        () => new THREE.BoxGeometry(14, 2.0, 14),
-        () => new THREE.MeshStandardMaterial({ color: 0x1d2230, roughness: 0.95 }),
-        { x: a[0], y: gy + 1.0, z: a[1] });
-    }
-  }
-
   function cone(b, THREE, x, y, z) {
     b.instance('fwCone',
       () => new THREE.BoxGeometry(2.0, 3.2, 2.0),
@@ -511,19 +551,15 @@
       arcPts(X0N + RC, Z0 + RC, RC, P, P * 1.5, 14)           // NW corner
     ];
 
-    const opts = { width: RING_W, color: C_DECK, curbColor: C_CURB, lineColor: C_LINE, deck: true };
     const full = [];
     for (const raw of pieces) {
       const pts = withY(raw, RING_Y, RING_Y);
-      b.road(pts, opts);
-      deckChain(b, pts, RING_W);
-      deckPatches(b, pts, RING_W);
-      pierDetail(b, THREE, pts);
+      viaduct(b, THREE, pts, RING_W, { pierEvery: 3 });
       pushPts(full, pts);
     }
     full.push([full[0][0], full[0][1], RING_Y]);   // close the loop
 
-    // The two streets that pass beneath the west leg. If a pillar ever lands in
+    // The two streets that pass beneath the west leg. If a pier ever lands in
     // one, this shouts about it in the console instead of silently blocking the
     // road for whoever plays next.
     assertPillarsClear(b, pieces, [[X0N, -30], [X0N, -590]]);
@@ -577,10 +613,7 @@
       // groundHeightAt, which would kill the bottom of the ramp.
       const gy = b.terrain.heightAt(rp.pts[0][0], rp.pts[0][1]);
       const pts = withY(rp.pts, gy, RING_Y);
-      b.road(pts, { width: RAMP_W, color: C_RAMP, curbColor: C_CURB, lineColor: C_LINE, deck: true });
-      deckChain(b, pts, RAMP_W);
-      deckPatches(b, pts, RAMP_W);
-      pierDetail(b, THREE, pts);
+      viaduct(b, THREE, pts, RAMP_W, { color: C_RAMP, pierEvery: 4 });
 
       const top = pts[pts.length - 1];
       junctionPad(b, top[0], top[1], RING_Y, rp.rot);
@@ -630,26 +663,20 @@
   }
 
   function spur(b, THREE, inCurve, runA, runB, lip, land, landB, outCurve, side) {
-    const o = { width: SPUR_W, color: C_RAMP, curbColor: C_CURB, lineColor: C_WARN, deck: true };
+    const o = { color: C_RAMP, lineColor: C_WARN, pierEvery: 3 };
 
     // take-off half: on the ring, out to the lip
     const a = [];
     pushPts(a, withY(inCurve, RING_Y, RING_Y));
     pushPts(a, withY(linePts(runA[0], runA[1], runB[0], runB[1], 50), RING_Y, RING_Y));
     pushPts(a, withY(linePts(runB[0], runB[1], lip[0], lip[1], 45), RING_Y, RING_Y + 8));
-    b.road(a, o);
-    deckChain(b, a, SPUR_W);
-    deckPatches(b, a, SPUR_W);
-    pierDetail(b, THREE, a);
+    viaduct(b, THREE, a, SPUR_W, o);
 
     // landing half: back down onto the ring
     const c = [];
     pushPts(c, withY(linePts(land[0], land[1], landB[0], landB[1], 52), RING_Y + 1, RING_Y));
     pushPts(c, withY(outCurve, RING_Y, RING_Y));
-    b.road(c, o);
-    deckChain(b, c, SPUR_W);
-    deckPatches(b, c, SPUR_W);
-    pierDetail(b, THREE, c);
+    viaduct(b, THREE, c, SPUR_W, o);
 
     // Open the rails where the spur is still overlapping the ring carriageway.
     const boIn = { off: 21.5, w: 3.4, skipStart: 165 };

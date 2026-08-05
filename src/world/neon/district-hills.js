@@ -475,7 +475,7 @@
       // --- radio mast: four legs, cross bracing, red aircraft warning lights
       const lampGeo = () => new THREE.BoxGeometry(3.4, 3.4, 3.4);
       const lampMat = () => new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-      const mx = cx - 40, mz = cz - 50, MH = 132;
+      const mx = cx - 30, mz = cz - 24, MH = 132;
       for (const leg of [[-5, -5], [5, -5], [5, 5], [-5, 5]])
         b.box({ x: mx + leg[0], z: mz + leg[1], y: y, w: 2.2, h: MH, d: 2.2, color: 0x545b6b });
       for (let h = 12; h < MH; h += 12) {

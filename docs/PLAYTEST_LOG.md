@@ -133,6 +133,41 @@ the natural hillside. Road and physics agree by construction.
 *Re-test:* a 1,400-step autopilot climb from y = 0 to y = 182 with **zero**
 off-road steps, zero stuck steps and no unintended airborne frames.
 
+**8. Half the map's horizontal surfaces were being back-face culled — FATAL, fixed**
+Reported by the docks author; my earlier winding fix turned out to be only half
+the story, and I had wrongly called it closed.
+
+`MeshAccum.tri` computed the normal as `(b−a)×(c−a)` but stored the vertices in
+the order `a, c, b`, whose right-hand front face is the *negation* of that. So
+the stored normal always pointed at the back face. Worse, the six districts were
+authored independently and hand `quad()` its perimeter in **both** rotational
+senses, so with the default `FrontSide` material a large fraction of horizontal
+surfaces faced away from the camera and vanished.
+
+Measured before the fix, sampling horizontal triangles near the downtown spawn:
+triangles at y=0 wound `+Y` with a stored normal of `−Y`; triangles at y=0.12
+wound `−Y` with a stored normal of `+Y` — i.e. *both* the normals were inverted
+*and* the two slabs disagreed with each other. Visually, the pavement slabs
+flanking the downtown streets were simply absent.
+
+*Fix, two parts:*
+1. `tri()` now stores vertices in the order matching its computed normal
+   (`a, b, c`), so normal and winding agree.
+2. Both merged materials are `THREE.DoubleSide`. Winding cannot be enforced
+   across independently authored districts, and a culled road surface is a hole
+   in the world. Three.js flips the normal for back faces on a double-sided
+   material, so lighting stays correct on whichever side is visible.
+
+*Re-test:* normal/winding mismatches across the merged surface fell from
+**88,119 of 88,119 to 33** (the remainder are degenerate zero-area triangles
+whose normal is arbitrary). The pavement slabs and road surface now render.
+Draw calls were **unchanged** (77–105 vs 70–111 before) and triangle counts are
+within noise, so DoubleSide cost nothing measurable here.
+*Route regression after the fix:* spawn→downtown, hill climb, downtown→docks,
+strip boulevard and quarry haul all completed with **zero** stuck steps and
+**zero** off-road steps. The quarry haul road now descends to y=−60; before the
+fix that route stuck at −28.
+
 ### Known limitations (not defects)
 
 - The autopilot follows "nearest road ahead", so at a switchback it can grab the

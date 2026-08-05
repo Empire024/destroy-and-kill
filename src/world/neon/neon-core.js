@@ -31,18 +31,27 @@
     this.pos = []; this.norm = []; this.col = [];
   }
   /**
-   * Emit one triangle. Callers give the corners in the natural "walk around
-   * the face" order (e.g. a quad's perimeter); we reverse it here so the
-   * resulting normal points OUT of the surface rather than into it. Getting
-   * this backwards lights every horizontal surface from underneath.
+   * Emit one triangle.
+   *
+   * The stored normal MUST match the right-hand rule of the stored vertex
+   * order, or the normal points at the back face: lighting then disagrees with
+   * geometry and every horizontal surface is lit from underneath.
+   *
+   * Note this does NOT make winding consistent across the map — six districts
+   * were authored independently and quads get handed to `quad()` in both
+   * rotational senses, so some faces wind up and some wind down. That is why
+   * the merged materials are DoubleSide (see `finish`): with per-face winding
+   * unenforceable, culling can only ever hide real geometry. Three.js flips the
+   * normal for back faces on a double-sided material, so lighting stays correct
+   * on whichever side you happen to see.
    */
-  MeshAccum.prototype.tri = function (a, c, b, color) {
+  MeshAccum.prototype.tri = function (a, b, c, color) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const len = Math.hypot(nx, ny, nz) || 1; nx /= len; ny /= len; nz /= len;
     const r = ((color >> 16) & 255) / 255, g = ((color >> 8) & 255) / 255, bl = (color & 255) / 255;
-    for (const p of [a, c, b]) { this.pos.push(p[0], p[1], p[2]); this.norm.push(nx, ny, nz); this.col.push(r, g, bl); }
+    for (const p of [a, b, c]) { this.pos.push(p[0], p[1], p[2]); this.norm.push(nx, ny, nz); this.col.push(r, g, bl); }
     return this;
   };
   MeshAccum.prototype.quad = function (a, b, c, d, color) { this.tri(a, b, c, color); this.tri(a, c, d, color); return this; };
@@ -415,14 +424,16 @@
   Builder.prototype.finish = function () {
     const THREE = this.THREE;
     if (!this._surf.isEmpty()) {
+      // DoubleSide: quad winding is not enforceable across independently
+      // authored districts, and a culled road surface is a hole in the world.
       const m = new THREE.Mesh(this._surf.build(THREE), new THREE.MeshStandardMaterial({
-        vertexColors: true, roughness: 0.82, metalness: 0.06
+        vertexColors: true, roughness: 0.82, metalness: 0.06, side: THREE.DoubleSide
       }));
       m.receiveShadow = true; m.castShadow = false; m.frustumCulled = false;
       this.group.add(m);
     }
     if (!this._glow.isEmpty()) {
-      const m = new THREE.Mesh(this._glow.build(THREE), new THREE.MeshBasicMaterial({ vertexColors: true }));
+      const m = new THREE.Mesh(this._glow.build(THREE), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
       m.frustumCulled = false;
       this.group.add(m);
     }
