@@ -133,6 +133,26 @@
     return d;
   };
   /** Height of deck `d` at world (x,z), or null if the point is off the deck. */
+  /**
+   * Height of deck `d` at world (x,z), or null if the point is off the deck.
+   *
+   * CONVENTION, established empirically — do not "correct" this without
+   * measuring all three of the garage, the freeway interchanges and the quarry
+   * spur, because they disagree about what looks right on paper.
+   *
+   * The transform below means a deck's height runs y0 -> y1 along local +Z,
+   * where local +Z lands along world +X for `rot = -PI/2` and along world +Z
+   * for `rot = 0`. So an EAST-WEST deck that should climb towards +X wants
+   * `rot = -PI/2`, NOT +PI/2.
+   *
+   * I tried "fixing" this to the textbook inverse rotation
+   * (`dx*cos - dz*sin`, `dx*sin + dz*cos`). It did repair downtown's garage,
+   * left the quarry spur unchanged, and BROKE every diagonal freeway on-ramp —
+   * the car stopped climbing and sat at y=0 instead of reaching the ring at
+   * y=30. Two of the three structures were authored against the transform
+   * below, and it is the one with the most in-world evidence behind it, so it
+   * stays and the offending district was fixed instead.
+   */
   DeckSystem.prototype._at = function (d, x, z) {
     const dx = x - d.x, dz = z - d.z;
     const lx = dx * d.cos + dz * d.sin;

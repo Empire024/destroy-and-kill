@@ -168,8 +168,23 @@
       b.quad([cx - hw, y + 0.05, cz - hd], [cx + hw, y + 0.05, cz - hd],
         [cx + hw, y + 0.05, cz + hd], [cx - hw, y + 0.05, cz + hd], L === 0 ? 0x2a2e3c : 0x33384a);
 
-      // drivable deck for the floor
-      b.decks.add({ x: cx, z: cz, w: w, d: d, rot: 0, y0: y + 0.05, y1: y + 0.05 });
+      // Drivable deck for the floor — SPLIT around this level's departing ramp.
+      //
+      // The deck resolver picks whichever surface is nearest the car's current
+      // height. A flat floor laid over the ramp corridor therefore wins at every
+      // step of the climb (at y=0.1 the flat 0.05 beats the rising 1.0), so the
+      // car can never get onto the ramp at all. Leaving a gap means the corridor
+      // has only the ramp in it, and the climb latches.
+      const rampSide = (L % 2 === 0) ? 1 : -1;
+      const corridorZ = cz + rampSide * (hd - rampW / 2 - 6);
+      const gap0 = corridorZ - rampW / 2 - 1, gap1 = corridorZ + rampW / 2 + 1;
+      if (L < LEVELS - 1) {
+        const aZ0 = cz - hd, aZ1 = gap0, bZ0 = gap1, bZ1 = cz + hd;
+        if (aZ1 - aZ0 > 2) b.decks.add({ x: cx, z: (aZ0 + aZ1) / 2, w: w, d: aZ1 - aZ0, rot: 0, y0: y + 0.05, y1: y + 0.05 });
+        if (bZ1 - bZ0 > 2) b.decks.add({ x: cx, z: (bZ0 + bZ1) / 2, w: w, d: bZ1 - bZ0, rot: 0, y0: y + 0.05, y1: y + 0.05 });
+      } else {
+        b.decks.add({ x: cx, z: cz, w: w, d: d, rot: 0, y0: y + 0.05, y1: y + 0.05 });
+      }
 
       // perimeter walls with a gap on the ramp side
       const wallH = 3.2;
@@ -195,9 +210,11 @@
         const side = (L % 2 === 0) ? 1 : -1;                 // +Z then -Z
         const rz = cz + side * (hd - rampW / 2 - 6);
         const rampLen = w * 0.8;
-        // sloped deck along local +Z... we want it along X, so rot = PI/2
+        // Sloped deck climbing towards +X. rot = -PI/2, NOT +PI/2: the deck
+        // frame puts local +Z along world +X for -PI/2, so +PI/2 ran the height
+        // backwards and this ramp descended while its own visual slope climbed.
         b.decks.add({
-          x: cx, z: rz, w: rampW, d: rampLen, rot: Math.PI / 2,
+          x: cx, z: rz, w: rampW, d: rampLen, rot: -Math.PI / 2,
           y0: y + 0.05, y1: y + FLOOR_H + 0.05
         });
         // visual slope
