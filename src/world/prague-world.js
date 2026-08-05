@@ -68,7 +68,7 @@
 
   // ------------------------------------------------------------------ config
   const RASTER = 1.5;          // collision raster cell, metres
-  const CELL_COLLIDE = 24;     // spatial-hash cell for colliders
+  const CELL_COLLIDE = 12;     // spatial-hash cell for colliders (see note in stats())
   const CELL_ROAD = 48;        // spatial-hash cell for road segments
   const TILE_N = 3;            // building geometry is split TILE_N x TILE_N for culling
   const MARGIN = 30;           // playable margin beyond the data extent
@@ -93,7 +93,7 @@
   const C_GROUND = 0x4a3f30;   // generic paving / courtyards / the river flats
   const C_ASPHALT = 0x5d4c36;  // carriageway
   const C_STONE = 0x82694a;    // pedestrian streets and squares — pale cobble
-  const C_KERB = 0xa08a68;
+  const C_KERB = 0x74604a;     // a kerb, not a lane marking — keep it quiet
   const C_MARK = 0xd9d2bd;     // unlit material: this hex is what you see
   const FOG = 0x141a26;
 
@@ -153,9 +153,16 @@
   function MeshAccum() { this.pos = []; this.norm = []; this.col = []; }
 
   /**
-   * Emit one triangle. Corners are given in "walk around the face" order; the
-   * winding is reversed here so the normal points OUT of the surface.
-   * A triangle whose (x,z) shoelace is positive gets a +Y normal.
+   * Emit one triangle. Corners are given in "walk around the face" order, so
+   * that a face whose (x,z) shoelace is positive comes out facing +Y.
+   *
+   * The vertices are emitted a, b, c — NOT in the order they were passed. That
+   * matters: the shading normal below is (b-a) x (c-a), and the GPU decides
+   * which side to cull from the vertex winding alone, ignoring the normal
+   * attribute entirely. Emit them in the passed order and the two disagree:
+   * every surface shades as though it faced up while the GPU culls it as
+   * though it faced down, so the ground silently disappears and buildings
+   * render inside-out. Keep these two in agreement.
    */
   MeshAccum.prototype.tri = function (a, c, b, color) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
@@ -164,7 +171,7 @@
     const len = Math.hypot(nx, ny, nz) || 1; nx /= len; ny /= len; nz /= len;
     const r = ((color >> 16) & 255) / 255, g = ((color >> 8) & 255) / 255, bl = (color & 255) / 255;
     const P = this.pos, N = this.norm, C = this.col;
-    P.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
+    P.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     N.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
     C.push(r, g, bl, r, g, bl, r, g, bl);
     return this;
@@ -189,9 +196,9 @@
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const len = Math.hypot(nx, ny, nz) || 1; nx /= len; ny /= len; nz /= len;
     const P = this.pos, N = this.norm, C = this.col;
-    P.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
+    P.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);   // see tri()
     N.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
-    const cols = [ca, cc, cb];
+    const cols = [ca, cb, cc];
     for (let i = 0; i < 3; i++) {
       const h = cols[i];
       C.push(((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255);
@@ -246,7 +253,7 @@
   // RoadNet — drivable centrelines. Feeds nearestRoad(), which is what gives
   // this map traffic and pedestrians for free.
   // =========================================================================
-  function RoadNet(cell) { this.segs = []; this.hash = new SpatialHash(cell); }
+  function RoadNet(cell) { this.segs = []; this.hash = new SpatialHash(cell); this.maxRing = 24; }
   RoadNet.prototype.addSegment = function (s) {
     s.dx = s.bx - s.ax; s.dz = s.bz - s.az;
     s.len = Math.hypot(s.dx, s.dz) || 1;
@@ -260,19 +267,48 @@
     this.segs.push(s);
     return s;
   };
-  const _rn = [];
+  /**
+   * Nearest drivable centreline point.
+   *
+   * The search grows a ring at a time rather than looking at one 3x3
+   * neighbourhood. Prague 1's core is genuinely pedestrianised — Old Town
+   * Square alone puts you well over a hash cell from the nearest street — and a
+   * fixed 3x3 lookup returns null there. The engine tolerates null, but traffic
+   * that gets null from its 26 m lookahead brakes to a standstill, so the
+   * plazas would fill with parked cars. Expanding until the best hit is
+   * provably closer than the next unscanned ring costs nothing on the common
+   * path (one ring) and always answers.
+   */
   RoadNet.prototype.nearest = function (x, z) {
-    this.hash.query(x, z, _rn);
+    if (!this.segs.length) return null;
+    const hash = this.hash, c = hash.cell;              // the cell size lives on the hash
+    const cx = Math.floor(x / c), cz = Math.floor(z / c);
+    const map = hash.map;
+    const stamp = ++hash.stamp;
     let best = null;
-    for (let i = 0; i < _rn.length; i++) {
-      const s = _rn[i];
-      let t = ((x - s.ax) * s.ux + (z - s.az) * s.uz) / s.len;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const px = s.ax + s.dx * t, pz = s.az + s.dz * t;
-      const d = Math.hypot(x - px, z - pz);
-      if (!best || d < best.d) {
-        best = { x: px, z: pz, y: 0, d: d, heading: s.heading, width: s.width, pitch: 0, seg: s };
+    for (let ring = 0; ring <= this.maxRing; ring++) {
+      for (let ix = cx - ring; ix <= cx + ring; ix++) {
+        for (let iz = cz - ring; iz <= cz + ring; iz++) {
+          // only the newly added perimeter
+          if (ring > 0 && ix !== cx - ring && ix !== cx + ring && iz !== cz - ring && iz !== cz + ring) continue;
+          const a = map.get(hash._key(ix, iz));
+          if (!a) continue;
+          for (let i = 0; i < a.length; i++) {
+            const s = a[i];
+            if (s._s === stamp) continue;
+            s._s = stamp;
+            let t = ((x - s.ax) * s.ux + (z - s.az) * s.uz) / s.len;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const px = s.ax + s.dx * t, pz = s.az + s.dz * t;
+            const d = Math.hypot(x - px, z - pz);
+            if (!best || d < best.d) {
+              best = { x: px, z: pz, y: 0, d: d, heading: s.heading, width: s.width, pitch: 0, seg: s };
+            }
+          }
+        }
       }
+      // anything in a ring further out is at least `ring * cell` away
+      if (best && best.d <= ring * c) break;
     }
     return best;
   };

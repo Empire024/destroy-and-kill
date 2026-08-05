@@ -1,5 +1,8 @@
 @echo off
+title DESTROY AND KILL
 cd /d "%~dp0"
+echo Starting DESTROY AND KILL...
+echo.
 where node >nul 2>nul
 if %errorlevel%==0 (
   node serve_game.js
@@ -15,6 +18,8 @@ if %errorlevel%==0 (
   python serve_game.py
   goto :eof
 )
-echo Node.js or Python is required.
-echo The standalone HTML can run the main game, but Prague needs this proxy launcher.
+echo.
+echo  Node.js or Python is required to run the game.
+echo  Install Node.js from https://nodejs.org/ - it takes about a minute.
+echo.
 pause

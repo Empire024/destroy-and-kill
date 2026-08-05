@@ -78,11 +78,13 @@
   const gapsOf = xs => xs.map(x => [x - 16, x + 16]);
 
   // Mall car park (the drift arena).
+  // Module pitch is 100: a 14-deep island, an 18-deep bay each side and a
+  // 50-wide aisle. Tighter than that and there is nothing to drift through.
   const LOT_X0 = 2120, LOT_X1 = 3340, LOT_Z0 = 440, LOT_Z1 = 800;
-  const ISLE_Z = [505, 575, 645, 715];   // kerbed island rows
-  const ISLE_HD = 7;
-  // The z 448..492 aisle is the jump run-up + landing: kept free of anything tall.
-  const RUN_X0 = 2380, RUN_X1 = 3200;
+  const ISLE_Z = [520, 620, 720];        // kerbed island rows
+  const ISLE_HD = 7, BAY_D = 18;
+  // The z 440..510 aisle is the jump run-up + landing: kept free of anything tall.
+  const RUN_X0 = 2440, RUN_X1 = 2780;
 
   // ------------------------------------------------------------------ palette
   const BASE = 0x15171e;                 // dead ground between everything
@@ -113,11 +115,21 @@
     const B = Math.min(255, (hex & 255) * f) | 0;
     return (R << 16) | (G << 8) | B;
   }
-  /** True if x is within `m` of a cross street — used to keep colliders out of roads. */
-  function nearCross(x, m) {
-    for (let i = 0; i < CX.length; i++) if (Math.abs(x - CX[i]) < m) return true;
+  /** True if x is within `m` of any value in `xs`. */
+  function nearAny(x, xs, m) {
+    for (let i = 0; i < xs.length; i++) if (Math.abs(x - xs[i]) < m) return true;
     return false;
   }
+  /** True if x is within `m` of a cross street — keeps colliders out of roads. */
+  function nearCross(x, m) { return nearAny(x, CX, m); }
+  /**
+   * Every x that must stay clear for a lane mouth: cross streets, connector
+   * alleys, the gas forecourt, the drive-through lanes and the wash tunnel.
+   * Clutter loops march on a fixed pitch and will otherwise drop a dumpster
+   * or a palm squarely in a doorway.
+   */
+  const LANE_X = CX.concat(CONN_A, CONN_B, [1870, 1930, 2215, 2396, 2920, 2960]);
+  function blocksLane(x, m) { return nearAny(x, LANE_X, m); }
   /** Axis-aligned ground quad. Corner order keeps the normal pointing up. */
   function slab(b, x0, z0, x1, z1, y, color, emissive) {
     b.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], color, emissive);
@@ -127,8 +139,8 @@
    * MeshBasicMaterial, so a heavily darkened colour reads as a reflection
    * rather than a light source. Two triangles for a lot of atmosphere.
    */
-  function sheen(b, x, z, w, d, color) {
-    slab(b, x - w / 2, z - d / 2, x + w / 2, z + d / 2, 0.16, dim(color, 0.16), true);
+  function sheen(b, x, z, w, d, color, f) {
+    slab(b, x - w / 2, z - d / 2, x + w / 2, z + d / 2, 0.16, dim(color, f || 0.24), true);
   }
 
   // ------------------------------------------------------------------- props
@@ -209,6 +221,19 @@
       () => new T.MeshBasicMaterial({ color: 0x3bff8b }), { x, y: 4.4, z });
     b.collider(x, z, 3.0, 2.4, 5.0, 0);
   }
+  /**
+   * A box truck backed up against an alley wall. 13 deep in a 36 corridor, so
+   * it leaves 23 — enough to get through, not enough to be lazy about it.
+   * These are what stop the alleys being a straight speedway.
+   */
+  function boxTruck(b, x, z, side, r) {
+    const col = [0x5c3a2c, 0x2f4453, 0x4a4436, 0x3f3348][(r() * 4) | 0];
+    b.box({ x, z, y: 0, w: 26, h: 12, d: 13, color: col });
+    b.box({ x, z: z - side * 6.7, y: 3.5, w: 22, h: 4, d: 0.6, color: dim(0xffd9a0, 0.55), emissive: true, noCollide: true });
+    b.box({ x, z, y: 12, w: 26.4, h: 0.5, d: 13.4, color: dim(0xff8a1f, 0.6), emissive: true, noCollide: true });
+    sheen(b, x, z - side * 16, 34, 22, 0xff8a1f, 0.18);
+  }
+
   /** Parked car: the body collides, cabin and glass are cosmetic. */
   function parkedCar(b, x, z, ry, r) {
     const col = CARCOL[(r() * CARCOL.length) | 0];
@@ -298,7 +323,14 @@
         b.box({ x: cx, z: zFront + face * 0.5, y: 0, w: dw, h: 9, d: 0.9, color: 0x4a4f5c, noCollide: true });
         b.box({ x: cx, z: zFront + face * 1.0, y: 9.2, w: dw + 2, h: 0.6, d: 0.5, color: 0xffb454, emissive: true, noCollide: true });
       } else {
-        b.box({ x: cx, z: zFront + face * 0.5, y: 2.6, w: uw - 8, h: 8.4, d: 0.8, color: dim(0xffd9a0, 0.42 + r() * 0.4), emissive: true, noCollide: true });
+        // glazing, broken into panes — one flat lit slab reads as a blank wall
+        const gw = uw - 8;
+        b.box({ x: cx, z: zFront + face * 0.5, y: 2.6, w: gw, h: 8.4, d: 0.8, color: dim(0xffd9a0, 0.42 + r() * 0.4), emissive: true, noCollide: true });
+        const panes = 3 + (r() * 3 | 0);
+        for (let p = 1; p < panes; p++) {
+          b.box({ x: cx - gw / 2 + gw * p / panes, z: zFront + face * 0.72, y: 2.6, w: 0.9, h: 8.4, d: 0.5, color: 0x13151c, noCollide: true });
+        }
+        b.box({ x: cx, z: zFront + face * 0.72, y: 2.6, w: gw + 1.2, h: 0.7, d: 0.5, color: 0x13151c, noCollide: true });
         b.box({ x: cx, z: zFront + face * 3.6, y: 11.6, w: uw - 5, h: 0.8, d: 7.0, color: NEON[(r() * NEON.length) | 0], noCollide: true });
         if (r() < signChance) {
           const c = NEON[(r() * NEON.length) | 0];
@@ -318,14 +350,20 @@
     slab(b, x + CONN_W / 2 - 0.8, z0, x + CONN_W / 2, z1, 0.10, dim(WARM, 0.5), true);
   }
 
-  /** Split a band into blocks around a list of [from,to] gaps. */
+  /**
+   * Split a band into blocks around a list of [from,to] gaps. Gaps that fall
+   * outside x0..x1 are ignored and every block is clamped to the band — the
+   * shared CX_GAP list is longer than most bands it is applied to.
+   */
   function blocks(x0, x1, gaps) {
     const cuts = gaps.slice().sort((a, c) => a[0] - c[0]);
     const out = [];
     let x = x0;
     for (const g of cuts) {
-      if (g[0] > x) out.push([x, g[0]]);
+      if (g[1] <= x0 || g[0] >= x1) continue;
+      if (g[0] > x) out.push([x, Math.min(g[0], x1)]);
       x = Math.max(x, g[1]);
+      if (x >= x1) break;
     }
     if (x1 > x) out.push([x, x1]);
     return out.filter(p => p[1] - p[0] > 42);
@@ -426,8 +464,10 @@
   // ------------------------------------------------------------ alley network
   function alleyNetwork(b, r) {
     // 36 clear between building faces: tight enough to be demanding, wide
-    // enough that the 5.2-wide collision capsule never wedges.
-    const runs = [[AL_A0, AL_A1, AL_X0, AL_X1], [AL_B0, AL_B1, AL_X0, AL_BX1], [LN_N0, LN_N1, AL_X0, 3860]];
+    // enough that the 5.2-wide collision capsule never wedges. The surfaces run
+    // past the outer cross streets to the west block ends, because the corridor
+    // is open there anyway and unpainted ground would read as a mistake.
+    const runs = [[AL_A0, AL_A1, 1544, AL_X1], [AL_B0, AL_B1, 1544, AL_BX1], [LN_N0, LN_N1, AL_X0, 3860]];
     for (const [z0, z1, x0, x1] of runs) {
       slab(b, x0, z0, x1, z1, 0.03, ALLEY_ASPH);
       const cz = (z0 + z1) / 2;
@@ -444,15 +484,34 @@
     // dumpsters against the walls + a wallpack every so often so the alleys are
     // navigable at night. Bins sit hard against a face, never mid-corridor.
     for (let x = AL_X0 + 60; x < AL_X1 - 40; x += 74) {
-      if (nearCross(x + 10, 46)) continue;
+      if (blocksLane(x, 46)) continue;
       bin(b, x, r() < 0.5 ? AL_A0 + 3.4 : AL_A1 - 3.4, r() * 0.3);
       b.box({ x: x + 24, z: AL_A1 + 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
       if (r() < 0.5) cone(b, x + 34, (AL_A0 + AL_A1) / 2 + (r() - 0.5) * 14);
     }
     for (let x = AL_X0 + 90; x < AL_BX1 - 40; x += 82) {
-      if (nearCross(x, 46)) continue;
+      if (blocksLane(x, 46)) continue;
       bin(b, x, r() < 0.5 ? AL_B0 + 3.4 : AL_B1 - 3.4, r() * 0.3);
       b.box({ x: x + 30, z: AL_B0 - 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
+    }
+
+    // Delivery trucks backed up to the loading doors, alternating walls. The
+    // resulting weave is the difference between a shortcut and a straight.
+    let t = 0;
+    for (let x = 1980; x < AL_X1 - 60; x += 296, t++) {
+      if (blocksLane(x, 60)) continue;
+      const side = (t % 2) ? 1 : -1;
+      boxTruck(b, x, side > 0 ? AL_A1 - 6.6 : AL_A0 + 6.6, side, r);
+    }
+    for (let x = 2110; x < AL_BX1 - 60; x += 296, t++) {
+      if (blocksLane(x, 60)) continue;
+      const side = (t % 2) ? 1 : -1;
+      boxTruck(b, x, side > 0 ? AL_B1 - 6.6 : AL_B0 + 6.6, side, r);
+    }
+    for (let x = 2260; x < 3700; x += 340, t++) {
+      if (blocksLane(x, 60)) continue;
+      const side = (t % 2) ? 1 : -1;
+      boxTruck(b, x, side > 0 ? LN_N1 - 6.6 : LN_N0 + 6.6, side, r);
     }
   }
 
@@ -467,29 +526,31 @@
     b.box({ x: cx, z: MED_S - 0.7, y: 0.55, w: len, h: 0.16, d: 1.4, color: dim(WARM, 0.8), emissive: true, noCollide: true });
 
     for (let x = BLV_X0 + 20; x <= BLV_X1 - 10; x += 92) {
-      pole(b, x, BLV_Z, 21);
-      headWarm(b, x, CW_N + 2, 20.4, 0);
-      headWarm(b, x, CW_S - 2, 20.4, 0);
-      sheen(b, x, CW_N, 20, 34, WARM);
-      sheen(b, x, CW_S, 20, 34, WARM);
-      if (x + 46 < BLV_X1) palm(b, x + 46, BLV_Z, 26 + r() * 8, r);
+      // The median runs straight through the cross-street junctions, so push
+      // anything solid clear of the junction rather than into the road.
+      let px = x;
+      for (const cx2 of CX) if (Math.abs(x - cx2) < 34) px = cx2 + (x < cx2 ? -32 : 32);
+      pole(b, px, BLV_Z, 21);
+      headWarm(b, px, CW_N + 2, 20.4, 0);
+      headWarm(b, px, CW_S - 2, 20.4, 0);
+      sheen(b, px, CW_N, 20, 34, WARM);
+      sheen(b, px, CW_S, 20, 34, WARM);
+      if (x + 46 < BLV_X1 && !nearCross(x + 46, 34)) palm(b, x + 46, BLV_Z, 26 + r() * 8, r);
     }
-    for (let x = BLV_X0 + 40; x <= BLV_X1 - 20; x += 138) {
-      if (nearCross(x, 34)) continue;
-      streetLamp(b, x, BLV_N - 14, 18, 0);
-      streetLamp(b, x, BLV_S + 14, 18, Math.PI);
-    }
+    // (the aprons are lit from the sidewalks in retailRows — nothing solid goes
+    // on the parking apron itself, it has to stay driveable end to end)
 
     // --- west gateway arch: the first thing you see coming from downtown ----
-    for (const z of [-104, 44]) {
+    // Legs stand on the two sidewalks, clear of the boulevard and its aprons.
+    for (const z of [-121, 61]) {
       b.box({ x: 1662, z, y: 0, w: 9, h: 42, d: 9, color: 0x262a36 });
       b.box({ x: 1662, z, y: 6, w: 9.6, h: 1.1, d: 9.6, color: 0x20e3ff, emissive: true, noCollide: true });
       b.box({ x: 1662, z, y: 30, w: 9.6, h: 1.1, d: 9.6, color: 0xff2d6b, emissive: true, noCollide: true });
     }
-    b.box({ x: 1662, z: BLV_Z, y: 42, w: 7, h: 5, d: 154, color: 0x1c2029, noCollide: true });
-    b.box({ x: 1662, z: BLV_Z, y: 47, w: 3.4, h: 13, d: 132, color: 0x14161d, noCollide: true });
-    letters(b, 1663.0, 49.5, BLV_Z, 108, 8, 0xff2d6b, r, Math.PI / 2);
-    letters(b, 1661.0, 49.5, BLV_Z, 108, 8, 0xff2d6b, r, -Math.PI / 2);
+    b.box({ x: 1662, z: BLV_Z, y: 42, w: 7, h: 5, d: 190, color: 0x1c2029, noCollide: true });
+    b.box({ x: 1662, z: BLV_Z, y: 47, w: 3.4, h: 13, d: 162, color: 0x14161d, noCollide: true });
+    letters(b, 1663.0, 49.5, BLV_Z, 136, 8, 0xff2d6b, r, Math.PI / 2);
+    letters(b, 1661.0, 49.5, BLV_Z, 136, 8, 0xff2d6b, r, -Math.PI / 2);
     sheen(b, 1662, BLV_Z, 44, 150, 0xff2d6b);
 
     // east terminus island + beacon
@@ -516,7 +577,11 @@
     for (const px of [cx - 52, cx + 52]) for (const pz of [102, 158]) {
       b.box({ x: px, z: pz, y: 0, w: 3.6, h: 13.5, d: 3.6, color: 0xb6bcc6 });
     }
-    sheen(b, cx, 130, 130, 76, 0xfff0c8);
+    // The forecourt is the brightest floor on the strip — a lit canopy dumps a
+    // hard pool of light, and it is the landmark you spot from the boulevard.
+    sheen(b, cx, 130, 128, 72, 0xfff0c8, 0.5);
+    sheen(b, cx, 84, 150, 46, 0xfff0c8, 0.22);
+    for (let x = cx - 56; x < cx + 56; x += 14) slab(b, x, 66, x + 8, 67.2, 0.18, dim(0xffd23f, 0.9), true);
 
     // two pump islands with a 34-wide through lane between them
     for (const iz of [110, 150]) {
@@ -525,10 +590,11 @@
       for (const px of [cx - 34, cx, cx + 34]) pump(b, px, iz);
     }
 
-    b.box({ x: 1910, z: 224, y: 0, w: 180, h: 16, d: 62, color: 0x3a3138 });
-    b.box({ x: 1910, z: 192.6, y: 3, w: 150, h: 9, d: 0.8, color: dim(0xffd9a0, 0.7), emissive: true, noCollide: true });
-    signBoard(b, 1910, 16.4, 192.4, 130, 7, 0x3bff8b, r, Math.PI);
-    hvac(b, 1880, 224, 16); hvac(b, 1948, 214, 16);
+    // shop — rear wall flush with alley B's north edge, never into the alley
+    b.box({ x: 1910, z: 218, y: 0, w: 180, h: 16, d: 56, color: 0x3a3138 });
+    b.box({ x: 1910, z: 189.6, y: 3, w: 150, h: 9, d: 0.8, color: dim(0xffd9a0, 0.7), emissive: true, noCollide: true });
+    signBoard(b, 1910, 16.4, 189.4, 130, 7, 0x3bff8b, r, Math.PI);
+    hvac(b, 1880, 218, 16); hvac(b, 1948, 210, 16);
 
     pylon(b, 1808, 78, 20, 22, 26, 0xff8a1f, r, Math.PI / 2, true);
     b.box({ x: 1808, z: 78, y: 12, w: 16, h: 6, d: 1.6, color: 0x14161d, rot: Math.PI / 2, noCollide: true });
@@ -536,7 +602,7 @@
 
     b.box({ x: 2098, z: 120, y: 0, w: 12, h: 7, d: 22, color: 0x33323f });
     b.box({ x: 2098, z: 120, y: 7, w: 12.6, h: 0.7, d: 22.6, color: 0x20e3ff, emissive: true, noCollide: true });
-    bin(b, 2060, 244, 0.2); bin(b, 1830, 244, 0);
+    bin(b, 2020, 232, 0.2); bin(b, 1812, 232, 0);
   }
 
   // --------------------------------------------------------------------- diner
@@ -722,17 +788,26 @@
     // street furniture along the shopfronts
     for (let x = 1580; x < 3860; x += 46) {
       if (r() < 0.35) trolley(b, x, -118 + r() * 6, r() * 3);
-      if (r() < 0.3 && !nearCross(x, 40)) bin(b, x, 57, 0);
+      if (r() < 0.3 && !blocksLane(x, 40)) bin(b, x, 57, 0);
     }
-    for (let x = 1600; x < 3760; x += 118) {
-      if (!nearCross(x, 34)) palm(b, x, -122, 22 + r() * 8, r);
-      if (!nearCross(x + 58, 34)) palm(b, x + 58, 58, 22 + r() * 8, r);
+    // Alternating palms and amber lamps down both sidewalks. Everything solid
+    // sits on the 9-wide walkway, so the parking apron stays clear end to end.
+    let k = 0;
+    for (let x = 1584; x < 3820; x += 59, k++) {
+      const sx = x + 30;
+      if (k % 2) {
+        if (!blocksLane(x, 34)) palm(b, x, -121, 22 + r() * 8, r);
+        if (!blocksLane(sx, 34)) palm(b, sx, 58, 22 + r() * 8, r);
+      } else {
+        if (!blocksLane(x, 34)) streetLamp(b, x, -121, 17, 0);
+        if (!blocksLane(sx, 34)) streetLamp(b, sx, 58, 17, Math.PI);
+      }
     }
-    // parked cars on the aprons, off the racing line
+    // parked cars nose-in against the walkway, leaving the apron drive lane open
     for (let x = 1560; x < 3860; x += 34) {
-      if (nearCross(x, 60)) continue;
+      if (nearCross(x, 60) || blocksLane(x, 46)) continue;
       if (r() < 0.42) parkedCar(b, x, -108, 0, r);
-      if (r() < 0.42) parkedCar(b, x + 12, 44, 0, r);
+      if (r() < 0.42) parkedCar(b, x + 12, 46, 0, r);
     }
   }
 
@@ -744,7 +819,7 @@
     // loading docks along the rear units' north wall
     for (let x = 1840; x < 3840; x += 96) {
       if (x > 2300 && x < 2840) continue;                    // keep the jump run clear
-      if (nearCross(x, 48)) continue;
+      if (nearCross(x, 48) || nearAny(x, CONN_N, 44)) continue;
       b.box({ x, z: -428, y: 0, w: 44, h: 4.4, d: 18, color: 0x3d424c });
       b.box({ x, z: -437.4, y: 4.4, w: 44, h: 0.5, d: 1.4, color: 0xffd23f, emissive: true, noCollide: true });
       b.box({ x, z: -418, y: 8, w: 30, h: 0.7, d: 0.6, color: WARM, emissive: true, noCollide: true });
@@ -769,7 +844,7 @@
     // yard clutter, kept off the landing run
     for (let x = 1840; x < 3840; x += 120) {
       if (x > 2300 && x < 2840) continue;
-      if (nearCross(x, 44)) continue;
+      if (nearCross(x, 44) || nearAny(x, CONN_N, 44)) continue;
       if (r() < 0.6) {
         b.box({ x, z: -530, y: 0, w: 12, h: 12, d: 46, color: 0x2b3038, rot: r() * 0.3 });   // trailer
         b.box({ x, z: -530, y: 12, w: 12.4, h: 0.6, d: 46.4, color: dim(0xff8a1f, 0.7), emissive: true, noCollide: true });
@@ -797,13 +872,17 @@
     }
     b.box({ x: LOT_X1, z: 675, y: 0, w: 4, h: 0.5, d: 230, color: 0x3d424c, noCollide: true });
 
+    // A clear ring lane inside the perimeter: the three entrances feed into it
+    // before you ever meet an island, so you can pick a bay run at speed.
+    const IX0 = LOT_X0 + 90, IX1 = LOT_X1 - 50;
+
     // --- kerbed islands: gaps staggered row to row so they form a slalom ----
     for (let i = 0; i < ISLE_Z.length; i++) {
       const z = ISLE_Z[i], off = (i % 2) ? 118 : 0;
-      if (off) island(b, LOT_X0 + 20, LOT_X0 + 20 + off - 46, z, ISLE_HD);
-      let x = LOT_X0 + 20 + off;
-      while (x < LOT_X1 - 40) {
-        const seg = Math.min(190, LOT_X1 - 20 - x);
+      if (off) island(b, IX0, IX0 + off - 46, z, ISLE_HD);
+      let x = IX0 + off;
+      while (x < IX1) {
+        const seg = Math.min(190, IX1 - x);
         if (seg > 50) island(b, x, x + seg, z, ISLE_HD);
         x += seg + 46;                                        // 46-wide cut-through
       }
@@ -811,22 +890,24 @@
 
     // --- painted bays either side of every island --------------------------
     for (const z of ISLE_Z) {
-      for (let x = LOT_X0 + 16; x < LOT_X1 - 10; x += 12.5) {
-        slab(b, x, z - ISLE_HD - 24, x + 0.9, z - ISLE_HD - 1, 0.12, 0xb8ad84, true);
-        slab(b, x, z + ISLE_HD + 1, x + 0.9, z + ISLE_HD + 24, 0.12, 0xb8ad84, true);
+      for (let x = IX0 - 4; x < IX1; x += 12.5) {
+        slab(b, x, z - ISLE_HD - BAY_D, x + 0.9, z - ISLE_HD - 1, 0.12, 0xb8ad84, true);
+        slab(b, x, z + ISLE_HD + 1, x + 0.9, z + ISLE_HD + BAY_D, 0.12, 0xb8ad84, true);
       }
     }
 
     // --- floodlights: the slalom obstacles ---------------------------------
     for (let i = 0; i < ISLE_Z.length; i++) {
       const z = ISLE_Z[i], off = (i % 2) ? 44 : 0;
-      for (let x = LOT_X0 + 70 + off; x < LOT_X1 - 40; x += 96) {
+      for (let x = IX0 + 40 + off; x < IX1 - 20; x += 96) {
         if (i === 0 && x > RUN_X0 && x < RUN_X1) continue;    // keep the jump lane clear
         lotLight(b, x, z);
         sheen(b, x, z, 60, 74, COOL);
       }
     }
-    for (const x of [LOT_X0 + 30, 2700, 3120, LOT_X1 - 30]) { lotLight(b, x, 772); sheen(b, x, 772, 60, 74, COOL); }
+    // mid-aisle lights in the two widest lanes — the pure slalom
+    for (const x of [LOT_X0 + 60, 2560, 3000, LOT_X1 - 40]) { lotLight(b, x, 770); sheen(b, x, 770, 60, 74, COOL); }
+    for (const x of [2320, 2860, 3220]) { lotLight(b, x, 570); sheen(b, x, 570, 60, 74, COOL); }
 
     // --- JUMP 2: raised ramp down the lot's north aisle --------------------
     // Approach from the west along z=470; the aisle is island-, pole- and
@@ -836,17 +917,20 @@
     slab(b, 2560, 448, 3160, 492, 0.10, dim(ASPHALT, 1.5));
     for (let x = 2580; x < 3150; x += 32) slab(b, x, 468, x + 15, 472, 0.14, dim(0xff8a1f, 0.85), true);
 
-    // --- trolley bays and parked cars, kept out of the racing line ---------
-    for (const [tx, tz] of [[2200, 540], [2660, 610], [3180, 680], [2960, 750], [2340, 750]]) {
+    // --- trolley bays and parked cars ---------------------------------------
+    // Trolley bays sit inside a parking bay, never in an aisle or an entrance.
+    for (const [tx, tz] of [[2280, 536], [2680, 636], [3200, 636], [2980, 736], [2400, 736]]) {
       b.box({ x: tx, z: tz, y: 8, w: 26, h: 0.8, d: 10, color: 0x4a4f5c, noCollide: true });
       post(b, tx - 12, tz, 8, true); post(b, tx + 12, tz, 8, true);
       for (let i = 0; i < 4; i++) trolley(b, tx - 9 + i * 6, tz, 0);
     }
+    // Occupancy rises toward the mall: the northern aisles stay open for the
+    // jump run and the fast line, the southern ones get technical.
     for (let i = 0; i < ISLE_Z.length; i++) {
-      const z = ISLE_Z[i];
+      const z = ISLE_Z[i], density = i * 0.2;
       for (let x = LOT_X0 + 30; x < LOT_X1 - 20; x += 27) {
-        if (i > 0 && r() < 0.30) parkedCar(b, x, z - ISLE_HD - 12, 0, r);   // north bay
-        if (r() < 0.30) parkedCar(b, x, z + ISLE_HD + 12, 0, r);            // south bay
+        if (r() < density) parkedCar(b, x, z + ISLE_HD + 9, 0, r);          // south bay
+        if (i > 0 && r() < density * 0.6) parkedCar(b, x, z - ISLE_HD - 9, 0, r);
       }
     }
 
@@ -889,7 +973,10 @@
   function usedCarLot(b, r) {
     slab(b, 1540, 576, 2070, 956, 0.02, dim(ASPHALT, 1.15));
     slab(b, 1540, 392, 2070, 502, 0.02, CONCRETE);
-    unitRun(b, 1560, 2060, 404, 468, 1, r, { roller: true, signs: 0.2, hMin: 11, hMax: 14 });
+    // split around the x=1780 cross street, which runs south to the access road
+    for (const [x0, x1] of blocks(1560, 2060, CX_GAP)) {
+      unitRun(b, x0, x1, 404, 468, 1, r, { roller: true, signs: 0.2, hMin: 11, hMax: 14 });
+    }
 
     for (let row = 0; row < 4; row++) {
       const z = 612 + row * 78;
@@ -945,7 +1032,19 @@
     // a hint of crash barrier along the very top edge — still driveable
     for (let x = 1560; x < 3880; x += 44) {
       b.box({ x, z: -972, y: 0, w: 26, h: 1.6, d: 1.2, color: 0x4a4f5c, noCollide: true });
+      b.box({ x: x + 12, z: -972, y: 1.6, w: 2, h: 0.5, d: 1.4, color: dim(0xff8a1f, 0.8), emissive: true, noCollide: true });
       if (r() < 0.3) cone(b, x + 12, -940);
+    }
+    // Same treatment on the eastern edge: the boulevard has to visibly END at
+    // the district line rather than running out into unbuilt ground.
+    slab(b, 3860, -800, 3900, 500, 0.02, GRAVEL);
+    for (let z = -780; z < 500; z += 44) {
+      b.box({ x: 3890, z, y: 0, w: 1.2, h: 1.6, d: 26, color: 0x4a4f5c, noCollide: true });
+      b.box({ x: 3890, z: z + 12, y: 1.6, w: 1.4, h: 0.5, d: 2, color: dim(0xff8a1f, 0.8), emissive: true, noCollide: true });
+    }
+    for (const z of [-30, -420, 300]) {
+      b.box({ x: 3886, z, y: 0, w: 5, h: 22, d: 5, color: 0x232732 });
+      signBoard(b, 3886, 22, z, 44, 16, 0xff5a2b, r, -Math.PI / 2);
     }
 
     // west edge dressing — the gap `links` will bridge back to downtown.

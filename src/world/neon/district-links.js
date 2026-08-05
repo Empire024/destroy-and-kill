@@ -36,9 +36,20 @@
   const RAMP_W = 48;
   const SPUR_W = 40;
   const LINK_W = 48;                       // ground connectors / loop / service
-  const X0 = -1450, X1 = 4060;             // ring extents, west/east
-  const Z0 = -1900, Z1 = 4060;             // ring extents, north/south
+  // The west side doglegs. North of the docks it can hug downtown at x=-1450
+  // (the 190-unit slot between downtown's pavement and the hillside boundary);
+  // alongside the docks it has to swing out to x=-1780, because the docks own
+  // everything from x=-1400 eastward between z=1700 and z=3900 and they build
+  // right up to that line. The dogleg also leaves a 350-unit ground corridor
+  // for the west service road, which is what feeds the south half of the ring.
+  const X0N = -1450, X0W = -1780;          // ring west leg: north / docks-side
+  const X1 = 4060;                         // ring east leg
+  const Z0 = -1900, Z1 = 4060;             // ring north / south legs
   const RC = 320;                          // ring corner radius
+  const DOG_Z0 = 1450, DOG_Z1 = 650;       // dogleg extent (travelling north)
+  const SVC_X = -1600;                     // west service road
+  const FRONT_Z = 3950;                    // south frontage road
+  const ELINK_X = 1430;                    // docks/quarry gap link road
 
   // Inner ground loop
   const LOOP = 1350, LOOP_R = 220, LOOP_S = LOOP - LOOP_R;   // straight half-length
@@ -150,10 +161,51 @@
   // ==========================================================================
 
   /**
-   * `road({deck:true})` emits one deck rectangle per segment. Where the polyline
-   * turns, the two rectangles leave a thin wedge open on the outside of the
-   * bend — small, but a hole in the deck is a hole the car falls through. Patch
-   * every bend with a flat deck square.
+   * IMPORTANT — deck rotation convention.
+   *
+   * `DeckSystem._at` transforms a world offset with
+   *     lx =  dx·cos(rot) + dz·sin(rot)
+   *     lz = -dx·sin(rot) + dz·cos(rot)
+   * so a deck's local +Z axis points along `(-sin(rot), cos(rot))`. `road()`
+   * passes `rot = atan2(dx, dz)`, i.e. a HEADING, which points along
+   * `(sin(rot), cos(rot))`. The two only agree when `sin(rot) == 0`; at 45
+   * degrees they are 90 degrees apart, so `road({deck:true})` lays its automatic
+   * deck rectangles ACROSS every diagonal or curved segment instead of along it,
+   * leaving holes and interpolating the slope in the wrong direction.
+   *
+   * Verified in-engine, and it is why the curved on-ramps dropped the car.
+   * neon-core.js is not mine to edit, so everything below passes `rot = -heading`
+   * (which cancels the sign) and lays its own correct deck chain on top of the
+   * one `road()` produces. Extra decks are harmless: `surfaceAt` picks the one
+   * nearest the car's current Y, and the correct surface is always the nearest.
+   */
+  function deckRot(heading) { return -heading; }
+
+  /**
+   * A correct, watertight chain of deck rectangles along a polyline. Each rect
+   * is extended `EXT` units past both ends (along the same grade) so adjacent
+   * rects overlap and no float-exact seam can open a hole.
+   */
+  function deckChain(b, pts, width) {
+    const half = width / 2 + 2.6, EXT = 6;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const dx = c[0] - a[0], dz = c[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.01) continue;
+      const grade = (c[2] - a[2]) / len;
+      b.decks.add({
+        x: (a[0] + c[0]) / 2, z: (a[1] + c[1]) / 2,
+        w: half * 2, d: len + EXT * 2, rot: deckRot(Math.atan2(dx, dz)),
+        y0: a[2] + 0.06 - grade * EXT, y1: c[2] + 0.06 + grade * EXT
+      });
+    }
+  }
+
+  /**
+   * Where the polyline turns, two rectangles still leave a thin wedge open on
+   * the outside of the bend. Bridge every bend with a short deck aligned to the
+   * average heading and following the local grade.
    */
   function deckPatches(b, pts, width) {
     const half = width / 2 + 2.6;
@@ -161,20 +213,24 @@
       const a = pts[i - 1], p = pts[i], c = pts[i + 1];
       const h0 = Math.atan2(p[0] - a[0], p[1] - a[1]);
       const h1 = Math.atan2(c[0] - p[0], c[1] - p[1]);
-      let d = h1 - h0;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      if (Math.abs(d) < 0.02) continue;
+      let turn = h1 - h0;
+      while (turn > Math.PI) turn -= Math.PI * 2;
+      while (turn < -Math.PI) turn += Math.PI * 2;
+      if (Math.abs(turn) < 0.02) continue;
+      const la = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1;
+      const lc = Math.hypot(c[0] - p[0], c[1] - p[1]) || 1;
+      const grade = ((p[2] - a[2]) / la + (c[2] - p[2]) / lc) / 2;
+      const size = Math.min(40, Math.abs(turn) * half * 2.4 + 14);
       b.decks.add({
-        x: p[0], z: p[1], w: half * 2, d: Math.min(34, Math.abs(d) * half * 2.2 + 8),
-        rot: h0 + d / 2, y0: p[2] + 0.06, y1: p[2] + 0.06
+        x: p[0], z: p[1], w: half * 2, d: size, rot: deckRot(h0 + turn / 2),
+        y0: p[2] + 0.06 - grade * size / 2, y1: p[2] + 0.06 + grade * size / 2
       });
     }
   }
 
   /** Flat merge nose where a ramp meets the ring — belt and braces. */
   function junctionPad(b, x, z, y, rot) {
-    b.decks.add({ x, z, w: RING_W + 20, d: 96, rot: rot, y0: y + 0.06, y1: y + 0.06 });
+    b.decks.add({ x, z, w: RING_W + 20, d: 96, rot: deckRot(rot), y0: y + 0.06, y1: y + 0.06 });
   }
 
   /**
@@ -352,11 +408,6 @@
     loopFurniture(b, THREE, loopPath);
 
     b.landmark('THE RIM', X1, 1100);
-    b.landmark('WEST GATE', -1450, -100);
-    b.landmark('DOCK GATE', -1450, 2380);
-    b.landmark('NORTH GATE', 700, -1900);
-    b.landmark('EAST GATE', 4060, 800);
-    b.landmark('SOUTH GATE', -950, 4060);
     b.landmark('INCOMPLETE SPAN', 2212, -2070);
   }
 
@@ -379,19 +430,24 @@
     // retail strip -> quarry
     b.road([[2400, 1000], [2400, 1700]], o);
 
-    // The docks->quarry stub sits in a corridor neither of those districts is
-    // required to reach from the west, so give it a spine of its own: x=1430 is
-    // clear of the docks (max x 1400) and joins the east cross road at z=1350.
-    b.road([[1430, 1350], [1430, 2500]], o);
-    b.road([[1400, 2500], [1430, 2500]], o);
+    // ---- the ring road around the docks ------------------------------------
+    // The docks own x [-1400,1400] z [1700,3900] and build to the line, so this
+    // frames them instead: down their east flank, along the south, back up the
+    // west, joining the inner loop at one end and the east cross road at the
+    // other. It is also what feeds the freeway's dock, south and east gates.
+
+    // east flank — threads the 300-unit gap between the docks and the quarry
+    b.road([[ELINK_X, 1350], [ELINK_X, FRONT_Z]], o);
+    b.road([[1400, 2500], [ELINK_X, 2500]], o);
+    // south frontage — clear of the docks (z<=3900) and of the freeway deck
+    b.road([[ELINK_X, FRONT_Z], [SVC_X, FRONT_Z]], o);
+    // west service road, up the corridor the freeway dogleg opens for it
+    b.road([[SVC_X, FRONT_Z], [SVC_X, 1300]], o);
+    b.road([[SVC_X, 1300], [-1350, 1130]], o);
 
     // East cross road: threads the strip/quarry gap (z 1000..1700) and hands the
     // whole east side of the map a route out to the freeway's east gate.
     b.road([[1150, 1350], [3980, 1350]], o);
-
-    // West service road: runs the corridor between downtown (pavement ends at
-    // x=-1310) and the docks (x=-1400), feeding the west and south gates.
-    b.road([[-1350, 1130], [-1350, 3800]], o);
   }
 
   // -------------------------------------------------------------- inner loop
@@ -433,15 +489,17 @@
   function rimFreeway(b, THREE) {
     const P = Math.PI;
     const pieces = [
-      linePts(X0 + RC, Z0, X1 - RC, Z0, 130),                 // north leg
+      linePts(X0N + RC, Z0, X1 - RC, Z0, 130),                // north leg
       arcPts(X1 - RC, Z0 + RC, RC, -P / 2, 0, 14),            // NE corner
       linePts(X1, Z0 + RC, X1, Z1 - RC, 130),                 // east leg
       arcPts(X1 - RC, Z1 - RC, RC, 0, P / 2, 14),             // SE corner
-      linePts(X1 - RC, Z1, X0 + RC, Z1, 130),                 // south leg
-      arcPts(X0 + RC, Z1 - RC, RC, P / 2, P, 14),             // SW corner
-      linePts(X0, Z1 - RC, X0, -300, 130),                    // west leg (south half)
-      linePts(X0, -300, X0, Z0 + RC, 130),                    // west leg (north half)
-      arcPts(X0 + RC, Z0 + RC, RC, P, P * 1.5, 14)            // NW corner
+      linePts(X1 - RC, Z1, X0W + RC, Z1, 130),                // south leg
+      arcPts(X0W + RC, Z1 - RC, RC, P / 2, P, 14),            // SW corner
+      linePts(X0W, Z1 - RC, X0W, DOG_Z0, 130),                // west leg, docks side
+      bez([X0W, DOG_Z0], [X0W, 1150], [X0N, 950], [X0N, DOG_Z1], 18),  // the dogleg
+      linePts(X0N, DOG_Z1, X0N, -300, 130),                   // west leg, downtown side
+      linePts(X0N, -300, X0N, Z0 + RC, 130),                  // …split so no pillar
+      arcPts(X0N + RC, Z0 + RC, RC, P, P * 1.5, 14)           // NW corner
     ];
 
     const opts = { width: RING_W, color: C_DECK, curbColor: C_CURB, lineColor: C_LINE, deck: true };
@@ -449,6 +507,7 @@
     for (const raw of pieces) {
       const pts = withY(raw, RING_Y, RING_Y);
       b.road(pts, opts);
+      deckChain(b, pts, RING_W);
       deckPatches(b, pts, RING_W);
       pierDetail(b, THREE, pts);
       pushPts(full, pts);
@@ -458,7 +517,7 @@
     // The two streets that pass beneath the west leg. If a pillar ever lands in
     // one, this shouts about it in the console instead of silently blocking the
     // road for whoever plays next.
-    assertPillarsClear(b, pieces, [[X0, -30], [X0, -590]]);
+    assertPillarsClear(b, pieces, [[X0N, -30], [X0N, -590]]);
 
     edgeLine(b, full, 24, C_EDGE);
     edgeLine(b, full, -24, C_EDGE);
@@ -490,22 +549,27 @@
   function interchanges(b, THREE) {
     const P = Math.PI;
     const ramps = [
-      // WEST GATE — off the west service road, merges north onto the west leg
-      { name: 'WEST GATE', rot: P, side: -1, pts: linePts(-1350, 340, X0, -100, 50) },
-      // DOCK GATE — merges south onto the west leg, the docks' way onto the ring
-      { name: 'DOCK GATE', rot: P, side: -1, pts: linePts(-1350, 1940, X0, 2380, 50) },
+      // WEST GATE — off the inner loop's west side, merges north onto the west leg
+      { name: 'WEST GATE', rot: P, side: -1, pts: linePts(-1350, 340, X0N, -100, 50) },
+      // DOCK GATE — off the west service road, merges onto the docks-side west leg
+      { name: 'DOCK GATE', rot: P, side: -1, pts: linePts(SVC_X, 2100, X0W, 2540, 50) },
       // NORTH GATE — off the inner loop's north side, sweeps east onto the north leg
       { name: 'NORTH GATE', rot: P / 2, side: -1, pts: bez([250, -LOOP], [250, -1745], [305, Z0], [700, Z0], 16) },
       // EAST GATE — off the east cross road, sweeps north onto the east leg
       { name: 'EAST GATE', rot: 0, side: -1, pts: bez([3700, 1350], [4000, 1350], [X1, 1150], [X1, 800], 16) },
-      // SOUTH GATE — off the west service road, sweeps east onto the south leg
-      { name: 'SOUTH GATE', rot: -P / 2, side: -1, pts: bez([-1350, 3620], [-1350, 3960], [-1290, Z1], [-950, Z1], 16) }
+      // SOUTH GATE — off the south frontage road, sweeps west onto the south leg
+      { name: 'SOUTH GATE', rot: -P / 2, side: -1, pts: bez([200, 3995], [-20, 3995], [-280, Z1], [-500, Z1], 16) }
     ];
 
     const gaps = [];
     for (const rp of ramps) {
-      const pts = withY(rp.pts, 0, RING_Y);
+      // start the deck flush with whatever the neighbouring district left on the
+      // ground: a deck more than 0.5 below the terrain is discarded outright by
+      // groundHeightAt, which would kill the bottom of the ramp.
+      const gy = b.terrain.heightAt(rp.pts[0][0], rp.pts[0][1]);
+      const pts = withY(rp.pts, gy, RING_Y);
       b.road(pts, { width: RAMP_W, color: C_RAMP, curbColor: C_CURB, lineColor: C_LINE, deck: true });
+      deckChain(b, pts, RAMP_W);
       deckPatches(b, pts, RAMP_W);
       pierDetail(b, THREE, pts);
 
@@ -547,11 +611,11 @@
       bez([2340, -2070], [2490, -2070], [2490, Z0], [2640, Z0], 10),
       1));
     gaps.push.apply(gaps, spur(b, THREE,
-      // south leg, peels to the inside
-      bez([1500, Z1], [1350, Z1], [1350, 3960], [1200, 3960], 10),
-      [1200, 3960], [1050, 3960], [960, 3960],
-      [915, 3960], [810, 3960],
-      bez([810, 3960], [705, 3960], [705, Z1], [600, Z1], 10),
+      // north leg again, this time peeling to the inside
+      bez([-900, Z0], [-750, Z0], [-750, -1700], [-600, -1700], 10),
+      [-600, -1700], [-400, -1700], [-310, -1700],
+      [-265, -1700], [-160, -1700],
+      bez([-160, -1700], [-10, -1700], [-10, Z0], [100, Z0], 10),
       -1));
     return gaps;
   }
@@ -565,6 +629,7 @@
     pushPts(a, withY(linePts(runA[0], runA[1], runB[0], runB[1], 50), RING_Y, RING_Y));
     pushPts(a, withY(linePts(runB[0], runB[1], lip[0], lip[1], 45), RING_Y, RING_Y + 8));
     b.road(a, o);
+    deckChain(b, a, SPUR_W);
     deckPatches(b, a, SPUR_W);
     pierDetail(b, THREE, a);
 
@@ -573,6 +638,7 @@
     pushPts(c, withY(linePts(land[0], land[1], landB[0], landB[1], 52), RING_Y + 1, RING_Y));
     pushPts(c, withY(outCurve, RING_Y, RING_Y));
     b.road(c, o);
+    deckChain(b, c, SPUR_W);
     deckPatches(b, c, SPUR_W);
     pierDetail(b, THREE, c);
 
@@ -614,21 +680,18 @@
 
     // overhead gantries naming what each stretch is heading for
     const signs = [
-      [X0, 620, 'HILLSIDE', 0x20e3ff],
-      [X0, -900, 'NEON DOWNTOWN', 0xff2d9b],
-      [X0, 1550, 'FREIGHT DOCKS', 0x3bff8b],
-      [X0, 3050, 'FREIGHT DOCKS', 0x3bff8b],
-      [-200, Z0, 'NEON DOWNTOWN', 0xff2d9b],
-      [2400, Z0, 'RETAIL STRIP', 0xffd23f],
-      [X1, -400, 'RETAIL STRIP', 0xffd23f],
-      [X1, 1900, 'QUARRY', 0x9b5cff],
-      [2900, Z1, 'QUARRY', 0x9b5cff],
-      [200, Z1, 'FREIGHT DOCKS', 0x3bff8b]
+      [X0N, 380, 'HILLSIDE', 0x20e3ff, 0],
+      [X0N, -900, 'NEON DOWNTOWN', 0xff2d9b, 0],
+      [X0W, 1900, 'FREIGHT DOCKS', 0x3bff8b, 0],
+      [X0W, 3100, 'FREIGHT DOCKS', 0x3bff8b, 0],
+      [1200, Z0, 'NEON DOWNTOWN', 0xff2d9b, Math.PI / 2],
+      [3100, Z0, 'RETAIL STRIP', 0xffd23f, Math.PI / 2],
+      [X1, -400, 'RETAIL STRIP', 0xffd23f, 0],
+      [X1, 1900, 'QUARRY', 0x9b5cff, 0],
+      [2900, Z1, 'QUARRY', 0x9b5cff, Math.PI / 2],
+      [900, Z1, 'FREIGHT DOCKS', 0x3bff8b, Math.PI / 2]
     ];
-    for (const s of signs) {
-      const rot = (s[0] === X0 || s[0] === X1) ? 0 : Math.PI / 2;
-      gantry(b, THREE, s[0], s[1], rot, s[2], s[3]);
-    }
+    for (const s of signs) gantry(b, THREE, s[0], s[1], s[4], s[2], s[3]);
   }
 
   function loopFurniture(b, THREE, loopPath) {
@@ -637,7 +700,8 @@
       const side = (n++ % 2) ? 1 : -1;
       streetLamp(b, THREE, x + Math.cos(rot) * 30 * side, z - Math.sin(rot) * 30 * side, rot);
     });
-    for (const seg of [[[-1350, 1130], [-1350, 3800]], [[1150, 1350], [3980, 1350]]]) {
+    for (const seg of [[[SVC_X, 1300], [SVC_X, FRONT_Z]], [[SVC_X, FRONT_Z], [ELINK_X, FRONT_Z]],
+                       [[ELINK_X, FRONT_Z], [ELINK_X, 1350]], [[1150, 1350], [3980, 1350]]]) {
       let m = 0;
       placeAlong([seg[0], seg[1]], 210, 90, (x, z, rot) => {
         const side = (m++ % 2) ? 1 : -1;
