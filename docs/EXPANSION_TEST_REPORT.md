@@ -20,25 +20,27 @@ evidence are filled in per row in the matrix; this file summarises.
 failures, both maps run, and every save, progression, race, navigation, damage
 and input contract that was exercised behaves as documented.
 
-Three rows fail. All three are **cosmetic or hygiene**, not gameplay: two are
-stale player-visible strings naming removed features, and one is a slow geometry
-leak that only shows across repeated map switches. None stops a player finishing
-a race, buying a car, or keeping their progress.
+Three rows failed on the gate run. All three were **cosmetic or hygiene**, not
+gameplay. **Five findings (F1–F5) have since been fixed and re-verified** — see
+the fix round below. The one remaining failure is F6, a slow geometry leak that
+only shows across repeated map switches and does not affect a normal session.
 
-Recommendation: **ship**, fixing F1 and F4 first — they are one-line copy
-changes, and they are the kind of thing the first player to press `H` will see.
+Recommendation: **ship.** F6 should be picked up by the render/world owners in
+the next cycle rather than held for.
 
 ## Totals
 
-| Status | Rows | |
-|---|---:|---|
-| `pass` | 110 | verified with evidence |
-| `partial` | 5 | core verified, one half unverifiable headlessly |
-| `fail` | 3 | findings F1/F2, F4, F6 |
-| `blocked` | 1 | sand A/B — could not locate a beach cell |
-| `n/a` | 2 | removed by design |
-| `untested` | 22 | not run this cycle (see Coverage gaps) |
-| **Total** | **143** | |
+Gate run, then after the fix round:
+
+| Status | Gate run | After fixes | |
+|---|---:|---:|---|
+| `pass` | 110 | **112** | verified with evidence |
+| `partial` | 5 | 6 | core verified, one half unverifiable headlessly |
+| `fail` | 3 | **1** | F6 only (geometry leak on map switch) |
+| `blocked` | 1 | 1 | sand A/B — could not locate a beach cell |
+| `n/a` | 2 | 2 | removed by design |
+| `untested` | 22 | 21 | not run this cycle (see Coverage gaps) |
+| **Total** | **143** | **143** | |
 
 Per section: Preflight 4/6 · Progression 12/13 · Body shops 5/8 · Navigation 9/9
 · Races, zones & coins 12/14 · Traffic & police 7/9 · Environment 7/11 · Camera
@@ -46,6 +48,28 @@ Per section: Preflight 4/6 · Progression 12/13 · Body shops 5/8 · Navigation 
 migration 12/14 · Legacy excision 6/7.
 
 ---
+
+## Fix round — all five actionable findings closed and re-verified
+
+After the gate run, F3/F4/F5 were fixed by the lead (`35a5b7e`) and F1/F2 by the
+help owner. **Every fix was re-verified against the running build, including
+edge cases**, and the full static gate re-run:
+
+| Finding | Fix | Re-verification |
+|---|---|---|
+| F3 death fee inert | Debits `progression.wallet`, capped at balance | Rich player **2000 → 1500**, charged exactly 500, toast `🏥 Patched up (-$500)`. Player with 120 charged **only 120 → 0**, never negative, toast `(-$120)`. Broke player charged nothing and gets **no fee line** at all |
+| F4 hospital copy | Reworded | No toast mentions a hospital: `🏥 Patched up (-$500)` / `(-$120)` / `🏥 Patched up` |
+| F5 dead save quartet | Removed; `game:saved` retired from the contract | `window.saveGame` and `window.loadGame` both `undefined`; architecture doc's event list corrected |
+| F1 help panel stale copy | `Enter` reworded to "join a race, enter a body shop" | No entry matches `/mission\|safehouse\|hospital/` anywhere in the panel |
+| F2 help panel missing radio | RADIO section seeded as a fallback that radio can replace in place | Section renders; `J`/`K` verified live (off → `neonwave` → off) |
+
+Post-fix regression check: **16/16 systems live, 0 failures**, car drives 176
+units to 164 mph, save round-trips, a race still starts and reaches countdown.
+`node scripts/expansion-checks.mjs` and `node scripts/quality-gate.mjs` both
+still pass.
+
+Findings F6–F10 remain open by choice: F6 (geometry leak) needs the render/world
+owners, and F7–F10 are low-severity or observations.
 
 ## Findings
 
@@ -220,6 +244,26 @@ Boot costs: world 240 ms, 16 systems 139 ms, road graph 30.6 ms (1783 nodes /
 2762 edges, 100% connected), shore field 34 ms, coast 28 ms, destructibles 80 ms
 (1118 props). World totals: 4402 colliders, 7063 props, 2423 breakables, 8
 districts.
+
+## Release packaging gate
+
+Run after the functional pass, on the same commit:
+
+| Check | Result |
+|---|---|
+| `node scripts/expansion-checks.mjs` | **all checks passed** — syntax on every module, 16 system ids, all 7 data files declare their globals, audio manifest (0 tracks) |
+| `node scripts/quality-gate.mjs` | **PASS**, 6 checks, 0 warnings (syntax · wiring · worlds · licensing · offline · smoke) |
+| v31 preservation | Pristine build recoverable at tag **`v31-pristine`** (commit `cde55e5`), extracted clean at **273,443 bytes / 2785 lines**. The root file of that name is a 265-byte redirect stub by design |
+| README / CHANGELOG accuracy | Spot-checked against this run's evidence — control table, unlock rules, v31 tag note and the "no internet needed" claim all match what was measured |
+
+Two notes on the preserved v31: it is **not offline-runnable** — it pulls Three
+r128 from `cdnjs.cloudflare.com`, unlike the shipping build which vendors Three
+locally. And it was not launched in a browser this cycle, so "preserved and
+recoverable" is proven; "still runs" is not.
+
+The README's control table is the counter-example that confirms F1: it correctly
+documents `Enter` as "interact — join races, enter body shops", which is exactly
+what the in-game help panel gets wrong.
 
 ## Coverage gaps — what this run does not tell you
 

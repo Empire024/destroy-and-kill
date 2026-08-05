@@ -52,17 +52,23 @@
       ['R', 'Reset car — unstick, repair, clear 2 wanted stars']
     ]],
     ['ON FOOT & WORLD', [
-      ['E', 'Enter nearest car / get out'],
-      ['Enter', 'Interact — start a mission, save at a safehouse']
+      ['E', 'Enter nearest car / get out — also bails out of a burning car'],
+      ['Enter', 'Interact — join a race, enter a body shop']
     ]],
     ['VIEW & MAP', [
       ['C', 'Camera: chase / bonnet / side / far'],
-      ['M  or  Tab', 'Full map'],
+      ['M  or  Tab', 'Full map — click to set a waypoint'],
       ['H', 'This panel']
+    ]],
+    /* Radio owns J/K. This is a fallback so the panel is never silent about
+     * them; if radio calls addControls('RADIO', …) its version replaces this
+     * one in place, which is exactly what duplicate-title replacement is for. */
+    ['RADIO', [
+      ['J  /  K', 'Previous / next station']
     ]],
     ['SYSTEM', [
       ['N', 'Mute / unmute'],
-      ['Esc', 'Menu — map and vehicle select'],
+      ['Esc', 'Close a panel, or open the menu'],
       ['F2', 'Steering wheel & pedals setup']
     ]]
   ];

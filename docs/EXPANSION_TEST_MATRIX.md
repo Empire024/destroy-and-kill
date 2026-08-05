@@ -286,7 +286,7 @@ Draw calls, triangles and counts — **not** frame rate.
 | Escape closes help, not the game | `tap('h')`, `tap('escape')`, `tap('escape')` | First closes the panel only; second opens the menu | pass | panel true→false with `selectionOpen` still false; second Escape opened the menu |
 | Help grows with systems | `addControls('QA',…)` twice | Appears once, replaced in place | pass | 7 sections both times, exactly 1 `QA` section, entries 1→2 |
 | Help hides touch buttons | Open the panel on a touch build | `#mobileControls` hidden, restored on close | pass | `block` → `none` → `block` |
-| Help lists real bindings | Read every row against the engine | Every key does what it says | **fail** | Lists `Enter — Interact — start a mission, save at a safehouse`; missions and safehouses are removed. No radio controls listed although `J`/`K` change station (verified `K` tuned `neonwave`). Findings F1, F2 |
+| Help lists real bindings | Read every row against the engine | Every key does what it says | pass (after fix) | Failed the gate run — listed `Enter — start a mission, save at a safehouse` (both removed) and no radio keys. Fixed and re-verified: nothing in the panel matches `/mission\|safehouse\|hospital/`, a RADIO section lists `J / K` and both keys were driven live (off → `neonwave` → off). Findings F1, F2 |
 | Wheel setup opens | `tap('F2')`, then `Escape` | Opens, Escape closes it | pass | `wheelPanel.open` true, then false |
 | Wheel calibration untouched | Compare `destroy_kill_wheel_v1` across a full session incl. reset | Byte-identical | pass | Unchanged on the 127.0.0.1 origin throughout, including across `GAME_DEBUG_SAVE.reset()` |
 | A greedy system cannot steal driving | Register `{onKey:()=>true}`, then drive | Car still accelerates | pass | Moved 27.1 units — identical to the clean run. It **does** eat every non-drive key, so unregister or reload straight after |
@@ -330,7 +330,7 @@ Snapshot and restore localStorage around this whole section.
 | Death → respawn at world spawn | Die away from spawn | Lands at the active world's spawn | pass | Died at (1200, 1200), respawned at (−30, 470) = world spawn exactly, distance 0. `hospitals[]` is an empty registry so the fallback is used |
 | No legacy symbols leak | Console + globals | Nothing legacy-shaped | pass | `window.legacyWorld` undefined; no legacy references in console across the session |
 | v1 save still migrates | Section 11 | Migration intact | pass | Covered above — v1 migration works with the legacy map gone |
-| Removed content not referenced in UI | Read all player-visible strings | No mentions of removed features | **fail** | Help panel: "start a mission, save at a safehouse". Respawn toast: "🏥 Patched up at the hospital (-$500)". Findings F1, F4 |
+| Removed content not referenced in UI | Read all player-visible strings | No mentions of removed features | pass (after fix) | Failed the gate run on two strings — the help panel's mission/safehouse line and the respawn toast `🏥 Patched up at the hospital (-$500)`. Both reworded and re-verified: respawn now reads `🏥 Patched up (-$500)` / `(-$120)` / `🏥 Patched up`, and no help entry references removed content. Findings F1, F4 |
 
 ---
 
