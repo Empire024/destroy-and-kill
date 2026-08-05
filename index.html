@@ -1590,7 +1590,11 @@ function explodePlayerCar(){
   addToast('💥 Your ride blew up! Find a new one.','#ff3b3b'); }
 
 // ---------- Audio ----------
-let audioCtx=null,engineOsc=null,engineOsc2=null,engineHarmonicGain=null,engineFilter=null,engineGain=null,turboOsc=null,turboGain=null,turboAir=null,turboAirFilter=null,turboAirGain=null,heatAir=null,heatAirFilter=null,heatAirGain=null,squealNoise=null,squealFilter=null,squealGain=null,muted=false;
+let audioCtx=null,engineOsc=null,engineOsc2=null,engineHarmonicGain=null,engineFilter=null,engineGain=null,turboOsc=null,turboGain=null,turboAir=null,turboAirFilter=null,turboAirGain=null,heatAir=null,heatAirFilter=null,heatAirGain=null,squealNoise=null,squealFilter=null,squealGain=null,
+  // ?mute=1 (or ?mute) starts the game silent. Automated playtests drive the
+  // page for long stretches and the engine loop is genuinely unpleasant to sit
+  // next to; this also gives players a quiet-launch option.
+  muted=/[?&]mute/.test(location.search);
 let driveGear=1, fakeRpm=900, shiftKick=0, pendingGear=0, gearDragTimer=0, gearElapsed=0, turboWasOn=false, nitroWasOn=false, turboSpool=0, turboPsi=0, limiterActive=false, limiterPhase=0, limiterSoundTimer=0;
 let driveMode='D', manualModeTimer=0, manualModeHardTimer=0, shiftHoldTimer=0, shiftPromptTimer=0, shiftNeeded=false, overRevTimer=0, limiterAbuseTimer=0, autoDownshiftTimer=0, autoShiftLock=0, engineBlown=false,reverseHoldTimer=0,brakeReverseTimer=0,reverseEngaged=false;
 let playerHearts=3, copRamCooldown=0, heartFlashTimer=0;

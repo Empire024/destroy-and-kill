@@ -76,7 +76,7 @@
    * it. Everything derived from the data (extent, raster, roads, colliders,
    * spawn, minimap) follows from this automatically.
    */
-  const SCALE = 2.5;
+  const SCALE = 3.0;
   const RASTER = 1.5 * SCALE;  // collision raster cell — scales with the world,
                                // so cell COUNT and erosion cost stay constant
   // Building colliders are pulled back this many raster cells so the historic
@@ -562,7 +562,11 @@
       // Patchwork rather than one slab: the west of the extract is the Vltava,
       // which OSM gives us no polygon for, so it renders as a large open flat.
       // Per-tile shading keeps that from reading as a void.
-      const step = 24;
+      // Scales with the world: the ground is dead flat, so tessellating it finer
+      // just because the map got bigger buys nothing but triangles. Keeping the
+      // quad COUNT constant is what matters (at 3x an unscaled step cost ~180k
+      // extra triangles for no visible difference).
+      const step = 24 * SCALE;
       for (let x = BOUNDS.minX; x < BOUNDS.maxX; x += step) {
         const x1 = Math.min(x + step, BOUNDS.maxX);
         for (let z = BOUNDS.minZ; z < BOUNDS.maxZ; z += step) {
@@ -1060,12 +1064,15 @@
     const room = Math.min(
       raster.probe(spawn.x, spawn.z, nx, nz, 14),
       raster.probe(spawn.x, spawn.z, -nx, -nz, 14));
-    const span = Math.max(8, Math.min(18, room * 1.7));
+    // Bounds scale with the world, or the sign stays a fixed size while the
+    // street around it grows and it stops reading as street furniture.
+    const span = Math.max(8 * SCALE, Math.min(18 * SCALE, room * 1.7));
     const panelH = span * (168 / 1024);          // keep the canvas aspect exactly
 
-    // 26 m ahead of the spawn, so it is the first thing in shot
+    // 26 m ahead of the spawn, so it is the first thing in shot (scaled, or at
+    // 3x it sits ~9 real metres away and fills the screen)
     const fx = Math.sin(spawn.heading), fz = Math.cos(spawn.heading);
-    const px = spawn.x + fx * 26, pz = spawn.z + fz * 26;
+    const px = spawn.x + fx * 26 * SCALE, pz = spawn.z + fz * 26 * SCALE;
 
     const panel = new THREE.Mesh(
       new THREE.PlaneGeometry(span, panelH),
