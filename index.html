@@ -4708,7 +4708,24 @@ const ATMOS={r:1,g:1,b:1,fogMul:1,_raw:null,_rawFog:null,_rawDensity:null,
 // --- dispatchers the engine calls -------------------------------------------
 function WORLD_groundHeightAt(x,z,curY){ return activeWorld.groundHeightAt(x,z,curY); }
 function WORLD_surfacePitchAt(x,z,h){ return activeWorld.surfacePitchAt(x,z,h); }
-function WORLD_obstaclesNear(x,z){ return activeWorld.obstaclesNear(x,z); }
+// Extra collider sources join the world's own here: the coast's sea walls and
+// fences (GameSea) and the destructibles system's props (which stop reporting a
+// prop the moment it breaks — collision and visuals must always agree). The
+// worlds return shared scratch arrays, so never push into their result: merge
+// into our own scratch only when an extra source actually has something.
+const _obsMerge=[];
+function WORLD_obstaclesNear(x,z){
+  const base=activeWorld.obstaclesNear(x,z);
+  const coast=(window.GameSea&&GameSea.coastObstaclesNear)?GameSea.coastObstaclesNear(activeWorld,x,z):null;
+  const dsys=window.GameSystems?GameSystems.api('destructibles'):null;
+  const props=(dsys&&dsys.obstaclesNear)?dsys.obstaclesNear(x,z):null;
+  if((!coast||!coast.length)&&(!props||!props.length)) return base;
+  _obsMerge.length=0;
+  for(let i=0;i<base.length;i++)_obsMerge.push(base[i]);
+  if(coast)for(let i=0;i<coast.length;i++)_obsMerge.push(coast[i]);
+  if(props)for(let i=0;i<props.length;i++)_obsMerge.push(props[i]);
+  return _obsMerge;
+}
 function WORLD_rampsNear(x,z){ return activeWorld.rampsNear(x,z); }
 function WORLD_nearestRoad(x,z){ return activeWorld.nearestRoad?activeWorld.nearestRoad(x,z):null; }
 // Bounds cannot answer "am I in the sea": NEON's land stops at x 4089.8 of a
@@ -5013,7 +5030,7 @@ if(window.GameSystems){
       activate:activateWorld
     },
 
-    actors:{traffic,peds,cops,makeCar,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,killCivilian,
+    actors:{traffic,peds,cops,makeCar,makeCharacter,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,killCivilian,
             removeTrafficObject,removePedObject,
             get densityScale(){return densityScale;},set densityScale(v){densityScale=clamp(+v||1,.2,3);}},
 
