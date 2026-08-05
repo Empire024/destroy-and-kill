@@ -50,15 +50,28 @@
   if (!window.GameSystems) { console.error('[destructibles] GameSystems missing'); return; }
 
   // ---------------------------------------------------------------- tuning
-  const SPACING_MIN = 95;      // metres of road between props (raised to hit MAX)
-  const MAX_PROPS = 380;       // instances across all types
+  // Density is a PER-LENGTH target, not a flat count: a flat cap that furnishes
+  // NEON leaves Prague (3x the centreline) one prop per 1.3 km, which reads as
+  // an empty city. `TARGET_SPACING` is units of road centreline per prop.
+  const TARGET_SPACING = { neon: 140, prague: 300, _default: 200 };
+  const SLOT_STRIDE = 55;      // candidate stride in pass 1; must be finer than
+                               // the target, because ~40% of slots are rejected
+  const MAX_PROPS = 1800;      // hard ceiling above every per-length target
+  const MIN_SEPARATION = 12;   // no two props closer than this — at a junction
+                               // several segments converge and the arc-length
+                               // stride alone cannot keep them apart
   const ROAD_OFFSET = 7.5;     // outside the kerb from the road edge
   const DECK_TOL = 2.5;        // ground must be this close to the road's own y
   const HASH_CELL = 60;
   const FALLEN_CAP = 24;       // live fallen props before the oldest is retired
   const RESPAWN_SEC = 90;
   const RESPAWN_DIST = 250;    // ...and only this far from the player
-  const DEBRIS_MAX = 96;
+  // 128, not 96: at ~1 prop per 140 units a race through a barrier run or one
+  // explosion's breakAt now breaks several props inside a second, and the 96
+  // pool saturated (measured: 96/96 on a 45-prop burst at the OLD density). It
+  // recycles its oldest rather than overflowing, so saturation only ever costs
+  // a truncated puff — but the headroom is one allocation.
+  const DEBRIS_MAX = 128;
   const TRAFFIC_PER_FRAME = 12;// round-robin, so traffic hits cost O(1) a frame
   const SCORE_PER_PROP = 25;
 
@@ -143,12 +156,42 @@
     }
   };
   const TYPE_KEYS = Object.keys(TYPES);
-  // Weighted mix. Signal poles are rare on purpose: the districts author their
-  // own junction signals, and these are roadside spares, not a second network.
-  const MIX = [
+  /* Weighted mixes, chosen per slot from what the road and the ground under it
+   * are. Signal poles stay rare everywhere on purpose: the districts author
+   * their own junction signals, and these are roadside spares, not a second
+   * network.
+   *   ARTERIAL — a wide carriageway. Lit and coned, barely planted.
+   *   GREEN    — off the datum: the hill switchbacks above it and the quarry
+   *              haul-road approaches below it. Planted, barely lit.
+   *   STREET   — everything else, the original mix. */
+  const MIX_STREET = [
     ['lampPost', 0.38], ['smallTree', 0.22], ['bigTree', 0.13],
     ['lightBarrier', 0.13], ['concreteBarrier', 0.08], ['trafficLightPole', 0.06]
   ];
+  const MIX_ARTERIAL = [
+    ['lampPost', 0.44], ['lightBarrier', 0.22], ['concreteBarrier', 0.12],
+    ['smallTree', 0.11], ['trafficLightPole', 0.07], ['bigTree', 0.04]
+  ];
+  const MIX_GREEN = [
+    ['smallTree', 0.38], ['bigTree', 0.29], ['lampPost', 0.17],
+    ['lightBarrier', 0.08], ['concreteBarrier', 0.06], ['trafficLightPole', 0.02]
+  ];
+  // Measured on NEON's 1585 segments: 44 wide x727, 48 x390, 52 x227, then a
+  // tail of 30-42 and a single 92. There is no 56+ class, so a threshold picked
+  // from intuition rather than the data (56) selected literally nothing and the
+  // arterial mix never fired. 48 takes the top ~39% of segments.
+  const ARTERIAL_WIDTH = 48;
+  /**
+   * Which mix a slot draws from. The quarry's own floor (below -45) is excluded
+   * from GREEN deliberately — the approaches are planted, a tree standing on the
+   * pit floor 70 below sea level is not a thing.
+   */
+  function mixFor(width, gy) {
+    if (gy > 18 || (gy < -6 && gy > -45)) return MIX_GREEN;
+    if (width >= ARTERIAL_WIDTH) return MIX_ARTERIAL;
+    return MIX_STREET;
+  }
+  function mixName(m) { return m === MIX_GREEN ? 'green' : m === MIX_ARTERIAL ? 'arterial' : 'street'; }
 
   // ------------------------------------------------------------------ utils
   function mulberry32(seed) {
@@ -321,6 +364,8 @@
 
     let total = 0;
     for (let i = 0; i < segs.length; i++) total += segs[i].len;
+    const perProp = TARGET_SPACING[world.id] || TARGET_SPACING._default;
+    const target = Math.min(MAX_PROPS, Math.round(total / perProp));
 
     const sea = window.GameSea;
     const coastApi = window.GameSystems.api('coast');
@@ -328,15 +373,15 @@
     // PASS 1 — every usable roadside slot at a tight stride. Roughly half of
     // them get thrown away (a shoulder that is really a 30-unit drop off a deck
     // edge, water, beach, or ground already occupied), and that rejection rate
-    // varies per map, so placing straight to MAX_PROPS at total/MAX spacing
+    // varies per map, so placing straight to `target` at total/target spacing
     // gave 192 props on NEON instead of the 380 asked for. Collect first.
     const slots = [];
-    let acc = SPACING_MIN * 0.5, side = 1;
+    let acc = SLOT_STRIDE * 0.5, side = 1;
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i];
       const nx = s.uz, nz = -s.ux;                    // left normal of the segment
       let d = acc;
-      for (; d < s.len; d += SPACING_MIN) {
+      for (; d < s.len; d += SLOT_STRIDE) {
         const t = d / s.len;
         const rx = s.ax + s.dx * t, rz = s.az + s.dz * t, ry = s.ay + (s.by - s.ay) * t;
         const off = s.width * 0.5 + ROAD_OFFSET + rnd() * 3.5;
@@ -361,20 +406,44 @@
         if (sea && sea.isWaterAt && sea.isWaterAt(world, px, pz, 0)) continue;
         if (coastApi && coastApi.isBeachAt && coastApi.isBeachAt(px, pz)) continue;
         if (blockedHere(world, px, pz, gy)) continue;
-        slots.push({ x: px, y: gy, z: pz, heading: s.heading });
+        slots.push({ x: px, y: gy, z: pz, heading: s.heading, width: s.width });
       }
       acc = d - s.len;                                // carry the stride across the joint
       if (!(acc >= 0)) acc = 0;
     }
 
     // PASS 2 — thin the slots evenly across the WHOLE map rather than taking
-    // the first MAX_PROPS, which would put every prop in whichever district
+    // the first `target`, which would put every prop in whichever district
     // happened to register its roads first.
     const props = [], byType = {};
     for (const k of TYPE_KEYS) byType[k] = [];
-    const stride = slots.length > MAX_PROPS ? slots.length / MAX_PROPS : 1;
-    for (let f = 0; f < slots.length && props.length < MAX_PROPS; f += stride) {
+    // Junction guard. The stride is measured along each segment's own arc, so
+    // where five segments meet, five slots can land within a few units of each
+    // other and props interpenetrate. A 30-unit occupancy grid rejects those.
+    const near = new Map();
+    const nkey = (x, z) => Math.floor(x / 30) * 8192 + Math.floor(z / 30);
+    function tooClose(x, z) {
+      const cx = Math.floor(x / 30), cz = Math.floor(z / 30);
+      for (let ix = cx - 1; ix <= cx + 1; ix++) for (let iz = cz - 1; iz <= cz + 1; iz++) {
+        const a = near.get(ix * 8192 + iz); if (!a) continue;
+        for (let i = 0; i < a.length; i += 2) {
+          const dx = a[i] - x, dz = a[i + 1] - z;
+          if (dx * dx + dz * dz < MIN_SEPARATION * MIN_SEPARATION) return true;
+        }
+      }
+      return false;
+    }
+    const stride = slots.length > target ? slots.length / target : 1;
+    let crowded = 0;
+    const mixCount = { street: 0, arterial: 0, green: 0 };
+    for (let f = 0; f < slots.length && props.length < target; f += stride) {
       const sl = slots[Math.floor(f)];
+      if (tooClose(sl.x, sl.z)) { crowded++; continue; }
+      const k0 = nkey(sl.x, sl.z);
+      let bucket = near.get(k0); if (!bucket) near.set(k0, bucket = []);
+      bucket.push(sl.x, sl.z);
+      const MIX = mixFor(sl.width, sl.y);
+      mixCount[mixName(MIX)]++;
       let r = rnd(), kind = MIX[MIX.length - 1][0];
       for (let m = 0; m < MIX.length; m++) { r -= MIX[m][1]; if (r <= 0) { kind = MIX[m][0]; break; } }
       const T = TYPES[kind];
@@ -424,9 +493,11 @@
       id: world.id, group: group, props: props, hash: hash, batches: batches,
       fallen: [], rnd: rnd,
       stats: {
-        props: props.length, slots: slots.length, spacing: Math.round(spacing), roadLen: Math.round(total),
+        props: props.length, target: target, slots: slots.length, crowded: crowded,
+        spacing: Math.round(spacing), targetSpacing: perProp, roadLen: Math.round(total),
         drawCalls: Object.keys(batches).length + 1, ms: Math.round(performance.now() - t0),
-        byType: TYPE_KEYS.map(k => k + ':' + byType[k].length).join(' ')
+        byType: TYPE_KEYS.map(k => k + ':' + byType[k].length).join(' '),
+        byMix: mixCount
       }
     };
     console.log('[destructibles] "' + world.id + '": ' + props.length + ' props (' +

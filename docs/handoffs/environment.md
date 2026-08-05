@@ -59,8 +59,23 @@ no bounds, so it has no shore field at all and keeps its own `isOceanAt` coast.
 
 ### Destructibles (`src/game/destructibles.js`)
 
-`GameSystems.register({id:'destructibles', order:60, …})`. 380 props placed along
-the active world's own `roadsRef.segs`, one `InstancedMesh` per type.
+`GameSystems.register({id:'destructibles', order:60, …})`. Props placed along the
+active world's own `roadsRef.segs`, one `InstancedMesh` per type.
+
+Density is a **per-length target**, not a flat count — `TARGET_SPACING` is units
+of centreline per prop (`neon: 140`, `prague: 300`, default 200), with
+`MAX_PROPS: 1800` as a hard ceiling above every target. A flat cap that furnishes
+NEON leaves Prague, at 3× the centreline, one prop per 1.3 km. Delivered: **1118
+on NEON** (target 1122, achieved spacing 141) and **1660 on Prague** (target 1665,
+spacing 301).
+
+The type mix is chosen per slot from what the road and the ground under it are:
+**arterial** (carriageway ≥ 48 wide — lit and coned, barely planted), **green**
+(off the datum: the hill switchbacks above and the quarry haul-road approaches
+below — planted, barely lit), and **street** (everything else, the original mix).
+On NEON that splits 748 street / 260 arterial / 110 green. Prague comes out all
+street, correctly: its `groundHeightAt` is flat 0 everywhere so green cannot fire,
+and a medieval street network has no 48-wide carriageways.
 
 | type | breaks at | behaviour | mass | respawn |
 |---|---|---|---|---|
@@ -163,7 +178,18 @@ radius) + 3 (front sample offset) clear of it. Measured with the default pad: an
 80 mph head-on into the **end** of a barrier stopped 8.7 units off centre and the
 crack never fired.
 
-**`MAX_PROPS` 380.** Within the 200–400 asked for. See limits below.
+**`ARTERIAL_WIDTH` 48.** Picked from the data, not intuition: NEON's 1585
+segments are 44 wide ×727, 48 ×390, 52 ×227, then a tail of 30–42 and a single
+92. My first guess of 56 selected **literally nothing** and the arterial mix never
+fired — the run before this fix came out 748 street / 0 arterial / 0 green-ish.
+48 takes the top ~39% of segments.
+
+**`SLOT_STRIDE` 55 with `MIN_SEPARATION` 12.** The candidate stride has to be
+finer than the target spacing because ~35% of slots are rejected; 55 yields 1720
+usable slots on NEON for a 1122 target. The separation guard exists because the
+stride is measured along each segment's *own* arc, so where several segments meet
+at a junction their slots can land on top of each other — it rejected 5 on NEON
+and 6 on Prague, and the closest surviving pair is 12.3 apart.
 
 ---
 
@@ -176,30 +202,44 @@ crack never fired.
 ```
 coast   1532 beach cells (3064 tris), 1015 furniture modules in 20 chains
         with 50 access gaps, 1423 colliders, 4 draw calls, 25 ms
-props   380 props from 994 usable slots over 157 km of centreline,
-        7 draw calls, 12 ms
-        lampPost 133  smallTree 79  lightBarrier 58
-        trafficLightPole 26  bigTree 55  concreteBarrier 29
+props   NEON    1118 props (target 1122) from 1720 usable slots over
+                157 km of centreline, spacing 141, 7 draw calls, 17 ms
+                lampPost 406  smallTree 233  lightBarrier 180
+                trafficLightPole 74  bigTree 131  concreteBarrier 94
+                mix classes: street 748  arterial 260  green 110
+        Prague  1660 props (target 1665) from 6461 slots over 499 km,
+                spacing 301, 7 draw calls, 47 ms
+        legacy  none — no roadsRef to place against
 ```
 
 **Draw calls / triangles** (`GAME_DEBUG.render`, groups toggled at one viewpoint):
 
 ```
-base                 145 calls   327 035 tris
-+ coast              149 calls   375 483 tris    (+4,  +48 448)
-+ props and debris   156 calls   392 847 tris    (+7,  +17 364)
+base                 631 calls   334 595 tris
++ coast              635 calls   383 043 tris    (+4,  +48 448)
++ props and debris   642 calls   431 535 tris    (+7,  +48 492)
 ```
+
+Draw calls are unchanged by the 2.9× densification — that is the whole point of
+the per-type `InstancedMesh`. Triangles went +17 364 -> +48 492 for the props,
+linear in the count as predicted. (The base moved 327 k -> 335 k and the call
+count jumped since the first measurement because other agents' districts and
+systems landed in between; only the deltas are mine.)
 
 **Geometry agreement** (whole-map sweeps):
 
 - 1423 coast colliders: **0** standing on a road surface, minimum clearance 16.
 - 1532 beach cells: **0** overlapping a road surface.
-- 380 props: **0** standing in a carriageway, minimum clearance 3.3.
-  *This was a real defect found by the sweep* — measured before the fix, 34 of 380
-  props stood in a road, the worst 45 units into it, because the offset was taken
-  from the segment being placed on and a side street's shoulder is the middle of
-  the arterial it joins. Now every candidate is re-checked against
-  `nearestRoad` with a height gate.
+- 1118 NEON props: **0** standing in a carriageway, minimum clearance **3.1**,
+  **0** pairs closer than 12 units, closest surviving pair **12.3**.
+- 1660 Prague props: **0** in a carriageway, minimum clearance **3.0**, **0**
+  pairs closer than 12, closest pair **12.8**. Its narrow streets survive the
+  density because the height-gated `nearestRoad` check is per candidate.
+- *The carriageway test exists because of a real defect the sweep caught at the
+  old count*: 34 of 380 props stood in a road, the worst 45 units into it,
+  because the offset was taken from the segment being placed on and a side
+  street's shoulder is the middle of the arterial it joins. Both sweeps above are
+  re-runs of it at ~3× the density.
 
 **Sand surface** (claim gate probed directly, engine surface confirmed per frame):
 
@@ -242,10 +282,31 @@ concreteBarrier  80 mph  BREAK 6/6, both orientations (end-on and broadside)
 Every break scored +25 and emitted `prop:destroyed`; signal poles also emitted
 `signal:destroyed` (4 fired in one run, with positions).
 
-**Pools and caps**: 36 props smashed by *driving* at 95 mph in one session —
-debris peaked at 22 live of 96, live fallen capped at exactly **24**, 17 retired,
-score +900. A faster burst via `breakAt` (45 props) peaked at **88 of 96** debris
-and again capped fallen at 24. Nothing leaked.
+Re-run after densifying (every prop moved, so this is a fresh sample, 3 runs
+each side of every threshold — **36/36 correct**):
+
+```
+lampPost 18 solid x3 / 23 BREAK x3      smallTree        22 solid x3 / 28 BREAK x3
+lightBarrier 8 solid x3 / 14 BREAK x3   trafficLightPole 27 solid x3 / 34 BREAK x3
+concreteBarrier 42 solid x3 / 50 BREAK x3   bigTree      50 solid x3 / 60 BREAK x3
+```
+
+**Pools and caps.** `DEBRIS_MAX` is **128** (raised from 96 with the densify:
+tripling prop density makes multi-break bursts routine). Measured with plain
+`GAME_DEBUG.step()` at the new density — particle lifetimes are time-based, so an
+earlier double-ticked pass aged debris twice as fast and under-reported peaks:
+
+- 36 props smashed by *driving* at 95 mph: debris peaked at **25** live, fallen
+  capped at exactly **24**.
+- 45 props broken three frames apart via `breakAt`: peak **118 of 128**. This is
+  the case the raise was for — at 96 the same burst saturated at 96/96.
+- Pathological floor: **24 props broken in a single frame** (24 = `FALLEN_CAP`,
+  the most that can ever be live-fallen at once) requests ~190 particles and still
+  saturates at **128 of 128**. That is accepted, not a bug: the ring buffer
+  recycles its oldest, so the only cost is a truncated puff on the earliest
+  break. Never exceeding 128 is structural.
+- **0** frames over the cap in any run, and the pool drained cleanly to 0 live
+  over the following 400 frames every time. Nothing leaked.
 
 **Collider removal**: a big tree reports 1 collider at low speed, **0** at 70 mph
 (the gate), and **0** after it is broken — no invisible collision left behind. A
@@ -256,22 +317,37 @@ lampPost at 95 s (90), lightBarrier at 64 s (60); the overshoot is the 1 s sampl
 granularity. The distance gate holds: a prop 120 units from a parked player stayed
 down for 100 s past its timer and returned within 4 s of the player moving to 400.
 
-**Other maps**: Prague builds 380 props in 14 ms with no coast and no errors;
+**Density, driven** — the same arterial run before and after (longest flat
+ground-level segment, 3030 units, both kerbs at 150 mph, counting
+`prop:destroyed`):
+
+```
+before  380 props on the map   2 smashed over 6.06 km   0.33 / km
+after  1118 props on the map   7 smashed over 6.06 km   1.16 / km
+```
+
+Statically, that arterial's corridor now holds 19 props over its 3 km — 6.3 per
+km of street, versus 2.4 per km of centreline map-wide before. Looking down the
+densest street on the map (6 props within 120 units): lamps on both kerbs, a tree
+and a light barrier on the pavement, **carriageway completely clear** — furnished,
+not crowded.
+
+**Other maps**: Prague builds 1660 props in 47 ms with no coast and no errors;
 legacy builds neither (no `roadsRef`, no bounds) and is unchanged. Switching
-maps and back preserves per-world state — NEON came back with its coast and its
-broken props intact.
+maps and back preserves per-world state — NEON came back with 1118 props, its
+1015 coast modules and the sand claim still correct.
 
 ---
 
 ## 5. Limits and things left for the lead
 
-1. **Prop density is thin.** 380 props over 157 km of NEON centreline is one per
-   ~410 units, and driving 6 km of one arterial hit only 2 of them. That is the
-   200–400 budget I was given, not a bug — but if you want a roadside that reads
-   as furnished, `MAX_PROPS` is the single knob and the cost is linear and
-   instanced: 380 props = 16.2 k tris in 6 draw calls, so ~1200 would be ~51 k
-   tris in the *same* 6 draw calls. Prague is far worse at this cap: one prop per
-   1.3 km.
+1. ~~Prop density is thin.~~ **Done** — densified to a per-length target
+   (NEON 1118 at one per 140, Prague 1660 at one per 300), draw calls unchanged,
+   +48.5 k tris. Both knobs are declarative: `TARGET_SPACING` per world and
+   `MAX_PROPS` as the ceiling. If a map ever needs more than 1800 props, raise
+   the ceiling rather than the per-world spacing — the cost stays linear in
+   triangles and flat in draw calls, but the build pass is O(centreline/55) world
+   queries and Prague already spends 47 ms there.
 2. **Coast fences are not breakable.** They are plain colliders. Making them
    destructible means routing them through `world.breakObstacle`, which `sea.js`
    does not own for any map. The natural fix is to hand the coast module list to

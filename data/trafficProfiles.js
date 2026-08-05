@@ -28,8 +28,13 @@
  *   followDist      units of gap it wants to the car ahead before easing off
  *   overtakeChance  0..1 probability it commits to a pass once it is eligible
  *                   (rolled once per eligibility, not per frame)
- *   hornThreshold   gap, as a FRACTION of followDist, below which it sounds the
- *                   horn. Higher = quicker to complain. 0 would never honk.
+ *   hornThreshold   0..1 patience with being held up. Higher = quicker to sound
+ *                   the horn: the driver complains after
+ *                   0.8 + (1.2 − hornThreshold) × 3 seconds stuck behind a car
+ *                   at under half the speed it wanted — 1.7s for `aggressive`,
+ *                   4.0s for `nervous`. It is deliberately NOT a gap threshold:
+ *                   the follower settles at roughly followDist by design, so a
+ *                   gap trigger would never fire.
  *   fleePolice      0..1 tendency to speed up when a patrol is running a pursuit
  *                   nearby — guilty conscience, not a scripted escape
  *   recklessness    0..1 feeds NPC offence probability (two scrapes in 10s gets

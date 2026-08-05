@@ -68,7 +68,15 @@
   /* ---------------------------------------------------------------- utils */
 
   const nf = n => '$' + Math.round(n).toLocaleString('en-US');
-  const num = (v, d) => { const n = +v; return Number.isFinite(n) ? n : d; };
+  /* `+null` is 0 and `+''` is 0, so a plain Number() coercion turns an unset
+   * save field into a real value — which painted every car black the first time
+   * `progression.defaultPaint` was absent. Anything that is not a number-ish
+   * value falls through to the default. */
+  const num = (v, d) => {
+    if (v === null || v === undefined || v === '' || typeof v === 'boolean') return d;
+    const n = +v;
+    return Number.isFinite(n) ? n : d;
+  };
   const hex = n => '#' + (n >>> 0 & 0xffffff).toString(16).padStart(6, '0');
 
   function toast(t, c) { if (ctx && ctx.fx && ctx.fx.toast) ctx.fx.toast(t, c || '#20e3ff'); }
@@ -343,10 +351,15 @@
   const CSS = `
 #vehicleSelect.progCards{grid-template-columns:repeat(auto-fit,minmax(190px,225px));justify-content:center;
   width:min(96vw,1000px);max-height:min(58vh,640px);overflow-y:auto;padding:2px 6px 2px 2px}
-.progCard{min-height:0!important;padding:16px 15px 14px!important}
-.progCard .carIcon{font-size:40px}
-.progCard h2{margin-top:10px!important;font-size:21px!important}
-.progCard p{margin-top:8px!important;font-size:12px!important}
+/* An explicit height, not the engine's 210px: the extra rows (stat bars +
+   the lock line) do not fit in it, and with min-height:0 the grid squeezed the
+   rows until .vehicleCard's own overflow:hidden cut the status line off. */
+.progCard{min-height:248px!important;padding:15px 15px 13px!important;display:flex;flex-direction:column}
+.progCard .carIcon{font-size:38px}
+.progCard h2{margin-top:9px!important;font-size:20px!important}
+.progCard p{margin-top:7px!important;font-size:11.5px!important;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.progCard .progStatus{margin-top:auto}
 .progCard.locked{opacity:.62;cursor:not-allowed;border-color:#2b3444}
 .progCard.locked:hover{transform:none;border-color:#2b3444;box-shadow:none}
 .progCard.current{border-color:var(--card);box-shadow:0 0 0 1px var(--card),0 10px 34px rgba(0,0,0,.5)}
@@ -355,7 +368,7 @@
 .progPips{display:flex;gap:2px}
 .progPips i{width:100%;height:5px;border-radius:2px;background:#232c3b}
 .progPips i.on{background:var(--card)}
-.progStatus{margin-top:10px;font:900 10.5px/1.35 system-ui,sans-serif;letter-spacing:1.1px;color:#8ea0b8;
+.progStatus{margin-top:9px;padding-top:2px;font:900 10.5px/1.35 system-ui,sans-serif;letter-spacing:1.1px;color:#8ea0b8;
   display:flex;align-items:center;gap:5px;min-height:15px}
 .progStatus.own{color:#3bff8b}.progStatus.buy{color:#ffd23f}.progStatus.lock{color:#7f8da0}
 #progWalletLine{margin-top:14px;font:900 13px/1 system-ui,sans-serif;letter-spacing:2px;color:#ffd23f}
@@ -383,11 +396,13 @@
 #progHubBtns button.ok{border-color:#3bff8b;color:#3bff8b}
 #progHubBtns button.ok:hover{background:rgba(59,255,139,.14)}
 #progHubBtns button.no:hover{background:rgba(255,107,107,.14);border-color:#ff6b6b;color:#ff6b6b}
-#progRadialHint{position:absolute;left:50%;bottom:5%;transform:translateX(-50%);white-space:nowrap;
-  font:700 10.5px/1 system-ui,sans-serif;letter-spacing:1.4px;color:#8ea0b8;pointer-events:none}
-#progRadialWallet{position:absolute;left:50%;top:5%;transform:translateX(-50%);white-space:nowrap;
-  font:900 12px/1 system-ui,sans-serif;letter-spacing:2px;color:#ffd23f;pointer-events:none}
-@media(max-width:620px){#progHub{width:150px}#progHubName{font-size:13px}#progRadialHint{font-size:9px}}
+/* Hint and wallet live INSIDE the hub: pinned to the top or bottom of the
+   screen they landed on the compass ribbon and the rev counter. */
+#progRadialHint{margin-top:2px;font:700 9px/1.3 system-ui,sans-serif;letter-spacing:1.1px;color:#8ea0b8;
+  text-align:center;pointer-events:none}
+#progRadialWallet{font:900 11px/1 system-ui,sans-serif;letter-spacing:2px;color:#ffd23f;pointer-events:none}
+@media(max-width:620px){#progHub{width:150px}#progHubName{font-size:13px}#progRadialHint{font-size:8px}
+  .progCard{min-height:196px!important}.progCard .carIcon{font-size:30px}.progCard h2{font-size:17px!important}}
 `;
 
   function injectStyle() {
@@ -520,11 +535,11 @@
       ok.addEventListener('click', () => radial.close(true));
       no.addEventListener('click', () => radial.close(false));
       btns.appendChild(ok); btns.appendChild(no);
-      hub.appendChild(name); hub.appendChild(sub); hub.appendChild(btns);
-      const hint = document.createElement('div'); hint.id = 'progRadialHint';
-      hint.textContent = '← →  CHOOSE   ·   ENTER  CONFIRM   ·   ESC  CANCEL';
       const money = document.createElement('div'); money.id = 'progRadialWallet';
-      root.appendChild(wheel); root.appendChild(hub); root.appendChild(hint); root.appendChild(money);
+      const hint = document.createElement('div'); hint.id = 'progRadialHint';
+      hint.textContent = '← →  CHOOSE  ·  ENTER  CONFIRM  ·  ESC  CANCEL';
+      hub.appendChild(money); hub.appendChild(name); hub.appendChild(sub); hub.appendChild(btns); hub.appendChild(hint);
+      root.appendChild(wheel); root.appendChild(hub);
       root.addEventListener('click', e => { if (e.target === root) radial.close(false); });
       ctx.dom.ui.appendChild(root);
       radial.root = root; radial.wheel = wheel; radial.hub = hub; radial.hubName = name; radial.hubSub = sub;

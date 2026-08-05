@@ -65,9 +65,17 @@
   const ENGAGE_MPH = 15, ENGAGE_HOLD = 2.5;   // idle this slow, this long, and they get out
   const FLEE_MPH = 25, FLEE_HOLD = 2.0;       // outrun this and they get back in
   const ENGAGE_RANGE = 60;
+  // On foot ctx.player.mph is 0, so the >25mph flee rule can never fire and an
+  // officer would otherwise keep shooting at a dot 300 units away. Walking out
+  // of this radius is what "getting away on foot" means.
+  const OFFICER_GIVEUP_R = 45;
   const MIN_FIRING = 4.0;                     // no officer bails out of a firefight sooner
   const STATE_TIMEOUT = 8.0;                  // any state stuck this long recovers
   const AIM_TIME = 1.2, SHOT_INTERVAL = 1.4, OFFICER_SHOT_DAMAGE = 7;
+  // On foot the player's health is hearts, so a hit is priced in hearts: half a
+  // heart means six hits from three, i.e. 8.4s under one officer's fire and
+  // ~2.8s under three. Long enough to break for cover, short enough to respect.
+  const OFFICER_SHOT_HEARTS = .5;
   const OFFICER_WALK = 4.6;
 
   let ctxRef = null;
@@ -473,7 +481,19 @@
   const officers = [];          // live officer figures, also shootable targets
   const officerPool = [];       // hidden character groups, reused
   const FLANK_SLOTS = [.62, -.62, 1.35, -1.35];
-  let idleTimer = 0, fleeTimer = 0, warnedAim = false;
+  let idleTimer = 0, fleeTimer = 0, warnedAim = false, warnedUnderFire = false;
+  // ctx.player.mph is 0 on foot, so the only way to know whether a walking
+  // player is actually moving is to measure it. Smoothed, and the per-frame
+  // sample is clamped so a teleport (reset, hospital, map switch) does not
+  // register as a sprint.
+  let playerSpeed = 0, lastPX = null, lastPZ = null;
+  function trackPlayerSpeed(dt, px, pz) {
+    if (lastPX !== null && dt > 0) {
+      const inst = Math.min(60, Math.hypot(px - lastPX, pz - lastPZ) / dt);
+      playerSpeed += (inst - playerSpeed) * Math.min(1, dt * 8);
+    }
+    lastPX = px; lastPZ = pz;
+  }
 
   /** Officers are people, not sprites: two of them may not occupy one point.
       Four at most, so this is six distance tests a frame. */
@@ -570,8 +590,9 @@
   }
 
   function officerShoot(ctx, of) {
+    const onFoot = ctx.player.onFoot;
     const px = ctx.player.x, pz = ctx.player.z;
-    const py = (ctx.player.onFoot ? ctx.world.groundHeightAt(px, pz, of.y) : ctx.carState.y) + 1.2;
+    const py = (onFoot ? ctx.world.groundHeightAt(px, pz, of.y) : ctx.carState.y) + 1.2;
     const dx = px - of.x, dz = pz - of.z, d = Math.hypot(dx, dz) || 1;
     const ux = dx / d, uz = dz / d;
     of.heading = Math.atan2(ux, uz);
@@ -581,14 +602,27 @@
     const wallT = wallDistance(ctx, of.x, oy, of.z, ux, uz, Math.min(d, 120));
     if (wallT < d - 1.5) { impact(ctx, of.x + ux * wallT, oy, of.z + uz * wallT, 0xbcd2ff); return; }
     tracer(ctx, of.x, oy, of.z, of.heading, d);
+
+    // Officers miss. A perfect hitscan every 1.4s killed a standing player in
+    // 3.8s with only two of them out, and — worse — running changed nothing,
+    // because a ray that always connects makes cover and speed meaningless.
+    // Standing still is still lethal; moving is what buys you the door handle.
+    const moving = onFoot ? playerSpeed > 4 : ctx.player.mph > 8;
+    const chance = (onFoot ? .5 : .8) + (moving ? -.15 : .15) - clamp(d / 24, 0, 1) * .15;
+    if (Math.random() > chance) {
+      const rx = uz, rz = -ux, off = (Math.random() < .5 ? -1 : 1) * (1.6 + Math.random() * 1.6);
+      impact(ctx, px + rx * off, py - 1, pz + rz * off, 0xbcd2ff);   // round goes wide
+      return;
+    }
     impact(ctx, px - ux * 1.5, py, pz - uz * 1.5, 0xff8a4b);
     const vd = GameSystems.api('vdamage');
     if (!ctx.player.onFoot && vd) vd.damage('player', { amount: OFFICER_SHOT_DAMAGE, channel: 'ballistic', from: 'police' });
-    else {
-      // On foot the player's health is hearts, engine-owned, with no ctx write —
-      // see docs/handoffs/combat.md. Until that hook lands, a hit reads.
-      ctx.fx.flash(.18);
-    }
+    else if (ctx.engine.hurtPlayer) {
+      // Hearts are the player's own health pool; the engine does the heart flash,
+      // the screen flash and the die() check, so we only price the hit.
+      ctx.engine.hurtPlayer(OFFICER_SHOT_HEARTS);
+      if (!warnedUnderFire) { warnedUnderFire = true; ctx.fx.toast('🚨 Taking fire on foot — get to cover or into a car', '#ff3b3b'); }
+    } else ctx.fx.flash(.18);
   }
 
   function beginStop(ctx, cop) {
@@ -623,6 +657,7 @@
     const px = ctx.player.x, pz = ctx.player.z;
     const wanted = ctx.stats.wanted;
     const cops = ctx.actors.cops;
+    trackPlayerSpeed(dt, px, pz);
 
     // Two thresholds with their own timers: engaging needs sustained slow, and
     // disengaging needs sustained fast. Nothing happens in the band between.
@@ -706,9 +741,11 @@
         st.firingTime += dt;
         of.heading = Math.atan2(px - of.x, pz - of.z);
         poseOfficer(of, dt, false, true);
+        const range = dist2d(of.x, of.z, px, pz);
         st.shotCd -= dt;
-        if (st.shotCd <= 0) { officerShoot(ctx, of); st.shotCd = SHOT_INTERVAL; }
-        if (st.t > STATE_TIMEOUT * 2 && st.firingTime >= MIN_FIRING) { st.state = 'RETURNING'; st.t = 0; }
+        if (st.shotCd <= 0 && range <= OFFICER_GIVEUP_R) { officerShoot(ctx, of); st.shotCd = SHOT_INTERVAL; }
+        const lost = range > OFFICER_GIVEUP_R && st.firingTime >= MIN_FIRING;
+        if (lost || (st.t > STATE_TIMEOUT * 2 && st.firingTime >= MIN_FIRING)) { st.state = 'RETURNING'; st.t = 0; }
       } else if (st.state === 'RETURNING') {
         const left = walkOfficer(ctx, of, st.x + Math.cos(st.heading) * 3.2, st.z - Math.sin(st.heading) * 3.2, dt);
         poseOfficer(of, dt, left > .5, false);
@@ -734,6 +771,7 @@
   function clearFootPolice(ctx) {
     for (const c of ctx.actors.cops) if (c._foot) c._foot = null;
     for (let i = officers.length - 1; i >= 0; i--) releaseOfficer(officers[i]);
+    lastPX = null; lastPZ = null; playerSpeed = 0;   // the next sample is a fresh start
   }
 
   /* ========================================================================

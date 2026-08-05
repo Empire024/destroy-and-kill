@@ -71,7 +71,10 @@
       prague: { x: 0, z: 0 }
     },
     cruise: 34,
-    pursuitMult: 1.45,
+    // Has to beat the fastest thing it can be sent after: a reckless driver runs
+    // base cruise (up to 46) × 1.28 = 59 u/s, so 34 × 1.45 would never close and
+    // every NPC pursuit would quietly time out at the 60s cap.
+    pursuitMult: 2.0,
     turnRate: 2.0,               // rad/s
     accel: 20, brake: 46,
     arrive: 18,                  // waypoint capture radius
@@ -79,6 +82,10 @@
     respawnDelay: 9,             // seconds after one is destroyed
     offenceRange: 55,
     speedingMph: 95,
+    // A pursuit that starts across the district is a car chase nobody sees and
+    // that takes half a minute to close. Only a patrol already in the area
+    // responds; otherwise the offender gets away with it, which is fine.
+    pursuitStart: 300,
     npcTailDist: 6,              // "on your tail"
     npcTailHold: 6,              // seconds held there before the offender gives up
     pullOverTime: 8,             // seconds stopped at the roadside
@@ -319,7 +326,16 @@
     if (t.shoveX || t.shoveZ) { p.x = t.x; p.z = t.z; }
 
     let tx = null, tz = null;
-    if (chaseTarget) { tx = chaseTarget.x; tz = chaseTarget.z; }
+    if (chaseTarget) {
+      // Aim where it is going, not where it is. Pure pursuit against a car with
+      // a similar top speed never closes the last few units — it just tracks the
+      // tail lights round every corner.
+      const d = Math.hypot(chaseTarget.x - p.x, chaseTarget.z - p.z);
+      const lead = Math.min(2.0, d / Math.max(12, p.spd));
+      const vs = chaseTarget.spd || 0;
+      tx = chaseTarget.x + Math.sin(chaseTarget.heading) * vs * lead;
+      tz = chaseTarget.z + Math.cos(chaseTarget.heading) * vs * lead;
+    }
     else if (p.route && p.route.length) {
       const wp = p.route[Math.min(p.idx, p.route.length - 1)];
       tx = wp.x; tz = wp.z;
@@ -336,9 +352,13 @@
       want = PATROL.cruise * (chaseTarget ? PATROL.pursuitMult : 1);
       if (Math.abs(err) > 0.35) want = Math.min(want, 16);
       if (chaseTarget) {
-        // Close, then hold station rather than shunting the car we are stopping.
-        const d = Math.hypot(tx - p.x, tz - p.z);
-        if (d < PATROL.npcTailDist) want = Math.min(want, (chaseTarget.spd || 0) * 0.9);
+        // Close, then sit on the bumper rather than shunting the car we are
+        // stopping: slightly faster just outside the tail distance, slightly
+        // slower just inside it, so it settles a few units back instead of
+        // porpoising in and out of the 6-unit window the hold timer counts.
+        const d = Math.hypot(chaseTarget.x - p.x, chaseTarget.z - p.z);
+        const vs = chaseTarget.spd || 0;
+        if (d < 11) want = Math.min(want, vs * (d < PATROL.npcTailDist * 0.8 ? 0.92 : 1.08));
       }
     }
     if (p.parked && !chaseTarget) want = 0;
@@ -377,6 +397,7 @@
     if (pursuit) return;
     const p = nearestPatrolTo(offender.x, offender.z);
     if (!p) return;
+    if (Math.hypot(p.x - offender.x, p.z - offender.z) > PATROL.pursuitStart) return;
     pursuit = { patrol: p, target: offender, phase: 'chase', hold: 0, life: 0, stopT: 0 };
     ctx.events.emit('police:pursuit', { target: 'npc', x: offender.x, z: offender.z });
   }
@@ -545,9 +566,17 @@
         // front. Without this the engine's +16/s push toward `cruise` creeps a
         // tailgater through the bumper ahead one frame at a time.
         if (lead.gap < pr.followDist) t.spd = Math.min(t.spd, leadSpd * 0.98);
-        if (lead.gap < pr.followDist * pr.hornThreshold) {
+        // Horns are about being HELD UP, not about proximity. The follower above
+        // settles at roughly followDist, so a pure gap trigger is unreachable —
+        // what a driver reacts to is sitting behind someone at half the speed it
+        // wanted. hornThreshold buys patience: aggressive complains after 1.2s,
+        // nervous after 4.2s.
+        const heldUp = lead.gap < pr.followDist * 1.6 && t.spd < t.cruise * 0.55;
+        if (heldUp) {
           t._blocked = (t._blocked || 0) + dt;
-          if (t._blocked > HORN_BLOCKED_T) { horn(t, pr.hornThreshold); t._blocked = -1.5; }
+          if (t._blocked > HORN_BLOCKED_T + (1.2 - pr.hornThreshold) * 3) {
+            horn(t, pr.hornThreshold); t._blocked = -4;
+          }
         } else t._blocked = 0;
       } else t._blocked = 0;
 

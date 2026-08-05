@@ -1,9 +1,9 @@
 # Handoff — combat (weapons, on-foot police, unified vehicle damage)
 
 Owner files: `src/game/vehicle-damage.js`, `src/game/combat.js`. Nothing else was
-edited. Built against the death hooks the lead wired in `57f0fec`
-(`ctx.engine.explodePlayer`, `ctx.engine.ignitePlayerVehicle`) — both are in use;
-one further one-line exposure is requested below.
+edited. **Every hook this system asked for is wired and in use** — `explodePlayer`
+and `ignitePlayerVehicle` (`57f0fec`), `hurtPlayer` and `igniteTraffic`
+(`e9e1d9e`). Nothing is outstanding from the lead.
 
 ## What was built
 
@@ -138,6 +138,20 @@ sustained **>25 mph**, and FIRING has a 4 s floor — nothing happens in the ban
 between. An officer who is shot goes down, his car is released **and marked
 spent**, so the same car never produces a second officer.
 
+**A shot costs 7 ballistic in a car, half a heart on foot** (six hits from three
+hearts). Two further rules make the on-foot fight fair rather than a cutscene:
+
+- **Officers miss.** Hit chance is `(onFoot ? .5 : .8) + (moving ? −.15 : +.15)
+  − (range/24)·.15`. A perfect hitscan every 1.4 s killed a standing player in
+  3.8 s with only two officers out and — the real problem — running changed
+  nothing, because a ray that always connects makes speed and cover meaningless.
+  A miss draws its spark wide of you so a near miss still reads.
+- **A give-up radius of 45 units.** On foot `ctx.player.mph` is 0, so the >25 mph
+  flee rule can never fire and an officer would happily keep shooting at a dot
+  300 units away. Walking out of 45 units is what getting away on foot means.
+  Since `mph` is 0 on foot, "moving" comes from a smoothed measurement of the
+  player's own position delta, clamped so a teleport is not read as a sprint.
+
 **Why parked cop cars are possible without an engine change**: the engine drives
 every cop in `update()` unconditionally, and `GameSystems.update()` runs *after*
 that in the same frame, so a taken-over cop is written back to the position we
@@ -146,23 +160,19 @@ engine's steering — which never stopped running — has the car back next fram
 The takeover skips its own first integration step, or the cop would move twice
 on that frame (measured 1.75 u in one frame; now 0.866, i.e. normal chase speed).
 
-## ctx additions still wanted from the lead
+## ctx hooks in use — nothing outstanding
 
-1. **`ctx.engine.hurtPlayer(n)`** — the one real gap left. On foot the player's
-   health is `playerHearts`, engine-owned, and `hud()` recomputes `stats.health`
-   from it every frame, so **officer bullets cannot hurt a player on foot**: a
-   hit is a screen flash and nothing more. Everything else about the firefight is
-   live. This is the single biggest remaining gameplay hole in the feature.
-2. **`ctx.actors.igniteTraffic(t)`** — the one-line exposure you offered, please.
-   A car shot to pieces should catch fire and cook off on the engine's 3-5 s fuse,
-   not detonate on the last bullet: the `explosionAt` fallback blasts at the
-   target's own position, which at point-blank range on foot can kill the player
-   (it did, in testing). `vehicle-damage.js` already calls
-   `ctx.actors.igniteTraffic` when present and falls back when it is not, so no
-   change here is needed once it lands.
+| hook | used for |
+|---|---|
+| `ctx.engine.ignitePlayerVehicle()` | the `burning` stage — real fire, real fuse |
+| `ctx.engine.explodePlayer(reason)` | still in the seat when the 6 s fuse ends |
+| `ctx.engine.hurtPlayer(hearts)` | officer fire against a player **on foot** |
+| `ctx.actors.igniteTraffic(t)` | a shot-out NPC car catches fire and cooks off |
 
-Already wired and in use, thank you: `ctx.engine.explodePlayer(reason)` and
-`ctx.engine.ignitePlayerVehicle()` (`57f0fec`).
+`hurtPlayer` does the heart flash, screen flash and `die()` check itself, so
+`officerShoot` only prices the hit. `igniteTraffic` replaced the `explosionAt`
+fallback for traffic kills — the fallback is still in the code for cop cars and
+for anything that is not in `ctx.actors.traffic`.
 
 ## Test evidence
 
@@ -250,6 +260,24 @@ released **1.88 s** later — `officers 0`, every `copState` back to `DRIVING`.
 **Officer down** — 2 pistol hits (30→12→-6), toast, +2 wanted (3→5), his car
 released and marked spent. Officer cap held at **4** with 5 cops on screen.
 
+**The firefight, both ways** (wanted 3, two officers firing):
+
+```
+in the car   officer fire → ballistic pool only, hearts untouched (5 hits, 35 dmg)
+             full ladder in one sitting, unassisted:
+             healthy → damaged 3.2s → critical 5.7s → burning 7.4s
+                     → exploded 13.3s (5.9s burn window) → hearts 0, dead
+on foot standing   6 hits, dead in 5.80s   (was 3.8s before officers could miss)
+on foot sprinting  1 hit, 2.5 hearts left, 295 units covered, every officer
+                   despawned by 11.5s — you get away, which is the point
+```
+
+**A shot NPC car now burns instead of detonating** — `igniteTraffic` preference
+path confirmed live: on the killing round the car is `burning` with the player's
+hp **unchanged in that frame at 25 units** (it used to take the blast instantly);
+the engine's fuse blew it **3.43 s** later, and the delayed blast then cost the
+player 11.7 hp. Warning, then consequence.
+
 **Explosion chain** — three cars 11 u apart, middle one killed:
 `destructibles.breakAt(41,480,9,60)` fired once; both neighbours took 19.6
 falloff damage and a 15.9 u/s shove; player 60 u away untouched. Repeated with
@@ -270,13 +298,19 @@ NITRO, HANDBRAKE, both shift buttons, both steer buttons and the top row →
 
 ## Known limits
 
-- **A player on foot cannot be shot** — see hook 1 above. Officers hit, flash the
-  screen and do nothing else. Everything else about them is live.
-- **The player car cannot be set alight while you are outside it.** The engine's
-  ignition only fires for the car you are sitting in, so a parked car shot to
-  pieces holds at `critical` with `pendingBurn` set and lights the instant you
-  get back in. Deliberate, and it degrades honestly; say the word if you want a
-  parked-car ignition hook too.
+- **`pendingBurn` (car wrecked while you are outside it) stays as it is, because
+  it is currently unreachable — measured, not assumed.** The branch holds the car
+  at `critical` and lights it the moment you get back in. Nothing can actually
+  reach it today: the engine's `explosionAt` only writes `carState.hp` when
+  `!onFoot` (a *big* blast detonated directly on the parked car left hp at
+  exactly 100), the collision resolver does not run on foot, and your own car is
+  in neither `traffic` nor `cops` so a bullet cannot select it (six rifle rounds
+  into it: hp 100, ballistic 100, stage healthy). It is graceful degradation for
+  a future caller — a mission that blows up your parked car — not a live gap. If
+  such a caller ever appears it needs an engine-side `detachBurningCar` after
+  ignition; `igniteTraffic` cannot stand in, because the burner path would score
+  the player's own car, spawn a replacement traffic car, and hand the mesh to the
+  wreck list while the engine still thinks it is your ride.
 - **The death outcome depends on where you are when the fuse ends** — in the
   seat is `explodePlayer` (WASTED), out of it is a wreck you walked away from.
   That is the design, but it means `vehicle:stage` `exploded` for the player can
@@ -285,11 +319,10 @@ NITRO, HANDBRAKE, both shift buttons, both steer buttons and the top row →
   so the weapon readout lingers over the first ~1 s of the death cinematic until
   `player:died` fires. `body.dying` fades `.hud` elements but does not reach into
   `#systemsUI`; both panels hide themselves instead.
-- **Killing an NPC car uses a 30-unit blast**, so shooting a car you are stood
-  next to will hurt you, and emptying a rifle into a queue of traffic on foot can
-  kill you outright (it did, once, in testing — WASTED, hospital respawn, all
-  engine-side and correct). That is deliberate, but it is a design choice worth
-  confirming rather than a bug I hid.
+- **Cop cars still die by blast, not by fire.** `igniteTraffic` only takes
+  objects in `ctx.actors.traffic`; a cop car killed by gunfire still goes through
+  `explosionAt`, which is what deletes it engine-side. Point-blank that blast can
+  still hurt you — much rarer now that ordinary traffic burns instead.
 - **No ray height falloff for targets**: a target is hit if its centre is within
   the perpendicular radius and within 6-8 units of the shooter's height. Good
   enough on a multi-level map, not a real 3D capsule test.

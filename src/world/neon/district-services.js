@@ -299,13 +299,19 @@
     }
 
     // ---- NEON kit -----------------------------------------------------------
+    // Roof-edge lines only. The other two compounds get dim unlit "spill" quads
+    // on the ground, which read as light because their aprons are near-black
+    // asphalt; this plot is paved in the legacy `concrete` (0x777b80), and on a
+    // pale surface the same quads invert and read as dirt. Measured at midnight
+    // from (2640,1910): the fountain pool showed as a dark green rectangle
+    // stamped across the middle of the square. The square is bright enough on
+    // its own — it is the only pale thing for 600 units.
     F.box(-45, 19.6, 22, 46.4, 0.5, 38.4, glow(0x20e3ff, 0.8));    // roof edge lines
     F.box(0, 17.6, 34, 42.4, 0.5, 34.4, glow(0xffd23f, 0.7));
     F.box(45, 21.6, 20, 46.4, 0.5, 40.4, glow(0xff2d9b, 0.7));
-    F.pad(0, -20, 62, 62, APRON_Y + 0.05, glow(0x20e3ff, 0.18));   // fountain spill
-    F.pad(-45, 3.4, 30, 12, APRON_Y + 0.06, glow(0xffd9a0, 0.24)); // shopfront spill
-    F.pad(0, 17.4, 28, 12, APRON_Y + 0.06, glow(0xffd9a0, 0.24));
-    F.pad(45, 0.4, 32, 12, APRON_Y + 0.06, glow(0xffd9a0, 0.24));
+    // Cap on the jet: the jet cylinder is r=4 at the top and ends at y=5.3, so
+    // an 8-wide plate at 5.5 sits exactly on it rather than hovering over it.
+    F.box(0, 5.5, -20, 8, 0.6, 8, C.neon);
   }
 
   /* =========================================================================
@@ -330,11 +336,19 @@
   const PLACES = [
     // --- fuel ---------------------------------------------------------------
     {
-      id: 'gas-east', kind: gasStation, name: 'EAST GATE FUEL',
-      x: 1200, z: 110, rot: Math.PI / 2,
-      // Downtown's east verge: the 180-wide band between the x=1090 avenue and
-      // the inner loop's stub band at x=1270, midway between the z=-30 and
-      // z=250 grid lines. Forecourt faces WEST onto the avenue.
+      id: 'gas-west', kind: gasStation, name: 'WEST GATE FUEL',
+      x: -1240, z: 110, rot: -Math.PI / 2,
+      // Downtown's west verge: the 135-wide band between the x=-1150 avenue and
+      // the edge of downtown's pavement plate at -1310, midway between the
+      // z=-30 and z=250 grid lines. Forecourt faces EAST onto the avenue.
+      //
+      // This was built on the EAST verge first (x=1200, the mirror-image band,
+      // which is 220 wide because downtown's grid lines run -1150..1090 rather
+      // than symmetrically). Both read fine, but from (1200,420) the east plot
+      // and the strip-approach plot below were in the same shot, 272 apart —
+      // two identical gas stations visible at once, and nothing at all on the
+      // hillside side of downtown. Moving it here puts a fuel stop on each of
+      // the three routes out of downtown instead of two on one of them.
       hw: 71, hd: 52
     },
     {
