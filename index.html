@@ -321,7 +321,7 @@ HOT</span>
 <div id="wheelPanel" role="dialog" aria-modal="true" aria-labelledby="wheelPanelTitle">
   <div class="wheelDialog">
     <h2 id="wheelPanelTitle">WHEEL & PEDALS</h2>
-    <p class="wheelLead">Connect the wheel, then bind steering, pedals and shift paddles. Steering calibration automatically learns center and both full-lock endpoints. Keyboard controls remain available.</p>
+    <p class="wheelLead">Connect the wheel, then bind steering, pedals and shift paddles. Steering calibration automatically learns center and both full-lock endpoints. Keyboard controls remain available.<br><b>This game has no force feedback.</b> Browsers only expose rumble through the Gamepad API, which is not steering torque — see docs/MOZA_R3_FFB.md.</p>
     <div class="wheelDeviceRow">
       <select id="wheelDeviceSelect" aria-label="Wheel device"><option value="">No controller detected</option></select>
       <button id="wheelRefresh" type="button">REFRESH</button>
@@ -358,7 +358,7 @@ HOT</span>
       <div class="wheelOption"><label for="wheelDeadzone">STEERING DEADZONE <span id="wheelDeadzoneValue">3%</span></label><input id="wheelDeadzone" type="range" min="0" max="15" step="1" value="3"></div>
       <div class="wheelOption"><label for="wheelResponse">STEERING RESPONSE <span id="wheelResponseValue">70%</span></label><input id="wheelResponse" type="range" min="20" max="100" step="1" value="70"></div>
       <label class="wheelOption check"><input id="wheelInvert" type="checkbox" checked><span>INVERT STEERING</span></label>
-      <label class="wheelOption check"><input id="wheelHaptics" type="checkbox" checked><span>HAPTICS ONLY (TRUE WHEEL FFB NEEDS A DRIVER)</span></label>
+      <label class="wheelOption check"><input id="wheelHaptics" type="checkbox" checked><span>RUMBLE — NOT FORCE FEEDBACK</span></label>
       <div class="wheelOption"><label for="wheelHapticsStrength">HAPTIC STRENGTH <span id="wheelHapticsStrengthValue">65%</span></label><input id="wheelHapticsStrength" type="range" min="0" max="100" step="1" value="65"></div>
     </div>
     <div class="wheelLive">

@@ -944,21 +944,21 @@
   // =========================================================================
   function buildAttributionSign(THREE, spawn, raster) {
     const cv = document.createElement('canvas');
-    cv.width = 1024; cv.height = 128;
+    cv.width = 1024; cv.height = 168;
     const g = cv.getContext('2d');
     if (!g) return null;
-    g.fillStyle = '#141210'; g.fillRect(0, 0, 1024, 128);
-    g.fillStyle = '#3a3229'; g.fillRect(0, 0, 1024, 5); g.fillRect(0, 123, 1024, 5);
+    g.fillStyle = '#141210'; g.fillRect(0, 0, 1024, 168);
+    g.fillStyle = '#3a3229'; g.fillRect(0, 0, 1024, 6); g.fillRect(0, 162, 1024, 6);
     g.textAlign = 'center';
     g.fillStyle = '#ffd9a0';
-    g.font = 'bold 40px Georgia, serif';
-    g.fillText('PRAHA 1', 512, 48);
-    g.fillStyle = '#c9bda6';
-    g.font = '22px Georgia, serif';
-    g.fillText('map data © OpenStreetMap contributors · ODbL 1.0', 512, 84);
-    g.fillStyle = '#8f9aa8';
-    g.font = '18px monospace';
-    g.fillText('openstreetmap.org/copyright', 512, 110);
+    g.font = 'bold 46px Georgia, serif';
+    g.fillText('PRAHA 1', 512, 54);
+    g.fillStyle = '#ddd0b6';
+    g.font = 'bold 30px Georgia, serif';
+    g.fillText('map data © OpenStreetMap contributors · ODbL 1.0', 512, 100);
+    g.fillStyle = '#9aa6b4';
+    g.font = '24px monospace';
+    g.fillText('openstreetmap.org/copyright', 512, 138);
 
     const tex = new THREE.CanvasTexture(cv);
     tex.anisotropy = 4;
@@ -971,8 +971,8 @@
     const room = Math.min(
       raster.probe(spawn.x, spawn.z, nx, nz, 14),
       raster.probe(spawn.x, spawn.z, -nx, -nz, 14));
-    const span = Math.max(7, Math.min(16, room * 1.7));
-    const panelH = span / 8;
+    const span = Math.max(8, Math.min(18, room * 1.7));
+    const panelH = span * (168 / 1024);          // keep the canvas aspect exactly
 
     // 26 m ahead of the spawn, so it is the first thing in shot
     const fx = Math.sin(spawn.heading), fz = Math.cos(spawn.heading);

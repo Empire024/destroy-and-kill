@@ -232,12 +232,14 @@
     b.box({ x: 0, z: QUAY_Z + 12, y: WATER_Y - 4, w: X1 - X0, h: (GY + 0.03) - (WATER_Y - 4), d: 32, color: 0x353a44, noCollide: true });
     b.box({ x: 0, z: QUAY_Z + 12.1, y: WATER_Y - 0.5, w: X1 - X0, h: 3.4, d: 32.2, color: 0x20262c, noCollide: true });
 
-    slab(b, X0, QUAY_Z + 28, X1, Z1, WATER_Y, 0x07141d);
-    // flat reflection streaks — cheap, and they stop the harbour reading as a
-    // single dead rectangle.
-    for (const s of [[-1100, 3790, 190], [-640, 3830, 240], [-120, 3800, 300], [430, 3850, 210], [900, 3800, 260]]) {
-      slab(b, s[0], s[1], s[0] + s[2], s[1] + 3, WATER_Y + 0.05, 0x143845, true);
-      slab(b, s[0] + 40, s[1] + 14, s[0] + s[2] - 60, s[1] + 16, WATER_Y + 0.05, 0x3a2a14, true);
+    slab(b, X0, QUAY_Z + 28, X1, Z1, WATER_Y, 0x0b1c27);
+    // Flat reflection streaks of the quay lighting. Cheap, deterministic, and
+    // they stop the harbour reading as one dead rectangle.
+    for (let x = X0 + 60; x < X1 - 120; x += 118) {
+      const h = (((x | 0) * 2654435761) >>> 0);
+      const z = QUAY_Z + 44 + (h % 130), len = 60 + (h >> 7) % 90;
+      slab(b, x, z, x + len, z + 2.6, WATER_Y + 0.05, (h & 1) ? 0x1a4553 : 0x4a3418, true);
+      slab(b, x + 14, z + 11, x + len - 22, z + 13, WATER_Y + 0.05, (h & 1) ? 0x11313b : 0x30220f, true);
     }
     // far bank, so the water does not simply end in the fog
     b.box({ x: 0, z: Z1 - 6, y: WATER_Y, w: X1 - X0, h: 11, d: 14, color: 0x0b1017, noCollide: true });

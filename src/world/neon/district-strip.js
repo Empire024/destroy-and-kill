@@ -222,16 +222,26 @@
     b.collider(x, z, 3.0, 2.4, 5.0, 0);
   }
   /**
-   * A box truck backed up against an alley wall. 13 deep in a 36 corridor, so
-   * it leaves 23 — enough to get through, not enough to be lazy about it.
-   * These are what stop the alleys being a straight speedway.
+   * A box truck backed up against an alley wall — the pinch that stops the
+   * alleys being a straight speedway. It reaches 17.5 into a 36 corridor, past
+   * the centreline, so you have to pick a side.
+   *
+   * The collider is a single box FLUSH to the wall. An earlier version stood
+   * the truck off the wall, which left a 4.5-wide slot behind it — narrower
+   * than the car's 5.2 collision capsule, so a car that clipped the truck's
+   * corner wedged in there and could not reverse out. Everything that reads as
+   * a cab is noCollide and lives inside that one footprint.
    */
-  function boxTruck(b, x, z, side, r) {
+  const TRUCK_D = 17.5;
+  function boxTruck(b, x, wallZ, inward, r) {
     const col = [0x5c3a2c, 0x2f4453, 0x4a4436, 0x3f3348][(r() * 4) | 0];
-    b.box({ x, z, y: 0, w: 26, h: 12, d: 13, color: col });
-    b.box({ x, z: z - side * 6.7, y: 3.5, w: 22, h: 4, d: 0.6, color: dim(0xffd9a0, 0.55), emissive: true, noCollide: true });
-    b.box({ x, z, y: 12, w: 26.4, h: 0.5, d: 13.4, color: dim(0xff8a1f, 0.6), emissive: true, noCollide: true });
-    sheen(b, x, z - side * 16, 34, 22, 0xff8a1f, 0.18);
+    const cz = wallZ + inward * TRUCK_D / 2;
+    const face = wallZ + inward * TRUCK_D;                   // the alley-facing side
+    b.box({ x, z: cz, y: 0, w: 26, h: 12, d: TRUCK_D, color: col });
+    b.box({ x: x + 9, z: cz, y: 0, w: 7, h: 8.5, d: TRUCK_D - 0.4, color: dim(col, 0.72), noCollide: true });
+    b.box({ x: x + 9, z: face - inward * 0.3, y: 4.6, w: 6, h: 3, d: 0.5, color: dim(0xffd9a0, 0.5), emissive: true, noCollide: true });
+    b.box({ x, z: cz, y: 12, w: 26.4, h: 0.5, d: TRUCK_D + 0.4, color: dim(0xff8a1f, 0.6), emissive: true, noCollide: true });
+    sheen(b, x, wallZ - inward * 4, 34, 26, 0xff8a1f, 0.18);
   }
 
   /** Parked car: the body collides, cabin and glass are cosmetic. */
@@ -496,8 +506,8 @@
     for (const [from, to, pitch, w0, w1] of truckRuns) {
       for (let x = from; x < to; x += pitch, t++) {
         if (blocksLane(x, 60)) continue;
-        const side = (t % 2) ? 1 : -1;
-        boxTruck(b, x, side > 0 ? w1 - 11 : w0 + 11, side, r);
+        const onSouth = (t % 2) === 1;                       // alternate walls
+        boxTruck(b, x, onSouth ? w1 : w0, onSouth ? -1 : 1, r);
         trucks.push(x);
       }
     }

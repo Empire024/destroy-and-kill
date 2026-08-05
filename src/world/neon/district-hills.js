@@ -166,15 +166,15 @@
     [-3372, -850, 280],
     [-3400, -1180, 260],
     [-3418, -1450, 170],
-    // Summit turnaround loop. It has to sit within ~80 of the crest ridge: the
-    // back face falls at 60%+, so a terrace any further west needs 50 units of
-    // fill and reads as a shelf bolted to a cliff.
-    [-3455, -1600, 130],
-    [-3570, -1700, 110],
-    [-3520, -1830, 110],
-    [-3380, -1810, 110],
-    [-3345, -1690, 110],
-    [-3420, -1605, 0]
+    // Summit turnaround loop, ringing the lookout. It has to sit within ~80 of
+    // the crest ridge: the back face falls at 60%+, so a terrace further west
+    // needs 40+ units of fill and reads as a shelf bolted to a cliff.
+    [-3440, -1590, 130],
+    [-3520, -1680, 105],
+    [-3480, -1800, 105],
+    [-3358, -1780, 105],
+    [-3332, -1670, 105],
+    [-3405, -1598, 0]
   ];
 
   /* Second mandatory stub: a foothill road through the stilt houses that rejoins
@@ -208,7 +208,7 @@
     [-2830, -524, 0]
   ];
 
-  const SUMMIT = { x: -3457, z: -1715 };
+  const SUMMIT = { x: -3430, z: -1700 };
   const APRON = { x: -2665, z: -505, w: 236, d: 156 };
 
   // ================================================================== builder
@@ -259,7 +259,7 @@
       splatPath(main); splatPath(link); splatPath(bypass); splatPath(cut);
       // Flat aprons: the summit terrace, and a landing box wide enough that an
       // over- or under-cooked jump still finds ground rather than a hillside.
-      splatPad(SUMMIT.x, SUMMIT.z, 270, 250, baseAt(SUMMIT.x, SUMMIT.z));
+      splatPad(SUMMIT.x, SUMMIT.z, 300, 300, baseAt(SUMMIT.x, SUMMIT.z));
       splatPad(APRON.x, APRON.z, APRON.w, APRON.d, baseAt(APRON.x, APRON.z));
 
       for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
@@ -358,11 +358,14 @@
         for (const n of noRail) if (Math.hypot(p[0] - n.x, p[1] - n.z) < n.r) { skip = true; break; }
         if (skip) continue;
 
+        // Probe beyond BLEND: inside the blend the bench is still holding the
+        // ground up, so a 20-unit drop only reads as ~9 at 120 out and half the
+        // outer bends end up unrailed.
         for (const side of [1, -1]) {
-          const ox = p[0] + nx * side * 120, oz = p[1] + nz * side * 120;
+          const ox = p[0] + nx * side * 155, oz = p[1] + nz * side * 155;
           if (ox < MINX || ox > MAXX || oz < MINZ || oz > MAXZ) continue;
           const drop = y0 - H(ox, oz);
-          if (drop >= 9) {
+          if (drop >= 8) {
             const gx = p[0] + nx * side * (halfW + 10), gz = p[1] + nz * side * (halfW + 10);
             const gy = H(gx, gz);
             b.collider(gx, gz, 12, 12, 5, gy);
@@ -376,7 +379,7 @@
           // Cut slope on the uphill side gets a crib wall. Its collider is an
           // axis-aligned box around a rotated solid, so it is pushed well clear
           // of the carriageway or the AABB would eat into the road.
-          if (i % 2 === 0 && H(ox, oz) - y0 >= 12) {
+          if (i % 2 === 0 && H(ox, oz) - y0 >= 14) {
             b.box({
               x: p[0] + nx * side * (halfW + 16), z: p[1] + nz * side * (halfW + 16),
               y: y0 - 1.5, w: 5, h: Math.min(15, (H(ox, oz) - y0) * 0.7) + 1.5, d: 26, rot,
@@ -440,30 +443,31 @@
     // ---- 6. summit lookout -------------------------------------------------
     (function () {
       const cx = SUMMIT.x, cz = SUMMIT.z, y = H(cx, cz);
-      const hw = 125, hd = 110;
+      const hw = 150, hd = 150;
       b.quad([cx - hw, y + 0.35, cz - hd], [cx + hw, y + 0.35, cz - hd],
         [cx + hw, y + 0.35, cz + hd], [cx - hw, y + 0.35, cz + hd], 0x2c2f38);
-      b.quad([cx - 74, y + 0.5, cz - 62], [cx + 74, y + 0.5, cz - 62],
-        [cx + 74, y + 0.5, cz + 62], [cx - 74, y + 0.5, cz + 62], 0x353a46);
+      b.quad([cx - 72, y + 0.5, cz - 66], [cx + 72, y + 0.5, cz - 66],
+        [cx + 72, y + 0.5, cz + 66], [cx - 72, y + 0.5, cz + 66], 0x353a46);
 
-      // view parapet on the downtown side (east + south), gapped so you can see
-      // over it and drive out onto the shoulder
-      for (let t = -hd + 14; t < hd - 10; t += 30) {
-        if (Math.abs(t) < 34) continue;
-        b.box({ x: cx + hw - 4, z: cz + t, y: y, w: 4, h: 4.6, d: 24, color: 0x3d4250 });
-        b.box({ x: cx + hw - 4, z: cz + t, y: y + 4.6, w: 4.6, h: 0.7, d: 24, color: 0x20e3ff, emissive: true, noCollide: true });
+      // view parapet along the pad rim on the downtown side (east + south),
+      // gapped so you can see over it from the car and drive out to the shoulder
+      for (let t = -hd + 16; t < hd - 12; t += 32) {
+        if (Math.abs(t) < 40) continue;
+        b.box({ x: cx + hw - 5, z: cz + t, y: y, w: 4, h: 4.6, d: 26, color: 0x3d4250 });
+        b.box({ x: cx + hw - 5, z: cz + t, y: y + 4.6, w: 4.6, h: 0.7, d: 26, color: 0x20e3ff, emissive: true, noCollide: true });
       }
-      for (let t = -hw + 14; t < hw - 10; t += 30) {
-        b.box({ x: cx + t, z: cz + hd - 4, y: y, w: 24, h: 4.6, d: 4, color: 0x3d4250 });
-        b.box({ x: cx + t, z: cz + hd - 4, y: y + 4.6, w: 24, h: 0.7, d: 4.6, color: 0x20e3ff, emissive: true, noCollide: true });
+      for (let t = -hw + 16; t < hw - 12; t += 32) {
+        if (Math.abs(t) < 40) continue;
+        b.box({ x: cx + t, z: cz + hd - 5, y: y, w: 26, h: 4.6, d: 4, color: 0x3d4250 });
+        b.box({ x: cx + t, z: cz + hd - 5, y: y + 4.6, w: 26, h: 0.7, d: 4.6, color: 0x20e3ff, emissive: true, noCollide: true });
       }
       // crib holding the terrace up over the back face
-      for (let t = -hd; t < hd; t += 26) b.box({ x: cx - hw + 3, z: cz + t, y: y - 22, w: 8, h: 24, d: 26, color: 0x2b2e35 });
+      for (let t = -hd; t < hd; t += 26) b.box({ x: cx - hw + 3, z: cz + t, y: y - 24, w: 8, h: 26, d: 26, color: 0x2b2e35 });
 
       // --- radio mast: four legs, cross bracing, red aircraft warning lights
       const lampGeo = () => new THREE.BoxGeometry(3.4, 3.4, 3.4);
       const lampMat = () => new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-      const mx = cx - 66, mz = cz - 66, MH = 132;
+      const mx = cx - 40, mz = cz - 50, MH = 132;
       for (const leg of [[-5, -5], [5, -5], [5, 5], [-5, 5]])
         b.box({ x: mx + leg[0], z: mz + leg[1], y: y, w: 2.2, h: MH, d: 2.2, color: 0x545b6b });
       for (let h = 12; h < MH; h += 12) {
@@ -477,17 +481,17 @@
       b.instance('hMastLamp', lampGeo, lampMat, { x: mx, y: y + MH + 18, z: mz, s: 1.5 });
 
       // --- observatory
-      const ox = cx + 64, oz = cz + 58;
-      b.box({ x: ox, z: oz, y: y, w: 46, h: 20, d: 46, color: 0x2a2f3c });
+      const ox = cx + 22, oz = cz + 22;
+      b.box({ x: ox, z: oz, y: y, w: 42, h: 20, d: 42, color: 0x2a2f3c });
       for (let s = 0; s < 4; s++) {
         const a = s * Math.PI / 2;
-        b.box({ x: ox + Math.sin(a) * 23, z: oz + Math.cos(a) * 23, y: y + 7, w: 12, h: 5, d: 12, rot: a, color: 0xffc27a, emissive: true, noCollide: true });
+        b.box({ x: ox + Math.sin(a) * 21, z: oz + Math.cos(a) * 21, y: y + 7, w: 11, h: 5, d: 11, rot: a, color: 0xffc27a, emissive: true, noCollide: true });
       }
-      b.instance('hDome', () => new THREE.SphereGeometry(25, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2),
+      b.instance('hDome', () => new THREE.SphereGeometry(23, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2),
         () => new THREE.MeshStandardMaterial({ color: 0xb9c2cf, roughness: 0.45, metalness: 0.25 }),
         { x: ox, y: y + 20, z: oz });
-      b.collider(ox, oz, 50, 50, 44, y);
-      b.box({ x: ox, z: oz - 24, y: y + 30, w: 8, h: 22, d: 4, color: 0x141821, noCollide: true });
+      b.collider(ox, oz, 46, 46, 42, y);
+      b.box({ x: ox, z: oz - 22, y: y + 30, w: 8, h: 20, d: 4, color: 0x141821, noCollide: true });
 
       b.landmark('SUMMIT LOOKOUT', cx, cz);
     })();
