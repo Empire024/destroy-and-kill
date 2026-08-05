@@ -271,13 +271,33 @@
   // Structures
   // ==========================================================================
 
+  /**
+   * A support pillar from the ground up to a deck at height `topY`.
+   *
+   * Refuses to stand in a carriageway. An elevated structure crosses roads by
+   * definition, so its columns land on them unless something checks — and a
+   * column in the haul road is not scenery, it is a wall the car wedges on at
+   * speed. Both of this district's overpasses had exactly that defect until it
+   * was measured. Skipping beats silently walling off a route; the warning says
+   * so rather than hiding it.
+   */
+  function pillar(b, x, z, topY, w) {
+    const g = groundY(x, z);
+    if (topY - g <= 6) return;                     // deck is already near the ground
+    const rd = b.roads.nearest(x, z);
+    if (rd && rd.d < rd.width * 0.5 + w) {
+      console.warn('[quarry] pillar at', x, z, 'skipped — it stands in a road');
+      return;
+    }
+    b.box({ x: x, z: z, y: g, w: w, h: topY - g - 1.6, d: w, color: CONC_DK });
+  }
+
   /** Pillars, edge kerbs and warning lamps for the half-built overpass. */
   function overpassDressing(b) {
-    const seg = [[2700, -28], [2900, -4], [3010, 9]];
-    for (const [x, y] of seg) {
-      const g = groundY(x, 2940);
-      b.box({ x: x, z: 2940, y: g, w: 9, h: y - g - 1.6, d: 9, color: CONC_DK });
-    }
+    // x=2660 not 2700: a pillar at 2700 stands in the bench C haul road, which
+    // runs north along x=2712. Measured before the move — the car wedged on it.
+    const seg = [[2660, -33], [2900, -4], [3010, 9]];
+    for (const [x, y] of seg) pillar(b, x, 2940, y, 9);
     // unfinished parapet: a broken run of concrete edge blocks, left side only
     for (let i = 0; i < 7; i++) {
       const t = i / 6, x = 2560 + t * 450, y = Y_B + t * 55;
@@ -304,11 +324,11 @@
         b.box({ x: 3400 + sx, z: 1970 + i * 68, y: 3.6 + i * 6.6, w: 2, h: 3.2, d: 60, color: CONC, noCollide: true });
       }
     }
-    // support pillars down the climb
-    for (const [z, y] of [[2010, 7.6], [2090, 15], [2250, 29.8]]) {
-      const g = groundY(3400, z);
-      if (y - g > 6) b.box({ x: 3400, z: z, y: g, w: 8, h: y - g - 1.6, d: 8, color: CONC_DK });
-    }
+    // Support pillars down the climb. The last one is at z=2200, not at the
+    // deck end (2250) — the bench A haul road runs along z=2245 and a pillar
+    // there stands in the carriageway. The end is left cantilevered, which is
+    // what an abandoned span looks like anyway.
+    for (const [z, y] of [[2010, 7.6], [2090, 15], [2200, 26.2]]) pillar(b, 3400, z, y, 8);
     b.box({ x: 3400, z: 1934, y: 1.2, w: 42, h: 0.5, d: 6, color: HAZARD, emissive: true, noCollide: true });
   }
 

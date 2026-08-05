@@ -95,6 +95,46 @@
     return this.map.get(this._key(Math.floor(x / c), Math.floor(z / c))) || null;
   };
 
+  /**
+   * Self-check for the deck rotation frame, run once at load.
+   *
+   * This frame has been inverted twice in this project's history, and both
+   * times the symptom was subtle — a ramp sloping opposite to its own visuals,
+   * a car dropping through an overpass — and cost about an hour to trace. It is
+   * a pure function of two lines of trigonometry, so assert it directly and
+   * fail loudly instead of letting a district author rediscover it.
+   *
+   * A deck with heading `rot` must run y0 -> y1 ALONG that heading. Two probes:
+   * an eastbound deck (the case that silently reverses when the frame is
+   * inverted) and a diagonal one (which the inverted frame lays 90 degrees
+   * across the segment, reading the mid-point instead of the far end).
+   */
+  function verifyDeckFrame() {
+    const probe = new DeckSystem();
+    const mk = rot => probe.add({ x: 0, z: 0, w: 400, d: 100, rot: rot, y0: 0, y1: 10 });
+    const east = mk(Math.PI / 2);
+    const diag = mk(Math.PI / 4);
+    const at = (d, dist, rot) => probe._at(d, Math.sin(rot) * dist, Math.cos(rot) * dist);
+    const gotEast = at(east, 40, Math.PI / 2);      // expect 9   (inverted: 1)
+    const gotDiag = at(diag, 40, Math.PI / 4);      // expect 9   (inverted: 5)
+    const bad = v => v === null || Math.abs(v - 9) > 0.05;
+    if (bad(gotEast) || bad(gotDiag)) {
+      console.error(
+        '[neon-core] DECK ROTATION FRAME IS WRONG. Elevated roads will slope ' +
+        'backwards or be laid across their segment.\n' +
+        '  eastbound deck read ' + gotEast + ' (expected 9)\n' +
+        '  diagonal deck read  ' + gotDiag + ' (expected 9)\n' +
+        '  Fix DeckSystem._at, and remember districts may carry compensating ' +
+        'rotation negations that must be removed in the same change.');
+      return false;
+    }
+    return true;
+  }
+  // NOTE: called at the bottom of this module, not here — DeckSystem's
+  // prototype methods are assigned further down, so calling it at this point
+  // would hit an undefined `add`/`_at` and take the whole world registration
+  // down with it.
+
   // =========================================================================
   // Terrain — analytic height field. Districts register height zones; the
   // field is a max/blend of them so road meshes and physics always agree.
@@ -587,7 +627,10 @@
   }
 
   // expose helpers for district modules that want raw geometry access
-  window.NeonCore = { MeshAccum, SpatialHash, BOUNDS };
+  window.NeonCore = { MeshAccum, SpatialHash, BOUNDS, verifyDeckFrame };
+
+  // Assert the deck rotation frame now that DeckSystem's prototype is complete.
+  verifyDeckFrame();
 
   window.GameWorlds.register({
     id: 'neon',
