@@ -347,6 +347,14 @@
     const reflGeo = () => new THREE.BoxGeometry(1.3, 1.0, 0.6);
     const reflMat = () => new THREE.MeshBasicMaterial({ color: 0xff5a34 });
 
+    /* A barrier offset from one road can land on a different one where they run
+       close — the bypass beside traverse 1, the link road under the first bend.
+       Never leave a solid box standing on a driving surface. */
+    function onSomeRoad(x, z, pad) {
+      const n = b.roads.nearest(x, z);
+      return !!n && n.d < n.width * 0.5 + pad;
+    }
+
     function guard(pts, halfW, lift) {
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i], q = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
@@ -365,8 +373,8 @@
           const ox = p[0] + nx * side * 155, oz = p[1] + nz * side * 155;
           if (ox < MINX || ox > MAXX || oz < MINZ || oz > MAXZ) continue;
           const drop = y0 - H(ox, oz);
-          if (drop >= 8) {
-            const gx = p[0] + nx * side * (halfW + 10), gz = p[1] + nz * side * (halfW + 10);
+          const gx = p[0] + nx * side * (halfW + 10), gz = p[1] + nz * side * (halfW + 10);
+          if (drop >= 8 && !onSomeRoad(gx, gz, 8)) {
             const gy = H(gx, gz);
             b.collider(gx, gz, 12, 12, 5, gy);
             b.instance('hRail', railGeo, railMat, { x: gx, y: gy + 3.1, z: gz, ry: rot });
@@ -379,11 +387,11 @@
           // Cut slope on the uphill side gets a crib wall. Its collider is an
           // axis-aligned box around a rotated solid, so it is pushed well clear
           // of the carriageway or the AABB would eat into the road.
-          if (i % 2 === 0 && H(ox, oz) - y0 >= 14) {
+          const wx = p[0] + nx * side * (halfW + 16), wz = p[1] + nz * side * (halfW + 16);
+          if (i % 2 === 0 && H(ox, oz) - y0 >= 14 && !onSomeRoad(wx, wz, 16)) {
             b.box({
-              x: p[0] + nx * side * (halfW + 16), z: p[1] + nz * side * (halfW + 16),
-              y: y0 - 1.5, w: 5, h: Math.min(15, (H(ox, oz) - y0) * 0.7) + 1.5, d: 26, rot,
-              color: 0x2f3339
+              x: wx, z: wz, y: y0 - 1.5,
+              w: 5, h: Math.min(15, (H(ox, oz) - y0) * 0.7) + 1.5, d: 26, rot, color: 0x2f3339
             });
           }
         }

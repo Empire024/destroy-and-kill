@@ -517,13 +517,15 @@
     // are navigable at night
     for (let x = AL_X0 + 60; x < AL_X1 - 40; x += 74) {
       if (!clearOf(x, 46)) continue;
-      bin(b, x, r() < 0.5 ? AL_A0 + 3.4 : AL_A1 - 3.4, r() * 0.3);
+      // BIN_H/2 exactly, so the bin is flush with the wall — any sliver of a
+      // gap behind it is a notch the collision resolver can wedge the car into
+      bin(b, x, r() < 0.5 ? AL_A0 + 2.5 : AL_A1 - 2.5, 0);
       b.box({ x: x + 24, z: AL_A1 + 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
       if (r() < 0.5) cone(b, x + 34, (AL_A0 + AL_A1) / 2 + (r() - 0.5) * 14);
     }
     for (let x = AL_X0 + 90; x < AL_BX1 - 40; x += 82) {
       if (!clearOf(x, 46)) continue;
-      bin(b, x, r() < 0.5 ? AL_B0 + 3.4 : AL_B1 - 3.4, r() * 0.3);
+      bin(b, x, r() < 0.5 ? AL_B0 + 2.5 : AL_B1 - 2.5, 0);
       b.box({ x: x + 30, z: AL_B0 - 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
     }
   }
@@ -711,8 +713,9 @@
     }
     b.box({ x: 2884, z: 155, y: 0, w: 36, h: 14, d: 178, color: 0x33323f });
     b.box({ x: 2884, z: 66.4, y: 3, w: 26, h: 7, d: 0.8, color: dim(0xffd9a0, 0.8), emissive: true, noCollide: true });
-    b.box({ x: 2996, z: 130, y: 0, w: 34, h: 9, d: 90, color: 0x2b3038 });
-    b.box({ x: 2996, z: 130, y: 9, w: 36, h: 0.8, d: 92, color: 0x9b5cff, emissive: true, noCollide: true });
+    // vacuum bay — flush with the retail run at x=3016, no sliver between them
+    b.box({ x: 2996, z: 130, y: 0, w: 40, h: 9, d: 90, color: 0x2b3038 });
+    b.box({ x: 2996, z: 130, y: 9, w: 42, h: 0.8, d: 92, color: 0x9b5cff, emissive: true, noCollide: true });
     for (const vz of [104, 156]) post(b, 2976, vz, 7, true);
 
     pylon(b, 2866, 84, 22, 22, 28, 0x20e3ff, r, Math.PI / 2, true);
@@ -801,7 +804,7 @@
     // street furniture along the shopfronts
     for (let x = 1580; x < 3860; x += 46) {
       if (r() < 0.35) trolley(b, x, -118 + r() * 6, r() * 3);
-      if (r() < 0.3 && !blocksLane(x, 40)) bin(b, x, 57, 0);
+      if (r() < 0.3 && !blocksLane(x, 40)) bin(b, x, 59.5, 0);   // flush to the shopfront
     }
     // Alternating palms and amber lamps down both sidewalks. Everything solid
     // sits on the 9-wide walkway, so the parking apron stays clear end to end.
