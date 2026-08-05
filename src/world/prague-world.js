@@ -67,16 +67,29 @@
   'use strict';
 
   // ------------------------------------------------------------------ config
-  const RASTER = 1.5;          // collision raster cell, metres
+  /**
+   * World scale. The data is real Prague in real metres, and the player car is
+   * ~4.5 units long — which is correct for a car, but the game's OTHER maps use
+   * 44-unit carriageways, so next to a real 7m street the car reads as enormous
+   * and the whole city looks like a model village. Scaling the map up is the
+   * honest fix: the geography stays exactly right, the car just stops dwarfing
+   * it. Everything derived from the data (extent, raster, roads, colliders,
+   * spawn, minimap) follows from this automatically.
+   */
+  const SCALE = 2.5;
+  const RASTER = 1.5 * SCALE;  // collision raster cell — scales with the world,
+                               // so cell COUNT and erosion cost stay constant
   // Building colliders are pulled back this many raster cells so the historic
   // street grid is actually driveable. 2 cells = 3 m off each face = every
   // street 6 m wider. Raise it if Prague still feels tight; lower it if the car
   // visibly overlaps facades too often. See FootprintRaster._erode.
-  const COLLIDER_EROSION = 2;
-  const CELL_COLLIDE = 12;     // spatial-hash cell for colliders (see note in stats())
-  const CELL_ROAD = 48;        // spatial-hash cell for road segments
+  // With the world scaled up, streets are already wide relative to the car,
+  // so the colliders barely need pulling back. This was 2 at 1x scale.
+  const COLLIDER_EROSION = 1;
+  const CELL_COLLIDE = 12 * SCALE;     // spatial-hash cell for colliders (see note in stats())
+  const CELL_ROAD = 48 * SCALE;        // spatial-hash cell for road segments
   const TILE_N = 3;            // building geometry is split TILE_N x TILE_N for culling
-  const MARGIN = 30;           // playable margin beyond the data extent
+  const MARGIN = 30 * SCALE;           // playable margin beyond the data extent
 
   const ATTRIBUTION = 'Prague map data © OpenStreetMap contributors, licensed under ODbL 1.0.';
   const ATTRIBUTION_URL = 'https://www.openstreetmap.org/copyright';
@@ -319,6 +332,33 @@
   };
 
   // =========================================================================
+  /**
+   * Multiply the whole dataset by `k`, in place, exactly once per load.
+   *
+   * Doing it here rather than at each use site means every downstream
+   * consumer — extent, bounds, raster, road ribbons, colliders, spawn pick,
+   * minimap — sees a consistent world and none of them needs to know the
+   * scale exists. Heights scale too: stretching the ground plan while leaving
+   * buildings their real height would give a city of squat bungalows.
+   *
+   * Guarded so a re-entrant create() cannot scale the same object twice.
+   */
+  function scaleWorld(data, k) {
+    if (!data || data.__scaled) return;
+    data.__scaled = k;
+    const e = data.meta && data.meta.extent;
+    if (e) { e.minX *= k; e.maxX *= k; e.minZ *= k; e.maxZ *= k; }
+    for (const b of data.buildings || []) {
+      if (typeof b.h === "number") b.h *= k;
+      if (typeof b.minH === "number") b.minH *= k;
+      for (const ring of b.rings || []) for (const pt of ring) { pt[0] *= k; pt[1] *= k; }
+    }
+    for (const r of data.roads || []) {
+      if (typeof r.w === "number") r.w *= k;
+      for (const pt of r.pts || []) { pt[0] *= k; pt[1] *= k; }
+    }
+  }
+
   // FootprintRaster — the union of every building footprint on a fixed grid,
   // plus the greedy maximal-rectangle decomposition used for collision.
   // =========================================================================
@@ -486,6 +526,7 @@
       throw err;
     }
 
+    scaleWorld(data, SCALE);
     const meta = data.meta, extent = meta.extent;
     const BOUNDS = {
       minX: extent.minX - MARGIN, maxX: extent.maxX + MARGIN,
