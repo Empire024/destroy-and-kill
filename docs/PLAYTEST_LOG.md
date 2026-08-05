@@ -52,7 +52,7 @@ Every map × every vehicle: `start()` → hold throttle 180 steps → brake to a
 | downtown → strip | pass | 6 | 42 | |
 | strip boulevard | pass | 0 | 0 | |
 | quarry haul road | pass | 0 | 0 | after fix, below |
-| freeway on-ramp → ring | pass | — | — | y climbs 0.4 → 30.1 and holds |
+| freeway on-ramp → ring | see correction below | — | — | my "pass" here was observing a defect |
 | Prague old town | pass | — | — | sustained 125 mph down a street |
 | legacy state highway | pass | — | — | unchanged behaviour |
 
@@ -83,6 +83,25 @@ height for z = 240…220.
 *Fix:* decks now extend 7 units past each segment end (y0/y1 adjusted so the
 plane is identical) and are 10 units wider, so neighbours overlap.
 *Re-test:* continuous climb 0.4 → 30.1, then a ring lap at 310 mph holding y=30.
+
+> **Correction — this "pass" was measuring a defect.** Driving due north from
+> `(-1350, 340)` climbed to the ring because the WEST GATE ramp deck was laid
+> **collinear with the inner loop**. That is why a straight-line test with no
+> steering reached y=30: the ramp was sitting on top of the loop. The same
+> collinearity meant anyone simply driving the inner loop northward was picked
+> up, carried into the air, and funnelled up the ramp by its own barrier — the
+> inner-loop lap failed on that build with the car stuck at y≈20. DOCK GATE had
+> the identical fault against the west service road.
+>
+> The district author found and fixed both by making each ramp leave its feeder
+> road perpendicular. My later test then read y=0 and I filed it as a
+> regression; it was the fix working. Independently reproduced on the current
+> build: the loop centreline at x=−1350 reads **0.00** across z 360→100, while
+> 50 units west at x=−1400 climbs **2.6 → 3.21 → 4.2 → 5.35 → 6.56**.
+>
+> The lesson is the one this log keeps relearning: a straight-line throttle test
+> proves a surface exists under the car, not that the route is correct. It
+> passed for the wrong reason and I published it.
 
 **2. Guardrails placed on the road surface — SERIOUS, fixed**
 Rails offset perpendicular from one hillside segment landed on the *next*
@@ -323,6 +342,39 @@ textures. (Chrome extension internals also appear; they are not the game.)
 its artwork. The minimap is hidden on real phones by the existing media query.
 
 ---
+
+## Open finding — PRAGUE navigability not established
+
+The automated route harness **cannot drive Prague**. It wedges after roughly 195
+units of travel, consistently, at every tuning tried: lookahead 55/20/14/10 at
+110/60/45/35/30 mph, all stuck between step 79 and 162 with 31–44 off-road
+steps. Neon and Legacy routes complete cleanly with the same harness.
+
+What *does* work, measured on the same build:
+
+- Straight-line driving sustains **125–215 mph** down the spawn street.
+- Collision is solid — the car stops at buildings rather than passing through.
+- Spawn is on a road (`nearestRoad().d = 0`), 1,427 buildings and 13,893
+  colliders load, 54 draw calls / 131k triangles, no console errors.
+
+Two hypotheses were checked and **rejected**: it is not the harness's lookahead
+(shortening it made no difference), and it is not the road graph including
+footpaths — `roads.addSegment` is called only inside `if (drive)`, so
+`nearestRoad` returns drivable centrelines only. The district author got that
+right.
+
+The most likely explanation is simply that Prague 1's streets are real: ~7 m
+wide with buildings hard against both sides, versus 44-unit carriageways
+everywhere else on the map. A proportional road-follower tuned for a 44-wide
+arcade road has no chance in a 7 m medieval lane, and the car is ~4.5 units long
+in a street barely wider than it.
+
+**Stated plainly: I do not know whether a human can drive Prague comfortably.**
+The district author reported driving it successfully; my harness cannot
+reproduce that, and I could not distinguish "hard but fun, as intended" from
+"too tight to be playable" without a human at the keyboard. It is shipped
+because everything measurable about it is correct, but it is the one part of
+this build I would want a person to try before calling it done.
 
 ## Not tested
 
