@@ -184,14 +184,17 @@ currentVehicle / paintByVehicle / tuneByVehicle / shopCooldowns`, plus
 `progression.defaultPaint` **read** as the paint fallback (thank you — it is
 used, do not drop it).
 
-**One new subtree, needs adding to `docs/SAVE_SCHEMA.md` by its owner:**
+**One new subtree — now documented** by the save owner in `docs/SAVE_SCHEMA.md`:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `progression.stats` | `{raceWins, zoneRecords, coins}` | counters the unlock rules test |
+| `progression.stats` | `{raceWins, zoneRecords, coins}` | lifetime counters the unlock rules test |
 
 It is deliberately **not** the schema's `coinsCollected`, which is the events
-system's `{worldId:[coinId]}` set — two different things with one obvious name.
+system's `{worldId:[coinId]}` identity set — two different things with one
+obvious name. The schema now carries that warning, and the matching
+`stats.raceWins` vs `raceResults[id].wins` / `stats.zoneRecords` vs
+`driftZoneBests` splits, in its own words.
 
 ---
 
