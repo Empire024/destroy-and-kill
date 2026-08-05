@@ -49,6 +49,11 @@ migration 12/14 · Legacy excision 6/7.
 
 ---
 
+> **F1, F2, F3, F4 and F5 were FIXED after this report's gate run** — commits
+> `35a5b7e` (F3/F4/F5, lead) and `3d29d11` + `517b933` (F1/F2, help owner). The
+> report body below describes the build as gated; this section describes the
+> build as shipped, and the two now agree.
+
 ## Fix round — all five actionable findings closed and re-verified
 
 After the gate run, F3/F4/F5 were fixed by the lead (`35a5b7e`) and F1/F2 by the
@@ -62,6 +67,7 @@ edge cases**, and the full static gate re-run:
 | F5 dead save quartet | Removed; `game:saved` retired from the contract | `window.saveGame` and `window.loadGame` both `undefined`; architecture doc's event list corrected |
 | F1 help panel stale copy | `Enter` reworded to "join a race, enter a body shop" | No entry matches `/mission\|safehouse\|hospital/` anywhere in the panel |
 | F2 help panel missing radio | RADIO section seeded as a fallback that radio can replace in place | Section renders; `J`/`K` verified live (off → `neonwave` → off) |
+| F2 (follow-up) panel vs README | Cross-checked every row against README's control table, the current source of truth. WEAPONS and the mouse-drag orbit line were also missing; added as replaceable fallbacks | All four weapon keys driven live: `Q` draws melee, `1`/`2`/`3` select melee/pistol/rifle exactly, `F` fires (pistol mag 12 → 11), `L` reloads. Panel is now 8 sections and matches README |
 
 Post-fix regression check: **16/16 systems live, 0 failures**, car drives 176
 units to 164 mph, save round-trips, a race still starts and reaches countdown.

@@ -57,14 +57,23 @@
     ]],
     ['VIEW & MAP', [
       ['C', 'Camera: chase / bonnet / side / far'],
+      ['Mouse drag', 'Orbit the chase camera — wheel zooms, recentres itself'],
       ['M  or  Tab', 'Full map — click to set a waypoint'],
       ['H', 'This panel']
     ]],
-    /* Radio owns J/K. This is a fallback so the panel is never silent about
-     * them; if radio calls addControls('RADIO', …) its version replaces this
-     * one in place, which is exactly what duplicate-title replacement is for. */
+    /* Combat and radio own these keys; these rows are fallbacks so the panel is
+     * never silent about a live binding. If either system calls addControls with
+     * the same title its version replaces this one in place — which is exactly
+     * what duplicate-title replacement is for. Cross-checked against README's
+     * control table, which is the current source of truth. */
+    ['WEAPONS', [
+      ['Q', 'Draw / cycle weapon'],
+      ['1  2  3', 'Melee / pistol / rifle direct'],
+      ['F', 'Fire — hold for the rifle'],
+      ['L', 'Reload']
+    ]],
     ['RADIO', [
-      ['J  /  K', 'Previous / next station']
+      ['J  /  K', 'Radio station down / up']
     ]],
     ['SYSTEM', [
       ['N', 'Mute / unmute'],
