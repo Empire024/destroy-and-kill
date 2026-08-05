@@ -2196,7 +2196,12 @@ function smashBarrier(col,closing,vel){
 const tireSmoke=[],tireMarks=[],engineSmoke=[];
 const tireSmokeGeo=new THREE.SphereGeometry(1,7,6),tireMarkGeo=new THREE.BoxGeometry(1,1,1);
 tireSmokeGeo.userData.shared=true;tireMarkGeo.userData.shared=true;
-const tireMarkMat=new THREE.MeshBasicMaterial({color:0x080808,transparent:true,opacity:.64,depthWrite:false});
+// polygonOffset is what stops marks flickering against the surface they lie on:
+// a 0.05 lift is smaller than the depth buffer can resolve at distance over a
+// 0.25..5200 range, so without the bias the road and the mark trade wins per
+// pixel per frame ("pop in and out"). The offset biases the mark toward the
+// camera in depth only — geometrically it stays on the road.
+const tireMarkMat=new THREE.MeshBasicMaterial({color:0x080808,transparent:true,opacity:.64,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
 function axleWheelWorldPositions(axle='rear'){
   if(!car)return null;
   const style=car.userData.style||CAR_STYLES[1],fx=Math.sin(carState.heading),fz=Math.cos(carState.heading),rx=Math.cos(carState.heading),rz=-Math.sin(carState.heading),sign=axle==='front'?1:-1;
@@ -2229,7 +2234,13 @@ function addTireMark(a,b,intensity){
   // why skids appeared to work on some surfaces and not others. Sample the real
   // ground under each end instead, and pitch the strip along the grade so a mark
   // laid on a 20% riser lies on it rather than stabbing through it.
-  const ya=WORLD_groundHeightAt(a.x,a.z,carState.y),yb=WORLD_groundHeightAt(b.x,b.z,carState.y);
+  let ya=WORLD_groundHeightAt(a.x,a.z,carState.y),yb=WORLD_groundHeightAt(b.x,b.z,carState.y);
+  // On elevated roads a wheel-width sample can miss the deck polygon and snap
+  // to the terrain far below, which made whole stretches of freeway refuse to
+  // take rubber. The car is ON the surface — its own height is the truth for
+  // any end that disagrees wildly with it.
+  if(Math.abs(ya-carState.y)>2.5)ya=carState.y;
+  if(Math.abs(yb-carState.y)>2.5)yb=carState.y;
   if(Math.abs(yb-ya)>3.2)return;   // straddling a deck edge or a cliff lip: no mark rather than a wrong one
   const mesh=new THREE.Mesh(tireMarkGeo,tireMarkMat);
   mesh.position.set((a.x+b.x)/2,(ya+yb)*.5+.05,(a.z+b.z)/2);
@@ -3147,16 +3158,16 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   if(dead||dying) return;   // no controls once the car is on fire, nor on the WASTED screen
   if(k==='c'){camMode=(camMode+1)%4;cameraSmoothingReady=false;}
   if(k==='r') resetCar();
-  // Mute moved M -> U: M is the full map now (the nav system owns it, with the
-  // engine fallback below so the map still opens if nav ever fails to boot).
-  if(k==='u'){ muted=!muted; addToast(muted?'🔇 Muted':'🔊 Sound on','#9ab'); }
+  // Mute lives on N: M is the full map, and U joined the shifter pairs below.
+  if(k==='n'){ muted=!muted; addToast(muted?'🔇 Muted':'🔊 Sound on','#9ab'); }
   if(k==='m') toggleFullMap();
   if(k==='tab') toggleFullMap();
   if(k==='e') { if(onFoot) enterNearestCar(); else exitCar(); }
-  // Z upshifts as well as X: on QWERTY that is the key immediately left of X, so
-  // the pair falls under the left hand whichever way round the bottom row is.
-  if(!e.repeat&&(k==='x'||k==='z')) requestManualShift(1);
-  if(!e.repeat&&k==='y') requestManualShift(-1);
+  // Shifter pairs are QWERTZ-proof: Y and Z swap places between QWERTY and
+  // QWERTZ layouts, so BOTH are downshift, and X gets U as its upshift twin —
+  // whichever two keys sit under your hand, one pair of them shifts.
+  if(!e.repeat&&(k==='x'||k==='u')) requestManualShift(1);
+  if(!e.repeat&&(k==='y'||k==='z')) requestManualShift(-1);
   if((k==='enter')&&started) doInteract();
 });
 addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
@@ -4665,8 +4676,8 @@ function hud(){stats.cash=999999999999;stats.health=playerHearts/3*100;
   const needDown=driveGear>1&&fakeRpm<1250&&mph>5;
   const showShift=powerShiftReady||shiftNeeded||needDown||limiterActive;
   shiftPromptEl.classList.toggle('show',showShift); shiftPromptEl.classList.toggle('danger',limiterActive);
-  if(limiterActive||powerShiftReady||shiftNeeded) shiftPromptEl.textContent='SHIFT · X';
-  else if(needDown) shiftPromptEl.textContent='DOWN · Y';
+  if(limiterActive||powerShiftReady||shiftNeeded) shiftPromptEl.textContent='SHIFT · X/U';
+  else if(needDown) shiftPromptEl.textContent='DOWN · Z/Y';
   const psi=clamp(turboPsi,0,1.5),psiAngle=-125+(psi/1.5)*250;
   boostPsiEl.textContent=psi.toFixed(2); boostNeedleEl.style.transform=`rotate(${psiAngle}deg)`;
   boostGaugeEl.classList.toggle('boosting',psi>.18);
