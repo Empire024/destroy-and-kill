@@ -37,8 +37,8 @@ window.RACES = [
     anchors: [{ x: -1150, z: 810 }, { x: 250, z: 810 }, { x: 250, z: -870 }, { x: 1090, z: -870 }, { x: 1090, z: 530 }],
     opponents: [
       { name: 'TALLY', skill: 0.36, aggression: 0.2, mistakes: 0.55, tuneKey: 'commuter', color: 0xd7c98c },
-      { name: 'RIVET', skill: 0.50, aggression: 0.35, mistakes: 0.35, tuneKey: 'streetDrift', color: 0x33d6ff },
-      { name: 'HALO', skill: 0.58, aggression: 0.45, mistakes: 0.25, tuneKey: 'streetDrift', color: 0xff4d6d }
+      { name: 'RIVET', skill: 0.44, aggression: 0.35, mistakes: 0.40, tuneKey: 'streetDrift', color: 0x33d6ff },
+      { name: 'HALO', skill: 0.51, aggression: 0.45, mistakes: 0.32, tuneKey: 'streetDrift', color: 0xff4d6d }
     ]
   },
 
@@ -53,10 +53,10 @@ window.RACES = [
     // is broken between z=2860 and z=3580 and the route detours 1120 units.
     anchors: [{ x: -1180, z: 2860 }, { x: 530, z: 2860 }, { x: 530, z: 3580 }, { x: -1180, z: 3580 }, { x: -1180, z: 2860 }],
     opponents: [
-      { name: 'CRANE', skill: 0.42, aggression: 0.30, mistakes: 0.45, tuneKey: 'commuter', color: 0xffd23f },
-      { name: 'BOLLARD', skill: 0.55, aggression: 0.55, mistakes: 0.30, tuneKey: 'streetDrift', color: 0x4dff88 },
-      { name: 'GANTRY', skill: 0.62, aggression: 0.40, mistakes: 0.25, tuneKey: 'proDrift', color: 0xff8c42 },
-      { name: 'QUAY', skill: 0.70, aggression: 0.25, mistakes: 0.20, tuneKey: 'gripper', color: 0xa66bff }
+      { name: 'CRANE', skill: 0.38, aggression: 0.30, mistakes: 0.45, tuneKey: 'commuter', color: 0xffd23f },
+      { name: 'BOLLARD', skill: 0.46, aggression: 0.55, mistakes: 0.35, tuneKey: 'streetDrift', color: 0x4dff88 },
+      { name: 'GANTRY', skill: 0.52, aggression: 0.40, mistakes: 0.30, tuneKey: 'streetDrift', color: 0xff8c42 },
+      { name: 'QUAY', skill: 0.57, aggression: 0.25, mistakes: 0.25, tuneKey: 'streetDrift', color: 0xa66bff }
     ]
   },
 
@@ -68,9 +68,9 @@ window.RACES = [
     anchors: [{ x: -3418, z: -1450 }, { x: -3052, z: -1246 }, { x: -2672, z: -900 },
               { x: -2180, z: -505 }, { x: -1975, z: -1120 }, { x: -1500, z: -30 }],
     opponents: [
-      { name: 'SWITCHBACK', skill: 0.40, aggression: 0.25, mistakes: 0.50, tuneKey: 'streetDrift', color: 0x20e3ff },
-      { name: 'CREST', skill: 0.53, aggression: 0.35, mistakes: 0.30, tuneKey: 'streetDrift', color: 0xff2d9b },
-      { name: 'GUARDRAIL', skill: 0.61, aggression: 0.50, mistakes: 0.25, tuneKey: 'proDrift', color: 0xffffff }
+      { name: 'SWITCHBACK', skill: 0.38, aggression: 0.25, mistakes: 0.50, tuneKey: 'streetDrift', color: 0x20e3ff },
+      { name: 'CREST', skill: 0.47, aggression: 0.35, mistakes: 0.35, tuneKey: 'streetDrift', color: 0xff2d9b },
+      { name: 'GUARDRAIL', skill: 0.55, aggression: 0.50, mistakes: 0.30, tuneKey: 'streetDrift', color: 0xffffff }
     ]
   },
 

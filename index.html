@@ -1423,6 +1423,9 @@ const stats={cash:0,score:0,wanted:0,health:100,nitro:100,_decay:0};
 // ---------- Traffic ----------
 // Each car lives in a lane on one road line, drives along it, and wraps within the grid.
 const traffic=[]; const trafficColors=[0xff4d6d,0x4dff88,0xffd23f,0xff8c42,0xa66bff,0xffffff,0x33d6ff];
+// Solid circles game systems ask the collision resolver to honour (race
+// opponents). Entries: {x, z, y, r?, solid?} — see the resolver walk.
+const extraCollidables=[];
 // Traffic AI: each car has position/heading/speed and actually DRIVES — it steers toward
 // the next waypoint on the road graph, braking into corners, arcing through, and speeding
 // back up on the straight. Picks a route node-to-node; never leaves the grid.
@@ -4379,6 +4382,17 @@ function updateDrive(dt){
           }
         }
       }
+      // Extra car-sized collidables published by game systems (race opponents —
+      // which must NOT live in traffic[], or the population manager would
+      // recycle them mid-race). Solid push-out only: the owning system prices
+      // every contact consequence itself, so there is no damage grading here.
+      for(let ei=0;ei<extraCollidables.length;ei++){ const t=extraCollidables[ei];
+        if(!t||t.solid===false) continue;
+        const ddx=carState.x-t.x, ddz=carState.z-t.z;
+        if(ddx*ddx+ddz*ddz<8.2*8.2&&Math.abs((t.y||0)-carState.y)<=6){
+          const im=circlePush(carState,4.2,t.x,t.z,t.r||4.0,vel,0.15); if(im>impact)impact=im;
+        }
+      }
       // Cops distinguish who initiated the collision. If your velocity is clearly
       // driving into them, they get blasted. If their chase car closes on you, you lose a heart.
       for(const c of [...cops]){
@@ -5121,7 +5135,7 @@ if(window.GameSystems){
     },
 
     actors:{traffic,peds,cops,makeCar,makeCharacter,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,killCivilian,
-            igniteTraffic,removeTrafficObject,removePedObject,
+            igniteTraffic,removeTrafficObject,removePedObject,extraCollidables,
             get densityScale(){return densityScale;},set densityScale(v){densityScale=clamp(+v||1,.2,3);}},
 
     vehicles:{
@@ -5145,10 +5159,12 @@ if(window.GameSystems){
       addScore(n){stats.score+=Math.max(0,n|0);},
       addWanted(n){stats.wanted=clamp(stats.wanted+(n|0),0,5);},
       setWanted(n){stats.wanted=clamp(n|0,0,5);},
-      teleportCar(x,z,heading){
+      teleportCar(x,z,heading,atY){
         carState.x=x;carState.z=z;if(heading!=null)carState.heading=heading;
         carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;
-        carState.y=WORLD_groundHeightAt(x,z,carState.y);resetDriftPhysics();
+        // atY is the multi-level hint: a race grid ON the freeway deck must
+        // resolve to the deck, not to the street (or sea) under it.
+        carState.y=WORLD_groundHeightAt(x,z,atY!=null?atY:carState.y);resetDriftPhysics();
         if(car){car.position.set(x,carState.y,z);car.rotation.set(0,carState.heading,0);}
         playerX=x;playerZ=z;cameraSmoothingReady=false;
       },

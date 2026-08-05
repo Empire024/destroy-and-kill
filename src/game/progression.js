@@ -61,6 +61,7 @@
   let tuneCfg = Object.create(null);
   let counters = { raceWins: 0, zoneRecords: 0, coins: 0 };
   let currentId = null;
+  let lastSpend = null;                 // {amount, reason, at} — debug only, not persisted
 
   let cardsEl = null, cardsBuilt = false, lastSelectionOpen = false;
   const offs = [];
@@ -288,10 +289,13 @@
     wallet += v; persist(SP.wallet, wallet);
     return wallet;
   }
-  function spend(n) {
+  /** `reason` is optional and only logged — callers (events' race entry fees)
+   *  already pass one, and it is the hook a spend ledger would hang off. */
+  function spend(n, reason) {
     const v = Math.max(0, Math.round(num(n, 0)));
     if (v > wallet) return false;
     wallet -= v; persist(SP.wallet, wallet);
+    lastSpend = { amount: v, reason: reason || '', at: Date.now() };
     return true;
   }
 
@@ -791,6 +795,16 @@
       offs.push(GameSystems.events.on('coin:collected', d => {
         counters.coins++; saveCounters();
         credit(d && d.value);
+        refreshWalletLine();
+        evaluateUnlocks(true);
+      }));
+      // Finishing a whole coin line pays a bonus on top. NO counter moves here:
+      // every coin in the route was already counted by coin:collected, and
+      // events owns the banner and the toast for it. Without this listener the
+      // bonus silently vanished — events only falls back to addScore when
+      // api('progression') is absent, and we are present.
+      offs.push(GameSystems.events.on('coinroute:complete', d => {
+        credit(d && d.reward);
         refreshWalletLine();
         evaluateUnlocks(true);
       }));

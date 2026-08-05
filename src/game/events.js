@@ -57,7 +57,7 @@
   // What an opponent's `tuneKey` is worth. The AI is kinematic — it does not run
   // the vehicle model — so the car it "drives" only shows up as a straight-line
   // ceiling. Ordered like the real tunes: the commuter really is comically slow.
-  const TUNE_SPEED = { commuter: 0.74, streetDrift: 1.00, proDrift: 1.06, gripper: 1.10 };
+  const TUNE_SPEED = { commuter: 0.82, streetDrift: 1.00, proDrift: 1.06, gripper: 1.10 };
 
   let ctx = null, THREE = null;
   let root = null, coinGroup = null, zoneGroup = null, raceGroup = null;
@@ -186,21 +186,34 @@
   /**
    * Put the player's car down at (x,z) ON A GIVEN LEVEL.
    *
-   * `ctx.engine.teleportCar` resolves its own height with
-   * `groundHeightAt(x, z, carState.y)` — the CURRENT height as the level hint —
-   * so teleporting from the street onto the freeway deck 30 units up lands the
-   * car under the deck instead. On COASTAL FREEWAY that is open water: measured
-   * before this, the grid placed the player at y = -9 and it drowned during the
-   * countdown, every time.
-   *
-   * carState is a co-owned live object and this writes exactly one field of it —
-   * the same field teleportCar is about to overwrite — purely to seed that hint.
-   * The clean fix is `teleportCar(x, z, heading, atY)`, which GAME_DEBUG.teleport
-   * already has and the seam does not; it is in the handoff as a ctx request.
+   * `atY` is the multi-level hint `teleportCar` feeds to `groundHeightAt`.
+   * Without it the current height is the hint, so a grid on the freeway deck
+   * resolves to the street — which on COASTAL FREEWAY is open water: the car
+   * landed at y = -9 and drowned during the countdown, every time.
    */
   function placeCar(x, z, heading, levelY) {
-    if (levelY != null) ctx.carState.y = ctx.world.groundHeightAt(x, z, levelY);
-    ctx.engine.teleportCar(x, z, heading);
+    ctx.engine.teleportCar(x, z, heading, levelY);
+  }
+
+  /**
+   * Publish the racing field to the engine's collision resolver.
+   *
+   * `ctx.actors.extraCollidables` is a live array of solid circles the player's
+   * resolver pushes out of — push-out ONLY. Every consequence of a contact
+   * (the shove, the speed loss, the sidestep, the crash sound) is still priced
+   * here, in `updateRace`. Opponents cannot live in `traffic[]` instead: the
+   * population manager would recycle them mid-race and the lane AI would steer
+   * them off the racing line.
+   */
+  function publishCollidables(ops) {
+    const list = ctx.actors && ctx.actors.extraCollidables;
+    if (!list) return;
+    for (const o of ops) { o.r = 4.0; o.solid = true; list.push(o); }
+  }
+  function unpublishCollidables(ops) {
+    const list = ctx.actors && ctx.actors.extraCollidables;
+    if (!list) return;
+    for (const o of ops) { const i = list.indexOf(o); if (i >= 0) list.splice(i, 1); }
   }
 
   // -------------------------------------------------------------- save i/o ---
@@ -238,12 +251,25 @@
     if (!SHARED[key]) { SHARED[key] = make(); SHARED[key].userData.shared = true; }
     return SHARED[key];
   }
+  /**
+   * Dispose everything under `g` that this module allocated — and NOTHING else.
+   *
+   * Recursive rather than `traverse`, because it has to be able to stop at a
+   * subtree: `ctx.actors.makeCharacter()` builds its crew out of the ENGINE's
+   * pedestrian rig (`pedLegGeo`, `pedTorsoGeo`, `PED_FACE_MATS[0]` …), which the
+   * instanced crowd and the player's own on-foot body share. A blanket
+   * `traverse(dispose)` over a start line would therefore delete the geometry of
+   * every pedestrian in the city on the first map change. Anything marked
+   * `userData.noDispose` is detached and left intact; `userData.shared` marks
+   * this module's own cache.
+   */
   function disposeTree(g) {
     if (!g) return;
-    g.traverse(o => {
-      if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose && o.geometry.dispose();
-      if (o.material && !Array.isArray(o.material) && !o.material.userData.shared) o.material.dispose && o.material.dispose();
-    });
+    if (g.userData && g.userData.noDispose) { if (g.parent) g.parent.remove(g); return; }
+    const kids = g.children.slice();
+    for (let i = 0; i < kids.length; i++) disposeTree(kids[i]);
+    if (g.geometry && !g.geometry.userData.shared) g.geometry.dispose && g.geometry.dispose();
+    if (g.material && !Array.isArray(g.material) && !g.material.userData.shared) g.material.dispose && g.material.dispose();
     if (g.parent) g.parent.remove(g);
   }
 
@@ -614,7 +640,7 @@
   // =========================================================================
   const races = {
     list: [], state: 'idle', active: null, pending: null,
-    ui: null, pool: [], rings: null, confirmAbandon: 0
+    ui: null, pool: [], crewPool: [], rings: null, confirmAbandon: 0
   };
 
   const coneGeo = () => shared('cone', () => new THREE.ConeGeometry(1.1, 3.2, 6));
@@ -679,7 +705,7 @@
         def: def, poly: poly, cum: cum, cps: buildCheckpoints(poly, cum),
         length: cum[cum.length - 1], heading: headingAt(poly, cum, 0),
         start: { x: poly[0].x, z: poly[0].z, y: poly[0].y || 0 },
-        group: null, parked: []
+        group: null, parked: [], crew: []
       };
       races.list.push(r);
       buildStartLine(r);
@@ -734,20 +760,20 @@
       const lat = (i - (ops.length - 1) / 2) * 9;
       const cx = r.start.x + rx * lat + sx * -26, cz = r.start.z + rz * lat + sz * -26;
       const color = o.color == null ? ctx.actors.trafficColors[i % ctx.actors.trafficColors.length] : o.color;
-      const mesh = ctx.actors.makeCar(color, false, ctx.actors.CAR_STYLES[4]);
+      const mesh = takeCar(color);
       mesh.position.set(cx, ctx.world.groundHeightAt(cx, cz, gy), cz);
       mesh.rotation.y = h;
-      g.add(mesh);                                             // reparents out of `scene`
+      g.add(mesh);                                             // reparents out of raceGroup
       r.parked.push(mesh);
     }
     if (ctx.actors.makeCharacter) {
       for (let i = 0; i < 2; i++) {
         const cx = r.start.x + rx * (i ? 16 : -16) + sx * -8, cz = r.start.z + rz * (i ? 16 : -16) + sz * -8;
-        const ch = ctx.actors.makeCharacter();
-        ch.visible = true;
+        const ch = takeCrew();
         ch.position.set(cx, ctx.world.groundHeightAt(cx, cz, gy), cz);
         ch.rotation.y = h + (i ? -0.9 : 0.9);
         g.add(ch);
+        r.crew.push(ch);
       }
     }
     r.group = g;
@@ -760,13 +786,20 @@
     for (const r of races.list) {
       if (inter) inter.removePrompt('race-' + r.def.id);
       if (nav) nav.removePOI('race-' + r.def.id);
+      for (const m of r.parked) giveCar(m);          // back to the pool, not the bin
+      for (const c of r.crew) giveCrew(c);
       disposeTree(r.group);
     }
     races.list.length = 0;
     if (races.rings) { races.rings.cur.visible = false; races.rings.next.visible = false; }
   }
 
-  // ---- opponent mesh pool --------------------------------------------------
+  // ---- mesh pools ----------------------------------------------------------
+  // Both the parked field at every start line and the cars actually racing come
+  // out of the same pool. `makeCar` allocates six geometries and five materials
+  // a time, and there are 18 parked cars on NEON alone — rebuilding them on
+  // every map change was the entire per-switch geometry churn.
+  const POOL_MAX = 32;
   function takeCar(color) {
     let mesh = races.pool.pop();
     if (!mesh) mesh = ctx.actors.makeCar(color, false, ctx.actors.CAR_STYLES[4]);
@@ -779,7 +812,21 @@
     if (!mesh) return;
     mesh.visible = false;
     if (mesh.parent) mesh.parent.remove(mesh);
-    if (races.pool.length < 8) races.pool.push(mesh); else disposeTree(mesh);
+    if (races.pool.length < POOL_MAX) races.pool.push(mesh); else disposeTree(mesh);
+  }
+  /** Crew are pooled and NEVER disposed — see disposeTree for why. */
+  function takeCrew() {
+    let mesh = races.crewPool.pop();
+    if (!mesh) { mesh = ctx.actors.makeCharacter(); mesh.userData.noDispose = true; }
+    mesh.visible = true;
+    raceGroup.add(mesh);
+    return mesh;
+  }
+  function giveCrew(mesh) {
+    if (!mesh) return;
+    mesh.visible = false;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    races.crewPool.push(mesh);
   }
 
   // ---- UI ------------------------------------------------------------------
@@ -921,6 +968,7 @@
         mistakeT: 0, stuckT: 0, offT: 0, dodgeT: 0, hitCd: 0, finished: false, finishTime: 0, shoveX: 0, shoveZ: 0, tick: 0
       };
     }
+    publishCollidables(ops);
     races.state = 'countdown';
     races.pending = null;
     ensureRings();
@@ -947,6 +995,7 @@
       }
       return;
     }
+    unpublishCollidables(a.opponents);
     for (const o of a.opponents) giveCar(o.mesh);
     for (const mesh of a.r.parked) mesh.visible = true;
     if (races.rings) { races.rings.cur.visible = false; races.rings.next.visible = false; }
@@ -1114,7 +1163,7 @@
         const nav = api('nav');
         if (nav && nav.setCompassTarget) nav.setCompassTarget(a.r.cps[0].x, a.r.cps[0].z, '#ffd23f');
       }
-      updateRaceHud(ui);           // opponents are held; the player may creep — arcade, by design
+      updateRaceHud(ui, dt);           // opponents are held; the player may creep — arcade, by design
       return;
     }
     if (races.state !== 'racing') return;
@@ -1183,7 +1232,7 @@
       placeCar(a.autopilot.x, a.autopilot.z, a.autopilot.heading, a.autopilot.y);
     }
 
-    updateRaceHud(ui);
+    updateRaceHud(ui, dt);
   }
 
   function takeCheckpoint(a) {
@@ -1216,8 +1265,15 @@
     return rows;
   }
 
-  function updateRaceHud(ui) {
+  /** 6 Hz, not 60: standings() builds an array of objects and the panel cannot
+   *  be read faster than this anyway. Keeps the only allocating call in the race
+   *  path off nine frames in ten. */
+  let hudClock = 0;
+  function updateRaceHud(ui, dt) {
     const a = races.active;
+    hudClock -= dt || 0;
+    if (hudClock > 0) return;
+    hudClock = 1 / 6;
     const rows = standings(a);
     ui.hPos.textContent = 'P' + (rows.findIndex(r => r.you) + 1) + '/' + rows.length;
     ui.hLap.textContent = 'LAP ' + Math.min(a.lap + 1, a.laps) + '/' + a.laps + ' · CP ' + (a.cpIndex + 1) + '/' + a.r.cps.length;
@@ -1266,9 +1322,41 @@
   function closeResults() {
     const a = races.active;
     if (races.ui) races.ui.results.style.display = 'none';
-    if (a) { for (const o of a.opponents) giveCar(o.mesh); for (const m of a.r.parked) m.visible = true; }
+    if (a) {
+      unpublishCollidables(a.opponents);
+      for (const o of a.opponents) giveCar(o.mesh);
+      for (const m of a.r.parked) m.visible = true;
+    }
     races.active = null;
     races.state = 'idle';
+  }
+
+  // =========================================================================
+  //  prop culling
+  // ----------------------------------------------------------------------
+  // A start line is a flag, twelve cones, three-to-five parked cars and two
+  // people, and `makeCar` alone is nine meshes. Five of those plus four zone
+  // arches measured 99 draw calls at the downtown spawn with nothing else on
+  // screen. Three.js frustum-culls them individually, but a whole start line
+  // 3 km away still costs a per-object test and pops into view through the
+  // fog; a group-level distance gate at 2 Hz costs nine hypots a second.
+  // =========================================================================
+  // Zone groups are left to Three's own per-object frustum culling: an arch is
+  // eight small meshes and the chevrons are one InstancedMesh each, so there is
+  // nothing here worth a distance gate.
+  const PROP_RADIUS = 520;
+  let cullClock = 0;
+  function cullProps(dt) {
+    cullClock -= dt;
+    if (cullClock > 0) return;
+    cullClock = 0.5;
+    const px = ctx.player.x, pz = ctx.player.z;
+    for (const r of races.list) {
+      if (!r.group) continue;
+      const dx = r.start.x - px, dz = r.start.z - pz;
+      // Never hide the field of the race actually being driven.
+      r.group.visible = (races.active && races.active.r === r) || dx * dx + dz * dz < PROP_RADIUS * PROP_RADIUS;
+    }
   }
 
   // =========================================================================
@@ -1343,6 +1431,7 @@
       updateCoins(dt);
       updateRace(dt);
       updateZones(dt);
+      cullProps(dt);
     },
 
     onKey(key) {
@@ -1377,7 +1466,7 @@
           zones: zones.list.map(z => ({ id: z.def.id, len: Math.round(z.length), width: z.half * 2, best: Math.round(z.best) })),
           races: races.list.map(r => ({ id: r.def.id, cps: r.cps.length, len: Math.round(r.length), laps: r.def.laps })),
           excluded: excluded.slice(),
-          state: races.state, zoneMult: zones.multSet, pool: races.pool.length
+          state: races.state, zoneMult: zones.multSet, pool: races.pool.length, crewPool: races.crewPool.length
         };
       },
       raceState() {

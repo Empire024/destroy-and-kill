@@ -83,17 +83,31 @@ Behaviour you must know:
 | `paintByVehicle` | object | `{tuneKey: 0xRRGGBB}` — per-vehicle body colour. |
 | `tuneByVehicle` | object | `{tuneKey: {…}}` — per-vehicle upgrades/tuning chosen in the body shop. Shape owned by the progression system. |
 | `raceResults` | object | `{raceId: {best: seconds, wins: n, runs: n}}`. Use `recordBest('progression.raceResults.<id>.best', t, false)`. |
-| `driftZoneBests` | object | `{zoneId: score}` — best drift score per zone. `recordBest(..., true)`. |
-| `coinsCollected` | object | `{worldId: [coinId, …]}` — the **identity set** of collectibles already picked up, per map. Owned by the events system; it answers "may this specific coin still be collected?" and must stay a set of ids. |
+| `driftZoneBests` | object | `{zoneId: number}` — best drift score per zone, higher-is-better. Always write it with `recordBest('progression.driftZoneBests.<zoneId>', score, true)`, never a bare `set()`, or a bad run overwrites a good one. |
+| `coinsCollected` | object | `{worldId: {routeId: [int, …]}}` — e.g. `{"neon":{"nc-downtown-loop":[0,1,2,3,32]}}`. The **identity set** of collectibles already picked up, nested per world then per route, each a sorted array of integer indices. Owned by the events system; it answers "may this specific coin still be collected?". Integers, not string ids, keep a full 278-coin map near 1 KB — see the hazard below before changing a route. |
 | `shopCooldowns` | object | `{shopId: epochMs}` — when a shop becomes usable again. Absolute ms so it survives a reload. |
 | `stats` | object | `{raceWins, zoneRecords, coins}` — lifetime **counters** for display (career screen, totals). Owned by the progression system. |
 
+> **Migration hazard — `coinsCollected` indices are positional.** Each integer is
+> a coin's index along its route's *resolved polyline*, not a stable identifier.
+> Re-authoring a route's anchors renumbers every coin after the edit, so a saved
+> `[0,1,2,3,32]` silently starts pointing at different coins: some the player
+> never touched read as collected, some they did read as fresh. Nothing detects
+> this — the data stays well-formed and wrong.
+>
+> So: **changing a route's anchors is a save migration, not a content tweak.**
+> Bump the route id (`nc-downtown-loop` → `nc-downtown-loop-2`) so the old entry
+> is simply orphaned and the route starts clean, or write an explicit remap. If
+> you need edits to be free, the fix is to stop storing positions — give coins
+> durable ids and store those, at a cost of roughly 5–10× the bytes.
+
 > **Do not merge `stats.coins` with `coinsCollected`.** They look redundant and
-> are not: `coinsCollected` is a per-world set of ids that gates re-collection,
-> `stats.coins` is a single lifetime tally that keeps counting after a world's
-> coins are exhausted and is not reset by re-entering a map. Deriving either from
-> the other loses information — the tally cannot say *which* coins, and the sets
-> cannot count a coin collected before a world's collectible list changed.
+> are not: `coinsCollected` is a per-world, per-route set of positional indices
+> that gates re-collection, `stats.coins` is a single lifetime tally that keeps
+> counting after a world's coins are exhausted and is not reset by re-entering a
+> map. Deriving either from the other loses information — the tally cannot say
+> *which* coins, and the sets cannot count a coin collected before a route was
+> re-authored (see the hazard above, where the sets stop meaning what they did).
 > Same split applies to `stats.raceWins` vs `raceResults[id].wins` (per-race) and
 > `stats.zoneRecords` vs `driftZoneBests` (per-zone).
 
