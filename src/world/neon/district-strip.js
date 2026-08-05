@@ -245,7 +245,8 @@
     b.box({ x: x + 9, z: cz, y: 0, w: 7, h: 8.5, d: TRUCK_D - 0.4, color: dim(col, 0.72), noCollide: true });
     b.box({ x: x + 9, z: face - inward * 0.3, y: 4.6, w: 6, h: 3, d: 0.5, color: dim(0xffd9a0, 0.5), emissive: true, noCollide: true });
     b.box({ x, z: cz, y: 12, w: 26.4, h: 0.5, d: TRUCK_D + 0.4, color: dim(0xff8a1f, 0.6), emissive: true, noCollide: true });
-    sheen(b, x, wallZ - inward * 4, 34, 26, 0xff8a1f, 0.18);
+    // pool spills into the alley in front of the truck, not behind it into the wall
+    sheen(b, x, wallZ + inward * (TRUCK_D + 7), 34, 22, 0xff8a1f, 0.22);
   }
 
   /** Parked car: the body collides, cabin and glass are cosmetic. */
@@ -495,21 +496,24 @@
     for (const x of CONN_B) connector(b, x, 62, AL_B0);
     for (const x of CONN_S) connector(b, x, AL_B1, 384);
 
-    // Delivery trucks parked badly, alternating walls. Each sits far enough off
-    // its wall to cover the alley centreline, so the alley is a weave you have
-    // to commit to rather than a straight you can hold flat. They go down
-    // FIRST and everything else keeps away from them — a dumpster stacked
-    // opposite a truck turns a weave into a needle.
+    // Delivery trucks, alternating walls. Each reaches past the alley
+    // centreline, so the alley is a weave you commit to rather than a straight
+    // you hold flat. Two rules keep them honest:
+    //   - they go down FIRST and everything else keeps clear of them; a
+    //     dumpster stacked opposite a truck turns a weave into a needle.
+    //   - each alley avoids only the mouths that open onto IT. Screening
+    //     against the whole LANE_X set (which includes shopfront lanes on the
+    //     boulevard side) deleted most of the trucks and left a speedway.
     let t = 0;
     const trucks = [];
     const truckRuns = [
-      [1980, AL_X1 - 60, 296, AL_A0, AL_A1],
-      [2110, AL_BX1 - 60, 296, AL_B0, AL_B1],
-      [2260, 3700, 340, LN_N0, LN_N1]
+      [1980, AL_X1 - 60, 296, AL_A0, AL_A1, CX.concat(CONN_A)],
+      [2110, AL_BX1 - 60, 296, AL_B0, AL_B1, CX.concat(CONN_B, CONN_S, [2940])],
+      [2260, 3700, 340, LN_N0, LN_N1, CX.concat(CONN_N)]
     ];
-    for (const [from, to, pitch, w0, w1] of truckRuns) {
+    for (const [from, to, pitch, w0, w1, keepOut] of truckRuns) {
       for (let x = from; x < to; x += pitch, t++) {
-        if (blocksLane(x, 60)) continue;
+        if (nearAny(x, keepOut, 44)) continue;               // half-truck + road half-width
         const onSouth = (t % 2) === 1;                       // alternate walls
         boxTruck(b, x, onSouth ? w1 : w0, onSouth ? -1 : 1, r);
         trucks.push(x);
@@ -521,8 +525,9 @@
     // are navigable at night
     for (let x = AL_X0 + 60; x < AL_X1 - 40; x += 74) {
       if (!clearOf(x, 46)) continue;
-      // BIN_H/2 exactly, so the bin is flush with the wall — any sliver of a
-      // gap behind it is a notch the collision resolver can wedge the car into
+      // offset is half the bin's collider depth, so it sits flush with the
+      // wall — any sliver of gap behind it is a notch the resolver can wedge
+      // the car into, and the car cannot drive back out of one
       bin(b, x, r() < 0.5 ? AL_A0 + 2.5 : AL_A1 - 2.5, 0);
       b.box({ x: x + 24, z: AL_A1 + 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
       if (r() < 0.5) cone(b, x + 34, (AL_A0 + AL_A1) / 2 + (r() - 0.5) * 14);
@@ -922,12 +927,12 @@
       for (let x = IX0 + 40 + off; x < IX1 - 20; x += 96) {
         if (i === 0 && x > RUN_X0 && x < RUN_X1) continue;    // keep the jump lane clear
         lotLight(b, x, z);
-        sheen(b, x, z, 60, 74, COOL);
+        sheen(b, x, z, 46, 56, COOL, 0.13);
       }
     }
     // mid-aisle lights in the two widest lanes — the pure slalom
-    for (const x of [LOT_X0 + 60, 2560, 3000, LOT_X1 - 40]) { lotLight(b, x, 770); sheen(b, x, 770, 60, 74, COOL); }
-    for (const x of [2320, 2860, 3220]) { lotLight(b, x, 570); sheen(b, x, 570, 60, 74, COOL); }
+    for (const x of [LOT_X0 + 60, 2560, 3000, LOT_X1 - 40]) { lotLight(b, x, 770); sheen(b, x, 770, 46, 56, COOL, 0.13); }
+    for (const x of [2320, 2860, 3220]) { lotLight(b, x, 570); sheen(b, x, 570, 46, 56, COOL, 0.13); }
 
     // --- JUMP 2: raised ramp down the lot's north aisle --------------------
     // Approach from the west along z=470; the aisle is island-, pole- and

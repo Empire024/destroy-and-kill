@@ -136,27 +136,32 @@
   /**
    * Height of deck `d` at world (x,z), or null if the point is off the deck.
    *
-   * CONVENTION, established empirically — do not "correct" this without
-   * measuring all three of the garage, the freeway interchanges and the quarry
-   * spur, because they disagree about what looks right on paper.
+   * `rot` is a HEADING from `Math.atan2(dirX, dirZ)`, so the deck's local +Z
+   * axis points along `(sin rot, cos rot)` and local +X along the perpendicular
+   * `(cos rot, -sin rot)`. Projecting a world offset onto those axes:
    *
-   * The transform below means a deck's height runs y0 -> y1 along local +Z,
-   * where local +Z lands along world +X for `rot = -PI/2` and along world +Z
-   * for `rot = 0`. So an EAST-WEST deck that should climb towards +X wants
-   * `rot = -PI/2`, NOT +PI/2.
+   *     lx = dx*cos - dz*sin
+   *     lz = dx*sin + dz*cos
    *
-   * I tried "fixing" this to the textbook inverse rotation
-   * (`dx*cos - dz*sin`, `dx*sin + dz*cos`). It did repair downtown's garage,
-   * left the quarry spur unchanged, and BROKE every diagonal freeway on-ramp —
-   * the car stopped climbing and sat at y=0 instead of reaching the ring at
-   * y=30. Two of the three structures were authored against the transform
-   * below, and it is the one with the most in-world evidence behind it, so it
-   * stays and the offending district was fixed instead.
+   * This used to be the INVERSE rotation, which put local +Z along
+   * `(-sin, cos)`. That agrees with the heading only when `sin(rot) == 0`, so
+   * north-south decks worked by luck while east-west decks interpolated their
+   * grade backwards and diagonals were laid 90 degrees across the segment —
+   * at 45 degrees the two frames are fully perpendicular.
+   *
+   * Consequences that were measured before this was fixed: downtown's garage
+   * ramps sloped opposite to their own visuals, and the quarry's overpass read
+   * -62 where it should have read -38 and dropped the car through.
+   *
+   * Two districts had already worked around the old frame by negating their
+   * rotation; both were updated in the same commit as this fix. If a deck ever
+   * looks laid across its road rather than along it, suspect a stale negation
+   * rather than this transform.
    */
   DeckSystem.prototype._at = function (d, x, z) {
     const dx = x - d.x, dz = z - d.z;
-    const lx = dx * d.cos + dz * d.sin;
-    const lz = -dx * d.sin + dz * d.cos;
+    const lx = dx * d.cos - dz * d.sin;
+    const lz = dx * d.sin + dz * d.cos;
     if (lx < -d.hw || lx > d.hw || lz < -d.hd || lz > d.hd) return null;
     const t = (lz + d.hd) / d.d;
     return d.y0 + (d.y1 - d.y0) * t;

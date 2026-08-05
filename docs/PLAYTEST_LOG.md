@@ -97,7 +97,24 @@ steps with no movement).
 *Fix:* radius raised to 110, leg count 7 → 6 to keep the same westward travel.
 *Re-test:* full climb with no stuck steps.
 
-**4. Quarry haul road floating above the terrain — SERIOUS, fixed**
+**4. Quarry haul road floating above the terrain — SERIOUS, superseded**
+
+> **Correction.** This entry, and the bench profile `0 → −28 → −52 → −56 → −88`
+> recorded under Loop B, describe an *interim* quarry district I wrote myself
+> when the district author had not yet delivered. That district has since been
+> replaced wholesale by the author's version (benches `0 / −20 / −46 / −70 /
+> −90`), whose haul road has a measured maximum mid-segment terrain error of
+> 0.16 units by construction and never had this defect. The entry is kept
+> because the *fix* it describes — road polyline sampling must be finer than the
+> terrain feature it crosses — is a real lesson, but it is not a defect in the
+> shipped map. Retained for honesty about what was measured when.
+>
+> Root cause of the confusion: for part of the session the dev server on :8765
+> was rooted at `dist/` rather than the source tree, so several measurements
+> (mine and other agents') were taken against a stale build. See "Coordination
+> failures" below.
+
+
 The spiral was sampled at 54 points (~180 units per segment) but a bench
 transition is only ~105 units wide, so a segment spanned an entire step. Road
 surface measured at y = −12 where the terrain was −28: a 16-unit ledge the car
@@ -193,6 +210,64 @@ short drop on an optional shortcut where a hop arguably reads as intended. Left
 as-is and recorded rather than smoothed, because it is the author's feature and
 not on the main route. Seam flatness (0.000 across x = −1700…−1300 on both stub
 lines) and stub continuity (d = 0.00 at both) were independently confirmed.
+
+**9. Deck rotation frame was inverted — FATAL, fixed (three files, one commit)**
+
+`DeckSystem._at` projected world offsets using the INVERSE rotation, putting a
+deck's local +Z along `(−sin rot, cos rot)`. But `Builder.road` passes
+`rot = atan2(dirX, dirZ)` — a heading, along `(sin rot, cos rot)`. The two agree
+only when `sin(rot) == 0`, so north-south decks worked by luck, east-west decks
+interpolated their grade **backwards**, and diagonals were laid up to 90° across
+the segment.
+
+Found independently by two district authors. Measured consequences:
+
+- Downtown's Chroma Deck garage ramps sloped **opposite to their own visuals**
+  (physics surface 8.87 → 4.23 west-to-east while the drawn slope climbed).
+- The quarry overpass read −62 where it should read −38, dropping the car
+  through it.
+
+Fixed to `lx = dx*cos − dz*sin`, `lz = dx*sin + dz*cos`, and the two districts
+that had already worked around the old frame by negating their rotation were
+updated in the same change (`district-links.js`'s `deckRot()` helper, and five
+negated rotations in `district-quarry.js`). All three now use plain headings.
+
+*A failed first attempt is worth recording:* fixing the core alone, without
+updating the workarounds, broke every diagonal freeway on-ramp. Any change to
+this transform must be verified against the garage, the freeway interchanges and
+the quarry overpass **together** — they were authored at different times against
+different states of it.
+
+*Verified after the unified fix:* garage climbs 0 → 13.05; quarry overpass
+matches design at four off-centre probes (−2.2 / −0.4 / 3.2 / 6.1 against a
+design of −2.2 / −0.5 / 3.1 / 6.0, where inversion would read 7.2 / 5.5 / 1.9 /
+−1.0); the elevated ring is continuous at y = 30.1 at five points along its west
+leg.
+
+**10. The Chroma Deck garage was never driveable — FATAL, fixed**
+
+Separate from the rotation bug above, and in a district I wrote and advertised
+as a headline feature. Each level's flat floor deck spanned the **full**
+footprint including the ramp corridor. The resolver picks whichever surface is
+nearest the car's current height, so at y = 0.1 the flat floor (0.05) always beat
+the rising ramp (1.0) and the car could never latch onto the climb — it drove the
+entire length of the ramp at y = 0.1. Floor decks are now split around the
+departing ramp's corridor. Verified: 0 → 13.05, settles on level 1.
+
+### Coordination failures (process, not code)
+
+Two mistakes of mine cost real time and produced measurements that had to be
+thrown away. Recorded because they are the kind of thing that repeats:
+
+1. **Multiple dev servers on the same port.** For part of the session `:8765`
+   was rooted at `dist/` rather than the source tree, so several measurements —
+   mine and two other agents' — were taken against a stale build. Symptoms were
+   confusing rather than obvious: a district "reverting", a fixed bug
+   "reappearing". Fix: one server, rooted at source, and prove it by comparing
+   served byte counts against disk before trusting any measurement.
+2. **Measuring while others were writing.** A file was rewritten 16 seconds
+   before I sampled it, and I drew opposite conclusions about the same structure
+   minutes apart. Fix: freeze before verifying.
 
 ### Known limitations (not defects)
 

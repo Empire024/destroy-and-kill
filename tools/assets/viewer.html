@@ -1,0 +1,303 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GLB kit audit — scale, pivot, texturing</title>
+<!--
+  Standalone GLB audit page. Owned by the asset-verification pass; it does not
+  touch the game build, neon-core.js, or any district module.
+
+  Why this exists: 15 CC0 kits (955 GLBs) were promoted into assets/ and
+  catalogued, but none had ever been rendered. Scale and pivot conventions were
+  unverified, and the Kenney GLBs are NOT self-contained — they reference
+  Textures/<atlas>.png by relative path, so a broken folder layout shows up as
+  an untextured model rather than a load error.
+
+  Serve from the project root (node serve_game.js) and open
+  /tools/assets/viewer.html. Then:
+
+      await AUDIT.measureAll()   // every model in the manifest: bbox, pivot,
+                                 // materials, texture-actually-decoded
+      AUDIT.byKit()              // per-kit rollup + suggested scale/offset
+      await AUDIT.gallery('kenney-city-kit-commercial')  // render a kit to look at
+
+  GAME SCALE ANCHOR: the player car mesh measures 10.6 x 2.85 x 5.42 world
+  units (length along local Z), base at y=0. Measured in-game, not assumed.
+-->
+<style>
+  html, body { margin: 0; background: #14161d; color: #dfe4ef;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #bar { padding: 10px 14px; background: #1b1f29; border-bottom: 1px solid #2c313e; }
+  #bar b { color: #ffd23f; }
+  #stage { display: block; }
+  #log { padding: 10px 14px; white-space: pre; font-size: 12px; max-height: 40vh; overflow: auto; }
+  .err { color: #ff6b6b; }
+</style>
+<div id="bar">GLB kit audit — <b id="status">idle</b> · car anchor 10.6 units long</div>
+<canvas id="stage"></canvas>
+<div id="log"></div>
+
+<script src="../../vendor/three/three.min.js"></script>
+<script src="../../vendor/three/GLTFLoader.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const CAR_LEN = 10.6;                 // measured player-car length, world units
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  const canvas = document.getElementById('stage');
+
+  function say(s, cls) {
+    logEl.insertAdjacentHTML('beforeend', '<div class="' + (cls || '') + '">' + s + '</div>');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function setStatus(s) { statusEl.textContent = s; }
+
+  // --- renderer (only used for the visual gallery) --------------------------
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(1400, 700, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x2a2f3a);
+  const camera = new THREE.PerspectiveCamera(40, 2, 0.1, 500);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.1));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(3, 6, 4); scene.add(dir);
+  const gallery = new THREE.Group(); scene.add(gallery);
+
+  // --- loading -------------------------------------------------------------
+  THREE.Cache.enabled = true;           // one atlas fetch per kit, not per model
+  const failedUrls = new Set();
+  const manager = new THREE.LoadingManager();
+  manager.onError = url => failedUrls.add(url);
+  const loader = new THREE.GLTFLoader(manager);
+
+  function loadGLB(url) {
+    return new Promise(resolve => {
+      loader.load(url, gltf => resolve({ ok: true, scene: gltf.scene }),
+        undefined, err => resolve({ ok: false, error: String(err && err.message || err) }));
+    });
+  }
+
+  /**
+   * Measure one loaded model.
+   *
+   * `textured` is deliberately strict: a material can carry a `map` whose image
+   * never decoded (the external PNG 404'd because the sibling Textures/ folder
+   * was not promoted with the GLB). We require image.width > 0, which is the
+   * only way to tell "has a texture slot" from "is actually textured".
+   */
+  function measure(root) {
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3(), center = new THREE.Vector3();
+    box.getSize(size); box.getCenter(center);
+
+    let tris = 0, meshes = 0;
+    const mats = new Set(), texSlots = new Set(), texOk = new Set(), texBad = new Set();
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      meshes++;
+      const g = o.geometry;
+      if (g) tris += (g.index ? g.index.count : (g.attributes.position ? g.attributes.position.count : 0)) / 3;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+        if (!m) continue;
+        mats.add(m.uuid);
+        if (m.map) {
+          texSlots.add(m.map.uuid);
+          const img = m.map.image;
+          if (img && (img.width > 0 || img.videoWidth > 0)) texOk.add(m.map.uuid);
+          else texBad.add(m.map.uuid);
+        }
+      }
+    });
+
+    const h = size.y || 1e-6;
+    const minY = box.min.y;
+    // pivot classification against the model's own height
+    let pivot = 'other';
+    if (Math.abs(minY) <= Math.max(0.01, h * 0.02)) pivot = 'base';
+    else if (Math.abs(minY + h / 2) <= Math.max(0.01, h * 0.02)) pivot = 'centred';
+    const lateral = (Math.abs(center.x) <= Math.max(0.01, size.x * 0.02) &&
+      Math.abs(center.z) <= Math.max(0.01, size.z * 0.02)) ? 'centred' : 'offset';
+
+    const r3 = n => Math.round(n * 1000) / 1000;
+    return {
+      size: { x: r3(size.x), y: r3(size.y), z: r3(size.z) },
+      min: { x: r3(box.min.x), y: r3(box.min.y), z: r3(box.min.z) },
+      center: { x: r3(center.x), y: r3(center.y), z: r3(center.z) },
+      longestHorizontal: r3(Math.max(size.x, size.z)),
+      pivot, lateral,
+      yOffsetToGround: r3(-minY),        // add this * scale to sit on y=0
+      triangles: Math.round(tris), meshes, materials: mats.size,
+      textureSlots: texSlots.size, texturesDecoded: texOk.size, texturesFailed: texBad.size,
+      textured: texSlots.size > 0 && texBad.size === 0
+    };
+  }
+
+  // --- manifest ------------------------------------------------------------
+  let MANIFEST = null;
+  async function manifest() {
+    if (!MANIFEST) MANIFEST = await fetch('/assets/ASSET_MANIFEST.json').then(r => r.json());
+    return MANIFEST;
+  }
+  /**
+   * Normalise manifest entries. Kits carry a `models[]`; the five Quaternius
+   * props are single-file entries whose `path` IS the .glb, with no models
+   * array — treat those as a one-model kit rather than skipping them.
+   */
+  async function kits() {
+    const m = await manifest();
+    return Object.values(m).map(k => {
+      let models = (k.models || []).map(mo => ({ name: mo.name, path: mo.path }));
+      if (!models.length && /\.glb$/i.test(k.path || '')) {
+        models = [{ name: k.path.split('/').pop().replace(/\.glb$/i, ''), path: k.path }];
+      }
+      return { id: k.id, path: k.path, family: k.styleFamily, selfContained: k.selfContained, models };
+    });
+  }
+
+  const RESULTS = [];
+
+  /** Measure every model in every kit. Disposes as it goes to bound memory. */
+  async function measureAll(limitPerKit) {
+    RESULTS.length = 0; failedUrls.clear();
+    const ks = await kits();
+    let done = 0, total = ks.reduce((a, k) => a + Math.min(k.models.length, limitPerKit || 1e9), 0);
+    for (const k of ks) {
+      const list = limitPerKit ? k.models.slice(0, limitPerKit) : k.models;
+      for (const mo of list) {
+        const url = '/' + mo.path.replace(/^\/+/, '');
+        const res = await loadGLB(url);
+        if (!res.ok) {
+          RESULTS.push({ kit: k.id, family: k.family, name: mo.name, path: mo.path, ok: false, error: res.error });
+        } else {
+          RESULTS.push(Object.assign({ kit: k.id, family: k.family, name: mo.name, path: mo.path, ok: true },
+            measure(res.scene)));
+          res.scene.traverse(o => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+        }
+        if ((++done % 25) === 0) { setStatus('measuring ' + done + '/' + total); await new Promise(r => setTimeout(r)); }
+      }
+      say(k.id + ' — ' + list.length + ' models measured');
+    }
+    setStatus('measured ' + RESULTS.length + ' models; ' + failedUrls.size + ' failed sub-resource fetches');
+    return RESULTS.length;
+  }
+
+  const med = a => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+  const r3 = n => Math.round(n * 1000) / 1000;
+
+  /** Per-kit rollup: the table that goes in the write-up. */
+  function byKit() {
+    const out = {};
+    for (const r of RESULTS) {
+      const k = out[r.kit] || (out[r.kit] = { kit: r.kit, family: r.family, n: 0, failed: 0,
+        longest: [], heights: [], minYs: [], mats: [], tris: [],
+        pivots: {}, untextured: [], noTexSlot: 0 });
+      k.n++;
+      if (!r.ok) { k.failed++; continue; }
+      k.longest.push(r.longestHorizontal); k.heights.push(r.size.y); k.minYs.push(r.min.y);
+      k.mats.push(r.materials); k.tris.push(r.triangles);
+      k.pivots[r.pivot] = (k.pivots[r.pivot] || 0) + 1;
+      if (r.textureSlots === 0) k.noTexSlot++;
+      else if (!r.textured) k.untextured.push(r.name);
+    }
+    return Object.values(out).map(k => ({
+      kit: k.kit, family: k.family, models: k.n, failedToLoad: k.failed,
+      medianLongestHorizontal: r3(med(k.longest)),
+      maxLongestHorizontal: r3(Math.max.apply(null, k.longest.concat(0))),
+      medianHeight: r3(med(k.heights)),
+      pivotMix: k.pivots,
+      medianMinY: r3(med(k.minYs)),
+      medianMaterials: med(k.mats), maxMaterials: Math.max.apply(null, k.mats.concat(0)),
+      medianTriangles: med(k.tris),
+      modelsWithNoTextureSlot: k.noTexSlot,
+      modelsWithFailedTexture: k.untextured.length,
+      failedTextureExamples: k.untextured.slice(0, 5)
+    }));
+  }
+
+  /**
+   * Lay a kit out in a grid at uniform display size so it can be eyeballed.
+   * `nameFilter` (string or RegExp) narrows to a subset — kits are ordered
+   * alphabetically, so without it you only ever see the first N files.
+   */
+  async function galleryOf(kitId, count, nameFilter) {
+    while (gallery.children.length) gallery.remove(gallery.children[0]);
+    const ks = await kits();
+    const k = ks.find(x => x.id === kitId || x.id.indexOf(kitId) >= 0);
+    if (!k) { say('no such kit: ' + kitId, 'err'); return 0; }
+    let models = k.models;
+    if (nameFilter) {
+      const re = nameFilter instanceof RegExp ? nameFilter : new RegExp(nameFilter, 'i');
+      models = models.filter(m => re.test(m.name));
+    }
+    const list = models.slice(0, count || 24);
+    const cols = Math.ceil(Math.sqrt(list.length)), pitch = 2.4;
+    let i = 0;
+    for (const mo of list) {
+      const res = await loadGLB('/' + mo.path.replace(/^\/+/, ''));
+      if (!res.ok) { i++; continue; }
+      const box = new THREE.Box3().setFromObject(res.scene);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const s = 1.7 / (Math.max(size.x, size.y, size.z) || 1);
+      const holder = new THREE.Group();
+      res.scene.scale.setScalar(s);
+      res.scene.position.set(-box.min.x * s - size.x * s / 2, -box.min.y * s, -box.min.z * s - size.z * s / 2);
+      holder.add(res.scene);
+      holder.position.set((i % cols - (cols - 1) / 2) * pitch, 0, (Math.floor(i / cols) - (cols - 1) / 2) * pitch);
+      gallery.add(holder);
+      i++;
+    }
+    const span = cols * pitch;
+    camera.aspect = 2; camera.updateProjectionMatrix();
+    camera.position.set(span * 0.62, span * 0.72, span * 0.95);
+    camera.lookAt(0, 0.4, 0);
+    renderer.render(scene, camera);
+    setStatus('gallery: ' + k.id + ' (' + i + ' models)');
+    return i;
+  }
+
+  /**
+   * Render an explicit list of model paths. Used to eyeball several kits at
+   * once — "a kit you never opened is unverified", and one mixed grid is a
+   * cheaper way to open the long tail than a gallery per kit.
+   */
+  async function galleryMixed(paths) {
+    while (gallery.children.length) gallery.remove(gallery.children[0]);
+    const cols = Math.ceil(Math.sqrt(paths.length)), pitch = 2.4;
+    let i = 0, loaded = 0;
+    for (const p of paths) {
+      const res = await loadGLB('/' + p.replace(/^\/+/, ''));
+      if (res.ok) {
+        const box = new THREE.Box3().setFromObject(res.scene);
+        const size = new THREE.Vector3(); box.getSize(size);
+        const s = 1.7 / (Math.max(size.x, size.y, size.z) || 1);
+        const holder = new THREE.Group();
+        res.scene.scale.setScalar(s);
+        res.scene.position.set(-box.min.x * s - size.x * s / 2, -box.min.y * s, -box.min.z * s - size.z * s / 2);
+        holder.add(res.scene);
+        holder.position.set((i % cols - (cols - 1) / 2) * pitch, 0, (Math.floor(i / cols) - (cols - 1) / 2) * pitch);
+        gallery.add(holder); loaded++;
+      }
+      i++;
+    }
+    const span = cols * pitch;
+    camera.aspect = 2; camera.updateProjectionMatrix();
+    camera.position.set(span * 0.62, span * 0.72, span * 0.95);
+    camera.lookAt(0, 0.4, 0);
+    renderer.render(scene, camera);
+    setStatus('mixed gallery: ' + loaded + '/' + paths.length + ' rendered');
+    return loaded;
+  }
+
+  window.AUDIT = {
+    measureAll, byKit, gallery: galleryOf, galleryMixed, kits, manifest,
+    get results() { return RESULTS; },
+    get failedUrls() { return [...failedUrls]; },
+    CAR_LEN,
+    /** Scale a kit needs so `refLenInKitUnits` maps onto `targetWorldUnits`. */
+    scaleFor(refLenInKitUnits, targetWorldUnits) { return r3(targetWorldUnits / refLenInKitUnits); },
+    find(sub) { return RESULTS.filter(r => (r.name + ' ' + r.kit).indexOf(sub) >= 0); }
+  };
+  say('ready — call await AUDIT.measureAll() then AUDIT.byKit()');
+  setStatus('ready');
+})();
+</script>

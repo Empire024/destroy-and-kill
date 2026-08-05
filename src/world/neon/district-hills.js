@@ -205,18 +205,25 @@
     [-1906, -378, 0]
   ];
 
-  /* Gravel cut that skips hairpin 4 on the way down. There are only ~150 units
-     between two switchback legs, so the spur peels off traverse 5 early and
-     swings east over 300 units: a late tight corner leaves the car still
-     rotating as it crosses the ramp, and it slides off the side instead of
-     launching off the lip. */
+  /* Gravel cut that skips hairpin 4 on the way down.
+     Two constraints shape this spur, and both were learned the hard way:
+     - It must leave traverse 5's bench EARLY. Hugging the parent road keeps the
+       spur inside that 104-wide flat, so it stays dead level and then has to
+       dump the whole 16-unit level change where it crosses the embankment —
+       a -24% pitch that trips the airborne test near 150mph, and an airborne
+       car cannot engage a ramp at all, so the shortcut silently fails.
+     - It must cross that embankment OBLIQUELY and arrive already straight. The
+       car is still rotating out of a late corner otherwise, and drifts off the
+       side of the ramp instead of launching off the lip. */
   const CUT_WP = [
     [-2884, -860, 0],
-    [-2874, -740, 110],
-    [-2860, -620, 95],
-    [-2840, -556, 62],
-    [-2745, -524, 0]
+    [-2836, -800, 70],
+    [-2812, -730, 90],
+    [-2798, -650, 90],
+    [-2780, -580, 80],
+    [-2725, -512, 0]
   ];
+  const CUT_DIR = 0.680;            // heading of the spur's final straight
 
   const SUMMIT = { x: -3430, z: -1700 };
   const APRON = { x: -2665, z: -505, w: 236, d: 156 };
@@ -457,8 +464,11 @@
     // corner and onto traverse 4 / the gravel apron behind it. Deliberately
     // wide and short — the car is still straightening as it arrives, and a
     // narrow deck lets it drop off the side with no vertical launch at all.
-    b.ramp({ x: -2778, z: -524, dir: Math.PI / 2, w: 44, len: 52, height: 13, color: 0xd8632c });
-    b.landmark('HAIRPIN CUT', -2778, -524);
+    // Held back along the spur: a ramp is a SOLID when approached from behind,
+    // and at -2762 its AABB reached 2 units into traverse 4's western edge —
+    // a wall nibbling the main descent line.
+    b.ramp({ x: -2772, z: -570, dir: CUT_DIR, w: 44, len: 52, height: 13, color: 0xd8632c });
+    b.landmark('HAIRPIN CUT', -2772, -570);
 
     // ---- 6. summit lookout -------------------------------------------------
     (function () {

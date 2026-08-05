@@ -77,11 +77,9 @@
    */
   let NO_PIER = [];
 
-  /** Deterministic RNG — never Math.random() at build time. */
-  function rng(seed) {
-    let s = seed >>> 0;
-    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  }
+  // Determinism: the whole district is laid out analytically from the constants
+  // above — no RNG is used, and therefore no Math.random() either. Every load
+  // produces byte-identical geometry.
 
   // ==========================================================================
   // path helpers — every path is a list of [x, z] or [x, z, y]
@@ -187,7 +185,10 @@
    * one `road()` produces. Extra decks are harmless: `surfaceAt` picks the one
    * nearest the car's current Y, and the correct surface is always the nearest.
    */
-  function deckRot(heading) { return -heading; }
+  // DeckSystem's local +Z now follows the heading directly (its frame used to
+  // be the inverse rotation, which needed this negated). Kept as a named helper
+  // because it is still the single place to change if that frame ever moves.
+  function deckRot(heading) { return heading; }
 
   /**
    * A correct, watertight chain of deck rectangles along a polyline. Each rect
@@ -400,7 +401,10 @@
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(text, 256, 66);
       const tex = new THREE.CanvasTexture(cv);
-      return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+      // FrontSide, not DoubleSide: the ring is driven both ways and a
+      // double-sided plane shows one of them mirrored text. Each gantry gets a
+      // back-to-back pair instead.
+      return new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide });
     };
   }
 
@@ -417,10 +421,14 @@
       () => new THREE.BoxGeometry(LEG * 2 + 4, 2.4, 2.0),
       () => new THREE.MeshStandardMaterial({ color: 0x2f3648, roughness: 0.85 }),
       { x, y: RING_Y + H + 0.6, z, ry: rot });
-    b.instance('fwSign_' + text,
-      () => new THREE.PlaneGeometry(34, 8.6),
-      signMat(THREE, text, color),
-      { x, y: RING_Y + H - 4.4, z, ry: rot + Math.PI });
+    const nz = Math.sin(rot), nx2 = Math.cos(rot);        // plane normal at ry=rot
+    for (const s of [1, -1]) {
+      b.instance('fwSign_' + text,
+        () => new THREE.PlaneGeometry(34, 8.6),
+        signMat(THREE, text, color),
+        { x: x + nz * 0.2 * s, y: RING_Y + H - 4.4, z: z + nx2 * 0.2 * s,
+          ry: rot + (s > 0 ? 0 : Math.PI) });
+    }
   }
 
   function mast(b, THREE, x, z, rot, side) {
@@ -461,7 +469,6 @@
 
   function build(b) {
     const THREE = b.THREE;
-    const r = rng(0x5EED17);
 
     NO_PIER = [];
     connectors(b);
@@ -470,7 +477,7 @@
     const ringPath = rimFreeway(b, THREE);
     const merges = interchanges(b, THREE, ramps);
     const spurGaps = spurs(b, THREE);
-    ringFurniture(b, THREE, ringPath, merges.concat(spurGaps), r);
+    ringFurniture(b, THREE, ringPath, merges.concat(spurGaps));
     loopFurniture(b, THREE, loopPath);
 
     b.landmark('THE RIM', X1, 1100);
@@ -750,7 +757,7 @@
   }
 
   // -------------------------------------------------------------- furniture
-  function ringFurniture(b, THREE, path, gaps, r) {
+  function ringFurniture(b, THREE, path, gaps) {
     // crash barriers, both sides, the whole way round
     barrierRail(b, path, 1, { off: 27.5, gaps: gaps });
     barrierRail(b, path, -1, { off: 27.5, gaps: gaps });

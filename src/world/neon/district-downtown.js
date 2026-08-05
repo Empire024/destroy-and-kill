@@ -210,11 +210,11 @@
         const side = (L % 2 === 0) ? 1 : -1;                 // +Z then -Z
         const rz = cz + side * (hd - rampW / 2 - 6);
         const rampLen = w * 0.8;
-        // Sloped deck climbing towards +X. rot = -PI/2, NOT +PI/2: the deck
-        // frame puts local +Z along world +X for -PI/2, so +PI/2 ran the height
-        // backwards and this ramp descended while its own visual slope climbed.
+        // Sloped deck climbing towards +X, so the heading is +PI/2. (This was
+        // briefly -PI/2 to compensate for the old inverted deck frame; that
+        // frame is fixed, so it is a plain heading again.)
         b.decks.add({
-          x: cx, z: rz, w: rampW, d: rampLen, rot: -Math.PI / 2,
+          x: cx, z: rz, w: rampW, d: rampLen, rot: Math.PI / 2,
           y0: y + 0.05, y1: y + FLOOR_H + 0.05
         });
         // visual slope
