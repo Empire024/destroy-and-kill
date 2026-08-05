@@ -195,25 +195,19 @@ system's `{worldId:[coinId]}` set — two different things with one obvious name
 
 ---
 
-## 6. What the lead must do (three small things)
+## 6. What the lead must do (one thing left of three)
 
-1. **Make the workshop solid.** `WORLD_obstaclesNear` merges the world, `GameSea`
-   and `destructibles` only; there is no fifth slot. One line next to the
-   `destructibles` line:
-   ```js
-   const shops=window.GameSystems?GameSystems.api('bodyshop'):null;
-   const shopObs=(shops&&shops.obstaclesNear)?shops.obstaclesNear(x,z):null;
-   ```
-   merged like the others. Until then **you can drive through the workshop** —
-   nothing else about the shop depends on it, and the apron/trigger/mechanic are
-   deliberately outside that volume so the shop still works exactly right.
-   Buildings are reported as their axis-aligned bounding box: exact for the three
-   NEON shops, ~0.6 units generous on the Prague one (heading 3.074).
-2. **`interact` needs a `setLabel(id, text)`** (interact owner). It caches the
-   label on the prompt object and only repaints when the *active* prompt changes
-   identity, so the "CLOSED — REOPENS IN 42S" countdown is currently done by
-   removing and re-adding the prompt, at most once a second and only while the
-   player is within ~220 units. It works; it is just churn a one-line api removes.
+1. ~~**Make the workshop solid.**~~ — **done**, the lead merged
+   `api('bodyshop').obstaclesNear` into `WORLD_obstaclesNear` alongside the coast
+   and `destructibles` sources. Re-verified: see *workshop solidity* in §8.
+   Buildings are still reported as their axis-aligned bounding box — exact for
+   the three NEON shops, ~0.9 units per side generous on the Prague one
+   (heading 3.074), which is well inside the 2-unit gap to the apron's back edge.
+2. ~~**`interact` needs a `setLabel(id, text)`**~~ — **done**, the interact owner
+   shipped it and `bodyshop.js` now uses it: the "CLOSED — REOPENS IN 42S"
+   countdown updates the label in place (verified 180S → 179S over real wall
+   time with `interact.active()` still the *same object*), and the remove/re-add
+   path is kept only as a fallback for a build whose interact predates it.
 3. **Note for review:** progression adds the class `progCards` to the engine's
    `#vehicleSelect` element (never edits `index.html`) so its own stylesheet can
    scope the grid without fighting engine rules.
@@ -301,6 +295,15 @@ $200, van owned, selected, scale `1.02/1/1.02`, banner **CAR PURCHASED**.
 "🔧 STRIP CUSTOMS is closed — 180s to go". `GAME_DEBUG_SHOPS.advanceCooldowns(190)`
 → `shop:opened`, mechanic upright, prompt back to ENTER, toast "is open again".
 The cooldown is an absolute epoch in the save, and survived a reload.
+
+**Workshop solidity** (after the lead's `WORLD_obstaclesNear` merge) — in NEON,
+`obstaclesNear(635,300)` now returns the workshop box `{x:635, z:306, w:28, d:14,
+h:9}`, and a car driven at the CHROME & CO. workshop from the apron **stopped at
+z 293.4** and settled back to 284.5 (front face is z 299, car half-length ~5) —
+before the merge the same run passed clean through to z 330. The drive-in is
+unaffected: rolling in at 15 mph the prompt still appears at z 274. Prague's
+rotated shop (heading 3.074, reported as a 28.9 × 15.9 AABB) stopped the car
+**4.6 units** past the apron centre against a face 11 units out. No failures.
 
 **Worlds** — the three NEON shops build on the first NEON frame and the Prague
 one on arriving in Prague (`[bodyshop] built "prague-nove" at -2433,-870 (ground

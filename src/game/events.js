@@ -895,7 +895,7 @@
       return {
         def: o, name: o.name, mesh: mesh, x: x, y: y, z: z, heading: h, speed: 0,
         s: 0, lap: 0, off: 0, lane: slot.lat * 0.5, laneTarget: slot.lat * 0.5,
-        mistakeT: 0, stuckT: 0, offT: 0, finished: false, finishTime: 0,
+        mistakeT: 0, stuckT: 0, offT: 0, dodgeT: 0, hitCd: 0, finished: false, finishTime: 0,
         shoveX: 0, shoveZ: 0, tick: 0
       };
     };
@@ -918,7 +918,7 @@
         def: { skill: (D && D.skill) || 0.55, aggression: 0.25, mistakes: 0.25 }, name: 'AUTOPILOT',
         mesh: null, x: px, y: ctx.world.groundHeightAt(px, pz, r.start.y), z: pz, heading: h, speed: 0,
         s: 0, lap: 0, off: 0, lane: playerSlot.lat * 0.5, laneTarget: playerSlot.lat * 0.5,
-        mistakeT: 0, stuckT: 0, offT: 0, finished: false, finishTime: 0, shoveX: 0, shoveZ: 0, tick: 0
+        mistakeT: 0, stuckT: 0, offT: 0, dodgeT: 0, hitCd: 0, finished: false, finishTime: 0, shoveX: 0, shoveZ: 0, tick: 0
       };
     }
     races.state = 'countdown';
@@ -1060,12 +1060,19 @@
     // enough to feel like a driver reacting and not like the race cheating.
     target *= 1 + clamp((a.playerProgress - (o.lap * total + o.s)) / 900, -1, 1) * RUBBER_BAND;
 
-    // Aggression: sit on the defended line when the player is close by.
-    if (o.mistakeT <= 0) {
+    // Aggression: draw ALONGSIDE the defended line, not onto it. Aiming straight
+    // at a.playerLane looks the same on paper and is not: the whole field
+    // converges into the player's exact tyre tracks, piles into the back of the
+    // car and then sits there being braked by the contact test every frame.
+    if (o.mistakeT <= 0 && o.dodgeT <= 0) {
       const dpx = ctx.player.x - o.x, dpz = ctx.player.z - o.z;
-      if (agg > 0 && dpx * dpx + dpz * dpz < 70 * 70) o.laneTarget = a.playerLane * agg;
-      else o.laneTarget *= 0.94;
+      if (agg > 0 && dpx * dpx + dpz * dpz < 70 * 70) {
+        const side = o.lane >= a.playerLane ? 1 : -1;
+        o.laneTarget = clamp(a.playerLane + side * 5.5, -12, 12) * agg + o.lane * (1 - agg);
+      } else o.laneTarget *= 0.94;
     }
+    if (o.dodgeT > 0) o.dodgeT -= dt;
+    if (o.hitCd > 0) o.hitCd -= dt;
     o.lane += clamp(o.laneTarget - o.lane, -8 * dt, 8 * dt);
 
     o.target = target; o.turn = turn;          // telemetry for GAME_DEBUG_RACE.status()
@@ -1145,14 +1152,30 @@
       o.mesh.rotation.y = o.heading;
       // The player punts opponents aside. The engine's resolver only walks
       // traffic[], and an opponent must not live there — see the file header.
+      //
+      // Who hit whom decides what happens, exactly as the engine's own traffic
+      // test does. Only the player DRIVING INTO a car is a punt; a car catching
+      // the player from behind gets a sidestep instead. The earlier version
+      // applied `o.speed *= 0.9` to any contact, every frame — which glued the
+      // entire field to the player's rear bumper at whatever speed the player
+      // was doing, so a skill-0.20 autopilot held up a skill-0.78 field for a
+      // whole lap. The cooldown is what keeps one shunt from being 60 shunts.
       const bx = ctx.player.x - o.x, bz = ctx.player.z - o.z;
       const d2 = bx * bx + bz * bz;
       if (d2 < 7.4 * 7.4 && Math.abs(ctx.player.y - o.y) < 6) {
-        const d = Math.sqrt(d2) || 1;
-        const closing = Math.max(0, Math.abs(ctx.player.speed) - o.speed);
-        o.shoveX += (-bx / d) * Math.min(28, closing * 0.7);
-        o.shoveZ += (-bz / d) * Math.min(28, closing * 0.7);
-        o.speed *= 0.9;
+        const d = Math.sqrt(d2) || 1, nx = -bx / d, nz = -bz / d;      // player -> opponent
+        const toward = Math.sin(ctx.player.heading) * ctx.player.speed * nx +
+                       Math.cos(ctx.player.heading) * ctx.player.speed * nz;
+        if (toward > 3 && o.hitCd <= 0) {
+          o.hitCd = 0.25;
+          o.shoveX += nx * Math.min(30, toward * 0.9);
+          o.shoveZ += nz * Math.min(30, toward * 0.9);
+          o.speed = Math.max(0, o.speed - Math.min(14, toward * 0.35));
+          ctx.audio.playCrash && ctx.audio.playCrash();
+        } else if (toward <= 3 && o.dodgeT <= 0) {
+          o.dodgeT = 1.1;
+          o.laneTarget = clamp(o.lane + (o.lane >= a.playerLane ? 7 : -7), -12, 12);
+        }
       }
     }
     if (a.autopilot) {
