@@ -98,6 +98,19 @@
   const BEACH_CLAIM_CLEAR = 3;  // above this over the sand you are on a bridge
   const ROAD_CLEAR = 2.5;       // sand keeps this clear of a road's own surface
   const FURN_ROAD_CLEAR = 14;   // furniture keeps this much clear of one
+  // A road that STOPS is usually a road that continues. NEON's mandated
+  // district connection stubs (DISTRICT_GUIDE "Mandatory connection stubs") end
+  // exactly on a district boundary and resume as the neighbour's own segment, so
+  // a point 80 units past the stub is "no road here" to nearestRoad even though
+  // it is the middle of the only route into the docks. Every segment is treated
+  // as extending this far past both its ends when deciding where furniture may
+  // stand — a barrier line must never close a connector, and the coast is
+  // rebuilt from whatever geometry exists at load, so a district author adding a
+  // shoreline building can move the fence line onto one without touching me.
+  const FURN_ROAD_EXTEND = 160;
+  const SAND_ROAD_EXTEND = 60;  // shorter: sand is not a blocker, and extending
+                                // it far would carve holes in real beaches at
+                                // every road that dead-ends at the shore
   const FURN_RAMP_CLEAR = 110;  // ...and never fences off a ramp's run or landing
   const MODULE_LEN = 20;        // one furniture module along the shore
   const MODULE_STEP = 22;       // ...and the spacing between them
@@ -503,6 +516,65 @@
     return g;
   };
 
+  /**
+   * Road corridors, each segment lengthened by `extend` at both ends, in a
+   * uniform grid. This exists because `world.nearestRoad` answers "is there
+   * road surface here", and the question furniture has to ask is "is this on
+   * anybody's way through" — those differ by exactly the length of a connection
+   * stub. Falls back to nothing for worlds that publish no `roadsRef`, and the
+   * caller then keeps using nearestRoad.
+   */
+  function RoadShield(segs, extend, cell) {
+    this.cell = cell || 120; this.map = new Map(); this.stamp = 0; this.n = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const e = {
+        ax: s.ax - s.ux * extend, az: s.az - s.uz * extend,
+        bx: s.bx + s.ux * extend, bz: s.bz + s.uz * extend,
+        width: s.width === undefined ? 44 : s.width, y: s.ay
+      };
+      e.dx = e.bx - e.ax; e.dz = e.bz - e.az;
+      e.len = Math.hypot(e.dx, e.dz) || 1;
+      e.ux = e.dx / e.len; e.uz = e.dz / e.len;
+      const pad = e.width * 0.5 + 40;
+      const x0 = Math.floor((Math.min(e.ax, e.bx) - pad) / this.cell);
+      const x1 = Math.floor((Math.max(e.ax, e.bx) + pad) / this.cell);
+      const z0 = Math.floor((Math.min(e.az, e.bz) - pad) / this.cell);
+      const z1 = Math.floor((Math.max(e.az, e.bz) + pad) / this.cell);
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+        const k = x * 73856093 ^ z * 19349663;
+        let a = this.map.get(k); if (!a) this.map.set(k, a = []); a.push(e);
+      }
+      this.n++;
+    }
+  }
+  /** Is (x,z) within `pad` of any extended corridor? `y` gates by height so a
+   *  fence beside a street is not blamed on the overpass 30 above it. */
+  RoadShield.prototype.blocks = function (x, z, pad, y) {
+    const c = this.cell, cx = Math.floor(x / c), cz = Math.floor(z / c);
+    for (let ix = cx - 1; ix <= cx + 1; ix++) for (let iz = cz - 1; iz <= cz + 1; iz++) {
+      const a = this.map.get(ix * 73856093 ^ iz * 19349663); if (!a) continue;
+      for (let i = 0; i < a.length; i++) {
+        const e = a[i];
+        if (y !== undefined && Math.abs(e.y - y) > 8) continue;
+        let t = ((x - e.ax) * e.ux + (z - e.az) * e.uz) / e.len;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = x - (e.ax + e.dx * t), dz = z - (e.az + e.dz * t);
+        if (dx * dx + dz * dz < (e.width * 0.5 + pad) * (e.width * 0.5 + pad)) return true;
+      }
+    }
+    return false;
+  };
+  /** Same, for a module of half-length `hd` lying along heading `rot`: its two
+   *  ends matter as much as its centre — a 20-long sea wall centred a legal 15
+   *  from a kerb still reaches 5 units into the carriageway if it lies across it. */
+  RoadShield.prototype.blocksModule = function (x, z, rot, hd, pad, y) {
+    const fx = Math.sin(rot), fz = Math.cos(rot);
+    return this.blocks(x, z, pad, y) ||
+           this.blocks(x + fx * hd, z + fz * hd, pad, y) ||
+           this.blocks(x - fx * hd, z - fz * hd, pad, y);
+  };
+
   /** Uniform grid of AABB colliders. Deliberately not the NEON SpatialHash:
    *  same reason as Accum, plus this one dedupes with a stamp instead of
    *  indexOf, because a shore line puts many modules in one cell. */
@@ -585,10 +657,19 @@
     const obsNear = typeof world.obstaclesNear === 'function' ? (x, z) => world.obstaclesNear(x, z) : () => null;
     const rampNear = typeof world.rampsNear === 'function' ? (x, z) => world.rampsNear(x, z) : () => null;
 
+    const segsRef = world.roadsRef && world.roadsRef.segs;
+    const furnShield = segsRef && segsRef.length ? new RoadShield(segsRef, FURN_ROAD_EXTEND) : null;
+    const sandShield = segsRef && segsRef.length ? new RoadShield(segsRef, SAND_ROAD_EXTEND) : null;
+
     /** Is (x,z) inside — or within `pad` of — a piece of road surface? */
     function onRoad(x, z, pad) {
       const r = nearRoad(x, z);
       return !!(r && r.d < (r.width === undefined ? 44 : r.width) * 0.5 + pad);
+    }
+    /** ...or of anybody's way through, stub extensions included. */
+    function onRoute(shield, x, z, pad) {
+      if (shield) return shield.blocks(x, z, pad);
+      return onRoad(x, z, pad);           // world publishes no segments: best effort
     }
     /** Is (x,z) inside a ground-level collider (a building, a wall, a crate)? */
     function blocked(x, z, pad) {
@@ -620,7 +701,7 @@
         let bad = false;
         for (let k = 0; k < 4 && !bad; k++) {
           const qx = minX + (ix + (k & 1)) * CELL, qz = minZ + (iz + (k >> 1)) * CELL;
-          if (onRoad(qx, qz, ROAD_CLEAR)) bad = true;
+          if (onRoute(sandShield, qx, qz, ROAD_CLEAR)) bad = true;
         }
         if (bad || blocked(cx, cz, 6)) continue;
         beach[i] = 1;
@@ -712,7 +793,7 @@
         }
         if (!touches) continue;
         const cx = minX + (ix + 0.5) * CELL, cz = minZ + (iz + 0.5) * CELL;
-        if (onRoad(cx, cz, FURN_ROAD_CLEAR) || blocked(cx, cz, 5)) continue;
+        if (onRoute(furnShield, cx, cz, FURN_ROAD_CLEAR) || blocked(cx, cz, 5)) continue;
         const rl = rampNear(cx, cz);
         if (rl && rl.length) {
           let nearRamp = false;
@@ -770,7 +851,7 @@
     const placed = { seawall: [], fence: [], rocks: [] };
     const colliders = new ColliderGrid(60);
     const colliderList = [];
-    let modules = 0, gaps = 0;
+    let modules = 0, gaps = 0, routeSkips = 0, coastSealed = 0;
     for (let c = 0; c < chains.length; c++) {
       const ch = chains[c];
       const pts = new Array(ch.length);
@@ -805,6 +886,13 @@
           if (gy < BEACH_LO - 1 || gy > BEACH_HI + 6) { sinceGap++; runLeft--; continue; }
           const rot = kind === 'rocks' ? rnd() * Math.PI * 2 : Math.atan2(dx, dz);
           const scale = kind === 'rocks' ? 0.78 + rnd() * 0.55 : 1;
+          // Final gate, on the module's own FOOTPRINT. The cell filter above
+          // tested cell centres 40 units apart, but modules are placed every 22
+          // units along the interpolated chain and are 20 long, so a module can
+          // sit between two legal cell centres with an end in a carriageway.
+          if (furnShield && furnShield.blocksModule(px, pz, rot, MODULE_LEN * 0.5 * scale, FURN_ROAD_CLEAR, gy)) {
+            routeSkips++; sinceGap++; runLeft--; continue;
+          }
           placed[kind].push({ x: px, y: gy, z: pz, ry: rot, s: scale });
           const mod = MODULES[kind];
           // Local +Z maps to (sin rot, cos rot) and local +X to (cos rot, -sin rot)
@@ -851,6 +939,35 @@
       group.add(im);
     }
 
+    // Self-check, in the spirit of verifyDeckFrame: the coast is re-derived from
+    // whatever geometry the districts happen to have built, so a district author
+    // adding a shoreline building can move this fence line onto a road without
+    // touching this file. Assert the invariant instead of trusting it — a sealed
+    // connector is a drivability regression that only shows up if somebody drives
+    // that exact route. Corner-accurate, because a module's ENDS are what reach
+    // into a carriageway.
+    if (furnShield) {
+      let sealed = 0, firstBad = null;
+      for (let i = 0; i < colliderList.length; i++) {
+        const c = colliderList[i], hw = c.w * 0.5, hd = c.d * 0.5;
+        for (let k = 0; k < 4; k++) {
+          const qx = c.x + (k & 1 ? hw : -hw), qz = c.z + (k >> 1 ? hd : -hd);
+          if (furnShield.blocks(qx, qz, 0, c.baseY + 0.6)) {
+            sealed++; if (!firstBad) firstBad = c; k = 4; break;
+          }
+        }
+      }
+      if (sealed) {
+        console.error('[sea] COAST FURNITURE IS STANDING ON A ROUTE. ' + sealed +
+          ' of ' + colliderList.length + ' shore colliders are inside a road corridor ' +
+          '(segments extended ' + FURN_ROAD_EXTEND + ' past both ends, which is how a ' +
+          'district connection stub is protected). First at ' +
+          Math.round(firstBad.x) + ',' + Math.round(firstBad.z) + ' (' + firstBad.kind + '). ' +
+          'A car on that road cannot get through. Raise FURN_ROAD_CLEAR or FURN_ROAD_EXTEND.');
+      }
+      coastSealed = sealed;
+    }
+
     group.visible = false;
     sceneRef.add(group);
     g.beach = beach;
@@ -858,7 +975,8 @@
       id: id, group: group, grid: g, colliders: colliders, colliderList: colliderList,
       stats: {
         beachCells: cand.length, sandTris: sand.tris(), chains: chains.length,
-        modules: modules, gaps: gaps, furnTris: furnTris, colliders: colliderList.length,
+        modules: modules, gaps: gaps, routeSkips: routeSkips, sealedRoutes: coastSealed,
+        furnTris: furnTris, colliders: colliderList.length,
         seawall: placed.seawall.length, fence: placed.fence.length, rocks: placed.rocks.length,
         drawCalls: (sand.isEmpty() ? 0 : 1) + MODULE_KEYS.filter(k => placed[k].length).length,
         ms: Math.round(performance.now() - t0)

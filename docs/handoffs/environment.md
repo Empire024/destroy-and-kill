@@ -41,9 +41,26 @@ so can never place anything **on** the shore; this is the other half.
   chained into shore-following polylines first (endpoints found by degree, then a
   greedy straight-preferring walk), then walked at 22 units. Type changes every
   6–14 modules, and every 15–25 modules a **2-module beach access gap** is left.
-  Roads get 14 units of clearance and ramps get 110 (a 2.8-high wall in a jump's
-  landing run would turn a jump into a crash). **3 draw calls**, one
-  `InstancedMesh` per module type.
+  Ramps get 110 units of clearance (a 2.8-high wall in a jump's landing run would
+  turn a jump into a crash). **3 draw calls**, one `InstancedMesh` per module
+  type.
+- **Furniture never stands on anybody's route.** `world.nearestRoad` answers "is
+  there road surface here", but the question a barrier has to ask is "is this on
+  the way through", and those differ by exactly the length of a district
+  connection stub: NEON's mandated stubs (`DISTRICT_GUIDE`) end *on* a district
+  boundary and resume as the neighbour's own segment, so a point 80 units past
+  one is "no road" to `nearestRoad` while being the only way into the docks. So
+  `RoadShield` re-indexes every `roadsRef` segment **extended 160 units past both
+  ends** and a module is rejected if its centre *or either end* falls in that
+  corridor (+14). A 20-long sea wall centred a legal 15 from a kerb still reaches
+  5 units into the carriageway if it lies across it. Worlds that publish no
+  `roadsRef` fall back to `nearestRoad`.
+- **The invariant is asserted at build, not trusted.** The coast is re-derived
+  from whatever geometry the districts happen to have built, so somebody adding a
+  shoreline building can move this fence line onto a road without touching my
+  file. After placement every collider's four corners are tested against those
+  corridors and a violation is a loud `console.error` naming the position — the
+  same discipline as `verifyDeckFrame`. `coast.stats.sealedRoutes` reports it.
 - **Colliders** — one AABB per collision *part*, not per module. The rock cluster
   gets two, because a single AABB around a randomly rotated 8×16 pile is up to 27
   units across and the car would stop nine units short of anything visible.
@@ -200,8 +217,10 @@ and 6 on Prague, and the closest surviving pair is 12.3 apart.
 **Build cost, NEON** (`GameSea.info().coast`, `api('destructibles').stats()`):
 
 ```
-coast   1532 beach cells (3064 tris), 1015 furniture modules in 20 chains
-        with 50 access gaps, 1423 colliders, 4 draw calls, 25 ms
+coast   1493 beach cells (2986 tris), 958 furniture modules in 25 chains
+        with 43 access gaps, 1287 colliders, 4 draw calls, 29 ms
+        (was 1015 modules before the route shield; 57 stood within a stub's
+        extension and are now refused, 4 of them at the footprint gate)
 props   NEON    1118 props (target 1122) from 1720 usable slots over
                 157 km of centreline, spacing 141, 7 draw calls, 17 ms
                 lampPost 406  smallTree 233  lightBarrier 180
@@ -228,8 +247,16 @@ systems landed in between; only the deltas are mine.)
 
 **Geometry agreement** (whole-map sweeps):
 
-- 1423 coast colliders: **0** standing on a road surface, minimum clearance 16.
-- 1532 beach cells: **0** overlapping a road surface.
+- 1287 coast colliders, tested at **footprint** level (all four AABB corners, not
+  the centre — the earlier centre-only sweep could not see a 20-long module whose
+  *end* reaches into a carriageway): **0** on a road surface and **0** inside a
+  road corridor extended 160 past both ends. Build-time assertion agrees:
+  `sealedRoutes: 0`.
+- **All 8 of the DISTRICT_GUIDE's mandated connection stubs driven through in
+  both directions at 60 mph — 16/16 clean**: docks (−30,1700) and (530,1700),
+  strip (1500,−30) and (1500,530), hills (−1500,−30) and (−1500,−590), quarry
+  (1700,2500) and (2400,1700).
+- 1493 beach cells: **0** overlapping a road surface.
 - 1118 NEON props: **0** standing in a carriageway, minimum clearance **3.1**,
   **0** pairs closer than 12 units, closest surviving pair **12.3**.
 - 1660 Prague props: **0** in a carriageway, minimum clearance **3.0**, **0**
