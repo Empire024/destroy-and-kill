@@ -181,19 +181,28 @@ The in-game versions are heavily simplified, procedural adaptations optimized fo
   /* Mobile controls — touch buttons plus phone-tilt steer-by-wire */
   #mobileControls{position:absolute;inset:0;z-index:60;display:none;pointer-events:none;user-select:none;-webkit-user-select:none}
   body.mobile-ui:not(.car-select-open) #mobileControls{display:block}
-  .mobileTop{position:absolute;top:max(8px,env(safe-area-inset-top));left:50%;display:flex;flex-wrap:wrap;justify-content:center;gap:7px;width:min(96vw,760px);transform:translateX(-50%);pointer-events:auto}
-  .mobileTop button,.mobileRound,.mobilePedal,.mobileShift{border:1px solid rgba(255,255,255,.32);background:rgba(5,8,14,.82);color:#fff;font:900 12px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.8px;box-shadow:0 5px 18px rgba(0,0,0,.55);backdrop-filter:blur(7px);-webkit-tap-highlight-color:transparent;touch-action:none}
-  .mobileTop button{min-width:62px;min-height:44px;padding:0 11px;border-radius:11px}
-  .mobileTop button.active{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 20px rgba(32,227,255,.45)}
-  #mobileTiltState{position:absolute;top:calc(max(8px,env(safe-area-inset-top)) + 49px);left:50%;transform:translateX(-50%);padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.65);color:#9fb0c6;font-size:10px;font-weight:800;letter-spacing:.7px;pointer-events:none;white-space:nowrap}
-  .mobileSteer{position:absolute;left:max(10px,env(safe-area-inset-left));bottom:max(16px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,72px);gap:10px;pointer-events:auto}
-  .mobileRound{width:72px;height:72px;border-radius:50%;font-size:28px}
+  /* Mobile controls: small on screen, generous to the thumb. Every control gets
+     an invisible ::before that extends the touch target well past the artwork,
+     so the visual footprint can shrink without the buttons getting harder to hit. */
+  .mobileTop{position:absolute;top:max(6px,env(safe-area-inset-top));left:50%;display:flex;align-items:center;justify-content:center;gap:6px;transform:translateX(-50%);pointer-events:auto}
+  .mobileTop button,.mobileRound,.mobilePedal,.mobileShift{position:relative;border:1px solid rgba(255,255,255,.28);background:rgba(5,8,14,.72);color:#fff;font:900 11px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.7px;box-shadow:0 4px 14px rgba(0,0,0,.5);backdrop-filter:blur(6px);-webkit-tap-highlight-color:transparent;touch-action:none}
+  .mobileTop button::before,.mobileRound::before,.mobilePedal::before,.mobileShift::before{content:"";position:absolute;inset:-12px;border-radius:inherit}
+  .mobileTop button{min-width:50px;height:34px;padding:0 9px;border-radius:9px;opacity:.86}
+  .mobileTop button.active{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 16px rgba(32,227,255,.4);opacity:1}
+  #mobileMore{min-width:38px;font-size:14px;letter-spacing:1px}
+  .mobileExtra{display:none;gap:6px}
+  .mobileExtra.open{display:flex}
+  #mobileTiltState{position:absolute;top:calc(max(6px,env(safe-area-inset-top)) + 38px);left:50%;transform:translateX(-50%);padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.55);color:#9fb0c6;font-size:9px;font-weight:800;letter-spacing:.6px;pointer-events:none;white-space:nowrap;opacity:.9}
+  /* left thumb: steering.  right thumb: gas/brake. */
+  .mobileSteer{position:absolute;left:max(8px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,58px);gap:12px;pointer-events:auto}
+  .mobileRound{width:58px;height:58px;border-radius:50%;font-size:22px}
   .mobileRound.pressed,.mobilePedal.pressed,.mobileShift.pressed{transform:scale(.94);background:rgba(32,227,255,.3);border-color:var(--cyan)}
-  .mobileDrive{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));display:grid;grid-template-columns:58px 82px 82px;grid-template-rows:58px 82px;gap:8px;align-items:end;pointer-events:auto}
-  .mobilePedal{height:82px;border-radius:18px;font-size:14px}
-  #mobileGas{background:rgba(22,110,65,.82);border-color:rgba(59,255,139,.65)}
-  #mobileBrake{background:rgba(120,24,31,.84);border-color:rgba(255,59,59,.72)}
-  .mobileShift{width:58px;height:58px;border-radius:14px;font-size:23px}
+  .mobileDrive{position:absolute;right:max(8px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));display:grid;grid-template-columns:44px 64px 64px;grid-template-rows:44px 68px;gap:8px;align-items:end;pointer-events:auto}
+  .mobilePedal{height:68px;border-radius:15px;font-size:12px}
+  #mobileGas{background:rgba(22,110,65,.78);border-color:rgba(59,255,139,.6)}
+  #mobileBrake{background:rgba(120,24,31,.8);border-color:rgba(255,59,59,.68)}
+  #mobileNitro,#mobileHandbrake{height:44px;font-size:10px}
+  .mobileShift{width:44px;height:44px;border-radius:12px;font-size:19px}
   #mobileShiftUp{grid-column:1;grid-row:1}#mobileShiftDown{grid-column:1;grid-row:2;align-self:start}
   #mobileNitro{grid-column:2;grid-row:1;height:58px;border-radius:14px;color:var(--cyan)}
   #mobileHandbrake{grid-column:3;grid-row:1;height:58px;border-radius:14px;color:var(--gold)}
@@ -215,7 +224,8 @@ The in-game versions are heavily simplified, procedural adaptations optimized fo
 <body>
 <div id="mobileControls" aria-label="Mobile driving controls">
   <div class="mobileTop">
-    <button id="mobileMenu" type="button">MENU</button><button id="mobileCamera" type="button">CAM</button><button id="mobileReset" type="button">RESET</button><button id="mobileTilt" type="button">TILT</button><button id="mobileTiltFlip" type="button">FLIP</button>
+    <button id="mobileMenu" type="button">MENU</button><button id="mobileCamera" type="button">CAM</button><button id="mobileReset" type="button">RESET</button><button id="mobileMore" type="button" aria-expanded="false" aria-controls="mobileExtra" aria-label="More controls">•••</button>
+    <span id="mobileExtra" class="mobileExtra"><button id="mobileTilt" type="button">TILT</button><button id="mobileTiltFlip" type="button">FLIP</button></span>
   </div>
   <div id="mobileTiltState">TOUCH STEERING</div>
   <div class="mobileSteer"><button id="mobileLeft" class="mobileRound" type="button" aria-label="Steer left">◀</button><button id="mobileRight" class="mobileRound" type="button" aria-label="Steer right">▶</button></div>
@@ -442,6 +452,10 @@ bindMobileHold('mobileShiftUp','shiftUp',()=>{if(started&&!carSelectionOpen)requ
 document.getElementById('mobileMenu')?.addEventListener('click',()=>openVehicleSelection());
 document.getElementById('mobileCamera')?.addEventListener('click',()=>{camMode=(camMode+1)%4;cameraSmoothingReady=false;});
 document.getElementById('mobileReset')?.addEventListener('click',()=>resetCar());
+// secondary controls live in a collapsed strip so the top bar stays out of the way
+(()=>{const more=document.getElementById('mobileMore'),extra=document.getElementById('mobileExtra');
+  more?.addEventListener('click',()=>{const open=extra.classList.toggle('open');
+    more.setAttribute('aria-expanded',open?'true':'false');more.classList.toggle('active',open);});})();
 mobileTiltBtn?.addEventListener('click',enableOrCenterMobileTilt);mobileTiltFlipBtn?.addEventListener('click',()=>{mobileTiltInvert=!mobileTiltInvert;localStorage.setItem('mobileTiltInvert',mobileTiltInvert?'1':'0');updateMobileTiltLabel();});
 updateMobileTiltLabel();
 
