@@ -396,6 +396,7 @@ window.addEventListener('unhandledrejection', (e) => {
 <script src="src/world/neon/district-strip.js"></script>
 <script src="src/world/neon/district-quarry.js"></script>
 <script src="src/world/neon/district-links.js"></script>
+<script src="src/world/prague-world.js"></script>
 <script>
 (() => {
 "use strict";
@@ -2950,6 +2951,8 @@ let pendingMapId=null,mapStage='map';
 const MAP_CARDS=[
   {id:'neon',  name:'NEON CITY',    accent:'#ff2d9b', icon:'🌃', sub:'DEFAULT · 5 DISTRICTS',
    desc:'Dense neon downtown, dockside drift yards, hill switchbacks, a retail strip and a quarry stunt zone. Built for flow.'},
+  {id:'prague',name:'PRAGUE 1',    accent:'#e8b44c', icon:'🏛️', sub:'REAL GEOGRAPHY · OSM',
+   desc:'The historic core, built from real OpenStreetMap data: 1427 buildings and 2284 streets, packaged locally. Tight, unforgiving, real.'},
   {id:'legacy',name:'LEGACY STATE', accent:'#ffd23f', icon:'🛣️', sub:'THE ORIGINAL MAP',
    desc:'The original coast-to-desert procedural state, preserved exactly as it was. Huge, open and empty by design.'}
 ];
