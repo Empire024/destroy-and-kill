@@ -1,8 +1,9 @@
 # DESTROY AND KILL
 
-An arcade driving game that runs in your browser. Three maps, four cars, drift
-scoring, a full instrument cluster, wheel and pedal support, and touch controls
-for phones.
+An arcade open-world driving game that runs in your browser. Two maps, a
+nine-car garage behind a real progression loop, street races, drift zones,
+coin routes, body shops, police that patrol and fight back, a day/night cycle,
+a synthesized radio, and full wheel + pedal + touch support.
 
 Everything is packaged locally — the game needs no internet connection to run.
 
@@ -26,43 +27,74 @@ node serve_game.js       # or: python3 serve_game.py
 ```
 
 **On your phone:** with the game running on your PC, open
-`http://YOUR-PC-IP:8765/` on a phone connected to the same Wi-Fi. Windows
-Firewall may ask you to allow Node or Python on private networks — say yes.
+`http://YOUR-PC-IP:8765/` on a phone connected to the same Wi-Fi.
+
+**Online:** the release build deploys to <https://destroy-and-kill.pages.dev>.
 
 ---
 
 ## The maps
 
-Pick a map, then pick a car.
+### NEON CITY — the home world
 
-### NEON CITY — the default
+A hand-built night city with eight connected districts: the downtown grid and
+its four-level Chroma Deck garage, the freight-dock drift yards, the hillside
+switchbacks, the retail strip, the quarry stunt pit, the elevated freeway ring,
+mast-arm traffic signals — and now the roadside services ported from the
+original map: three gas stations, a diner and a town square.
 
-A hand-built night city with five connected districts:
-
-- **Neon downtown** — tight grid, lit towers, and the Chroma Deck: a four-level
-  parking garage you can actually drive up and down.
-- **Freight docks** — wide concrete drift pads, container stacks and warehouse
-  corridors. The place to hold a long slide.
-- **Hillside** — a switchback climb to a summit lookout, and the best downhill
-  drift road on the map.
-- **Retail strip** — gas station, diner, motel, and a mall car park full of
-  light poles to link slides through. Back alleys run behind the whole strip.
-- **Quarry** — stepped benches descending into a pit, with the map's biggest
-  jumps and drops.
-
-An elevated freeway ring and a ground-level inner loop tie it all together.
+A sand beach rings the coast (it drives like sand — loose, slow, dusty),
+varied sea walls and fences mark the shore with deliberate access gaps, and
+over a thousand destructible lamps, trees, barriers and signals line the roads.
 
 ### PRAGUE CENTRE
 
-8.4 km² of the real centre from **OpenStreetMap** — 5,953 buildings and 3,164
-ways covering Staré Město, Josefov, Nové Město, Malá Strana and Hradčany, out to
-Vinohrady and Smíchov. Converted offline and packaged with the game. Real
-geography, real street layout, solid buildings. Tight and unforgiving.
+8.4 km² of the real centre from **OpenStreetMap** — 5,953 buildings covering
+Staré Město, Josefov, Nové Město, Malá Strana and Hradčany. Real geography,
+real street layout, solid buildings. Tight and unforgiving.
 
-### LEGACY STATE
+### The original map
 
-The original map, preserved exactly as it was: a huge procedural coast-to-desert
-region. Kept because it was here first.
+The v31 procedural coast-to-desert state was retired from the picker; its gas
+stations, diner and town centre live on in NEON. The original build is
+preserved verbatim as `gta_vice_city_destroy_and_kill_v31.html`.
+
+---
+
+## The game
+
+- **Progression** — you start with the COMMUTER and the STREET DRIFT. Win
+  **three street races** to unlock the PRO DRIFT. Seven more cars wait behind
+  race wins, drift-zone records, coin counts, wallet purchases — and the
+  overpowered GRIPPER behind a substantial mixed challenge. Everything persists
+  (versioned save with migration; progression can be reset separately from
+  your wheel calibration).
+- **Street races** — six authored events with parked fields, crew, countdown,
+  ordered checkpoints, live standings and opponents with skill, aggression and
+  believable mistakes. First win pays full; repeats pay 25%.
+- **Drift zones** — five neon-gated road corridors where valid drifts score
+  **×5** (capped, shown on the meter). Leave the corridor and the run voids.
+- **Coin routes** — 365 coins laid along real drives, including deck sweeps
+  and quarry descents. Collection persists; clearing a line pays a bonus.
+- **Body shops** — drive in, meet the mechanic, repaint, retune, buy cars.
+  Hurt the mechanic and the shop closes, the police converge, and you wait
+  out a real cooldown.
+- **Police** — patrols exist at zero stars and notice speeding, and they
+  pull over reckless NPC drivers you had nothing to do with. Stop during a
+  serious pursuit and officers get out, flank and open fire; floor it and
+  they run back to their cars.
+- **Weapons** — melee, pistol (drive-by capable) and rifle, with an
+  authoritative vehicle damage model: gunfire and crashes combine through
+  healthy → damaged → critical → burning, with a six-second window to bail
+  out (`E`) before the explosion.
+- **Day/night** — a 24-hour cycle (14 real minutes) with a visible sun and
+  moon. Night is the authored look; noon is a real day.
+- **Radio** — four fully synthesized stations plus MY FM, which plays audio
+  files you drop into `assets/audio/tracks/` (see the README there; only add
+  music you have the rights to). No streaming, no YouTube, no autoplay.
+- **Navigation** — `M` opens the full map: click anywhere or on an icon to
+  set a waypoint, and the road-graph route draws on both maps with a compass
+  ribbon up top.
 
 ---
 
@@ -73,90 +105,72 @@ region. Kept because it was here first.
 | | |
 |---|---|
 | `W` / `↑` | throttle |
-| `S` / `↓` | brake — hold at a stop to engage reverse, then throttle to back up |
+| `S` / `↓` | brake — hold at a stop to engage reverse |
 | `A` `D` / `←` `→` | steer |
 | `Space` | handbrake |
 | `Shift` | nitro |
-| `X` / `Y` | shift up / down (switches to manual; it returns to auto on its own) |
+| `X` or `U` | shift up (QWERTZ-proof pair) |
+| `Y` or `Z` | shift down (QWERTZ-proof pair) |
 | `C` | change camera |
+| **mouse drag** | orbit the chase camera · wheel zooms · recenters on its own |
 | `R` | reset the car |
-| `E` | get out / get in |
-| `M` | full map |
-| `Enter` | interact |
+| `E` | get out / get in — also bails out of a burning car |
+| `M` / `Tab` | full map (click to set a waypoint) |
+| `V` | radial car selector (owned cars) |
+| `Enter` | interact — join races, enter body shops |
+| `Q` | draw / cycle weapon · `1` `2` `3` direct select |
+| `F` | fire (hold for the rifle) · `L` reload |
+| `J` / `K` | radio station down / up |
+| `N` | mute |
+| `H` | help panel (all of this, in game) |
+| `Esc` | close panel / abandon race / menu |
+| `F2` | wheel & pedal setup |
 
 ### Wheel and pedals
 
-Click **⚙ WHEEL & PEDALS** on the start screen. Move the wheel or press a pedal
-so the browser sees the device, then bind steering, throttle, brake and the shift
-paddles. Steering calibration learns centre and both full-lock endpoints
-automatically. Keyboard controls keep working alongside.
+Click **⚙ WHEEL & PEDALS** on the start screen. Move the wheel or press a
+pedal so the browser sees the device, then bind steering, throttle, brake and
+the shift paddles. Keyboard controls keep working alongside.
 
-**On force feedback:** the Gamepad API only exposes **rumble**, which is not
-steering torque. There is now an experimental **real FFB** path — a self-centring
-spring driven over WebHID using the USB PID standard MOZA bases implement. It is
-spring-only (a spring resists; it cannot spin the wheel the way a constant force
-can), reads its report IDs from the device descriptor rather than guessing, opens
-at 25% gain, and releases the motor on tab blur, disconnect or the STOP button.
-**It has not been tested on real hardware** — hold the wheel loosely the first
-time. See `docs/MOZA_R3_FFB.md`.
+**On force feedback:** the Gamepad API only exposes rumble. The experimental
+real-FFB path (WebHID PID spring for MOZA bases) is documented in
+`docs/MOZA_R3_FFB.md` and **has not been tested on real hardware**.
 
 ### Phone
 
-Left thumb steers, right thumb does throttle and brake. Secondary controls are
-behind the `•••` button to keep the screen clear.
-
-Tap **TILT** once to steer by tilting the phone (allow motion access when
-asked), and again to re-centre. **FLIP** reverses the tilt axis if your phone
-reports it backwards. Touch steering always works and never goes away.
+Left thumb steers, right thumb throttle/brake; tilt steering via **TILT**.
+Weapon and fire buttons appear only with a weapon drawn. The radio panel sits
+bottom-left, clear of the driving controls.
 
 ---
 
 ## Credits and licensing
 
-15 **CC0** 3D asset kits from [Kenney](https://kenney.nl) and
-[Quaternius](https://quaternius.com) are downloaded, licence-verified and
-catalogued in `assets/ASSET_MANIFEST.json` and `assets/ATTRIBUTION.md`.
-
-**Note:** those kits are *not yet used in the world* — every district is
-currently built from procedural geometry, which is what keeps the whole map at
-around 100 draw calls. The kits are packaged and ready for the prop pass; see
-"Known gaps" below.
-
-Prague map data is © **OpenStreetMap contributors**, licensed under the
-[Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/).
-See <https://www.openstreetmap.org/copyright>.
-
-[Three.js](https://threejs.org) r128 (MIT) is vendored in `vendor/three/`.
-
----
-
-## Known gaps
-
-Stated plainly so nobody is surprised:
-
-- **The licensed GLB kits are not in the world yet.** Districts are procedural.
-  Wiring the kits in is a prop pass on top of the existing prefab registry.
-- **Frame rate has not been measured.** Draw calls and triangle counts are real
-  and well inside budget (see `docs/PLAYTEST_LOG.md`), but a genuine FPS reading
-  needs a focused foreground tab and was not taken.
-- **No physical racing wheel was tested.** The wheel code is unchanged from v31.
-- **Mobile was tested by resizing a desktop browser**, not on a real handset.
+- Prague map data © **OpenStreetMap contributors**,
+  [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/).
+- [Three.js](https://threejs.org) r128 (MIT), vendored in `vendor/three/`.
+- 15 CC0 asset kits from [Kenney](https://kenney.nl) and
+  [Quaternius](https://quaternius.com) are catalogued in
+  `assets/ASSET_MANIFEST.json` (packaged, not yet placed in the world).
+- Radio music is **synthesized in-engine**; MY FM plays only files you supply.
+  Policy: `docs/RADIO_SOURCE_POLICY.md`.
+- Traffic-signal logic and shadow settings adapted from the author-authorised
+  `gta6` project by Patrik Kupco.
 
 ## For developers
 
 ```bash
-node scripts/quality-gate.mjs      # syntax, wiring, licensing, offline, smoke
-node scripts/package.mjs           # build dist/ (excludes assets/intake)
+node scripts/expansion-checks.mjs   # static gate: syntax, wiring, data, audio
+node scripts/quality-gate.mjs       # original build gate
+node scripts/package.mjs            # build dist/
 ```
 
-`dist/` is the distributable: ~28 MB, 1,046 files. It deliberately excludes
-`assets/intake/` — 172 MB of quarantined raw downloads kept for provenance and
-reprocessing, which players never need.
-
-- `docs/CURRENT_ARCHITECTURE.md` — how the game is put together
-- `docs/WORLD_OVERHAUL_PLAN.md` — design decisions and why
-- `docs/PLAYTEST_LOG.md` — what was tested and what was found
+- `docs/EXPANSION_ARCHITECTURE.md` — the GameSystems seam and ownership map
+- `docs/EXPANSION_BASELINE.md` — what the engine was before the expansion
+- `docs/SAVE_SCHEMA.md` — the versioned save and its migration rules
+- `docs/EXPANSION_TEST_MATRIX.md` / `_REPORT.md` — QA
+- `docs/handoffs/` — per-subsystem engineering handoffs with test evidence
 - `src/world/neon/DISTRICT_GUIDE.md` — how to build a new district
 
-There is **no build step**. Maps are plain `<script>` files that register
-themselves into a world registry; edit one and reload the page.
+There is **no build step**. Systems and maps are plain `<script>` files that
+register themselves; edit one and reload the page.
