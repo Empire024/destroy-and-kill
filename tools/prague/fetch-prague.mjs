@@ -146,7 +146,10 @@ const round2 = (n) => Math.round(n * 100) / 100;
 const PAUSE_MS = 12000;         // between tiles — be a good neighbour
 const BACKOFF_429_MS = 45000;   // a 429 means "slow down", so actually slow down
 const MAX_ATTEMPTS = 2;         // a timeout means "ask for less", not "ask again harder"
-const FETCH_TIMEOUT_MS = 200000; // client-side cap, just above the query's [timeout:180]
+// Client-side cap. Tiles this size come back in 1-8 s when a mirror is healthy
+// (the slowest observed good response was 78 s), so a minute and a half means
+// the mirror is not going to answer and another one should get the chance.
+const FETCH_TIMEOUT_MS = 90000;
 const TILE_TARGET_KM2 = 1.6;    // tile size that reliably answers in ~1-2 s
 
 /**

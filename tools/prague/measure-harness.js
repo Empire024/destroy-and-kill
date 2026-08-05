@@ -152,37 +152,70 @@
     },
 
     /**
-     * Spawn sanity: the spawn must sit ON a drivable road, and collision must
-     * still stop the car dead at the nearest building rather than let it pass.
+     * Spawn sanity plus a real collision test.
+     *
+     * The collision half samples colliders from all over the map, drives at
+     * each one head-on, and asserts the car never ends up INSIDE the box.
+     * An earlier version aimed at a single collider near spawn and checked the
+     * end speed — which passed by luck at one extent and reported a car doing
+     * 190 mph at another, because it had simply driven past the target rather
+     * than into it. "Did it stop" is the wrong question; "is it ever inside a
+     * building" is the one that matters, and it has to be asked in many places
+     * because one building's geometry proves nothing about the map.
      */
-    spawnAndCollision() {
+    spawnAndCollision(samples) {
+      samples = samples || 12;
       const W = GAME_DEBUG.world, sp = W.spawn;
       GAME_DEBUG.start('prague', 'proDrift');
       const nr = GAME_DEBUG.nearestRoad(sp.x, sp.z);
-      const obs = W.obstaclesNear(sp.x, sp.z);
-      let collision = null;
-      if (obs.length) {
-        let best = obs[0], bd = Infinity;
+
+      // Spread the probes over the drivable network so the sample is the map,
+      // not one street corner.
+      const segs = W.roadsRef.segs.filter((s) => s.len > 20);
+      segs.sort((a, b) => (a.ax + a.az * 7.7) - (b.ax + b.az * 7.7));
+
+      let tested = 0, penetrations = 0, stopped = 0;
+      let worstPenetration = 0;
+      for (let i = 0; i < samples && segs.length; i++) {
+        const s = segs[Math.floor((i + 0.5) * segs.length / samples)];
+        const ox = (s.ax + s.bx) / 2, oz = (s.az + s.bz) / 2;
+        const obs = W.obstaclesNear(ox, oz);
+        if (!obs.length) continue;
+        let best = null, bd = Infinity;
         for (const o of obs) {
-          const d = Math.hypot(o.x - sp.x, o.z - sp.z);
-          if (d < bd) { bd = d; best = o; }
+          const d = Math.hypot(o.x - ox, o.z - oz);
+          if (d > 8 && d < bd) { bd = d; best = o; }
         }
-        const heading = Math.atan2(best.x - sp.x, best.z - sp.z);
-        GAME_DEBUG.teleport(sp.x - Math.sin(heading) * 60, sp.z - Math.cos(heading) * 60, heading);
+        if (!best) continue;
+
+        const heading = Math.atan2(best.x - ox, best.z - oz);
+        // start just outside the box, pointed straight at its centre
+        const back = bd + 25;
+        GAME_DEBUG.teleport(best.x - Math.sin(heading) * back, best.z - Math.cos(heading) * back, heading);
         GAME_DEBUG.press('w', true);
-        for (let i = 0; i < 400; i++) GAME_DEBUG.step(1);
+        let insideEver = 0, deepest = 0;
+        for (let f = 0; f < 240; f++) {
+          GAME_DEBUG.step(1);
+          const c = GAME_DEBUG.car;
+          const dx = (best.w / 2) - Math.abs(c.x - best.x);
+          const dz = (best.d / 2) - Math.abs(c.z - best.z);
+          if (dx > 0 && dz > 0) { insideEver++; deepest = Math.max(deepest, Math.min(dx, dz)); }
+        }
         GAME_DEBUG.press('w', false);
-        const c = GAME_DEBUG.car;
-        collision = {
-          endedInsideCollider:
-            Math.abs(c.x - best.x) < best.w / 2 && Math.abs(c.z - best.z) < best.d / 2,
-          endSpeed: +Math.abs(c.speed).toFixed(2),
-        };
+        tested++;
+        if (insideEver) { penetrations++; worstPenetration = Math.max(worstPenetration, deepest); }
+        if (Math.abs(GAME_DEBUG.car.speed) < 5) stopped++;
       }
+
       return {
         spawnDistToDrivableRoad: nr ? +nr.d.toFixed(2) : null,
         spawnClearance: W.stats().spawnClearance,
-        collision,
+        collision: {
+          collidersTested: tested,
+          timesCarGotInside: penetrations,
+          deepestPenetration: +worstPenetration.toFixed(1),
+          endedStationary: stopped,
+        },
       };
     },
 

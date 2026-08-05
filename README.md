@@ -52,10 +52,11 @@ A hand-built night city with five connected districts:
 
 An elevated freeway ring and a ground-level inner loop tie it all together.
 
-### PRAGUE 1
+### PRAGUE CENTRE
 
-The historic core, built from real **OpenStreetMap** data — 1,427 buildings and
-2,284 streets of Prague 1, converted offline and packaged with the game. Real
+8.4 km² of the real centre from **OpenStreetMap** — 5,953 buildings and 3,164
+ways covering Staré Město, Josefov, Nové Město, Malá Strana and Hradčany, out to
+Vinohrady and Smíchov. Converted offline and packaged with the game. Real
 geography, real street layout, solid buildings. Tight and unforgiving.
 
 ### LEGACY STATE
@@ -90,9 +91,14 @@ so the browser sees the device, then bind steering, throttle, brake and the shif
 paddles. Steering calibration learns centre and both full-lock endpoints
 automatically. Keyboard controls keep working alongside.
 
-**On force feedback:** this game does **not** have force feedback, and does not
-pretend to. Browsers expose only rumble through the Gamepad API, which is not
-steering torque. See `docs/MOZA_R3_FFB.md` for the full research and why.
+**On force feedback:** the Gamepad API only exposes **rumble**, which is not
+steering torque. There is now an experimental **real FFB** path — a self-centring
+spring driven over WebHID using the USB PID standard MOZA bases implement. It is
+spring-only (a spring resists; it cannot spin the wheel the way a constant force
+can), reads its report IDs from the device descriptor rather than guessing, opens
+at 25% gain, and releases the motor on tab blur, disconnect or the STOP button.
+**It has not been tested on real hardware** — hold the wheel loosely the first
+time. See `docs/MOZA_R3_FFB.md`.
 
 ### Phone
 

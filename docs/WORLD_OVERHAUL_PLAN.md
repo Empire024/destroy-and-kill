@@ -102,8 +102,8 @@ ownership boundary held: no agent modified `neon-core.js` or the game HTML.
 
 The feasibility spike recommended **INTEGRATE**. OpenStreetMap data for a Prague 1
 bounding box was fetched offline via Overpass and converted to a packaged local
-`prague1.json` (1427 building footprints, 2284 road centrelines, already in local
-metres). It renders in the game's own scene with the real car and real collision.
+`prague1.json`. Since expanded to 8.42 km² of the centre — 5,953 buildings and
+3,164 ways, 2.33 MB (704 KiB gzipped) — fetched as 6 cached tiles. It renders in the game's own scene with the real car and real collision.
 
 Every part of the old approach — ArcGIS iframe, screen-space car, separate
 physics, postMessage camera, CORS proxy — has been deleted.

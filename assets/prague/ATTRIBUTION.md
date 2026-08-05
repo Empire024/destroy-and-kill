@@ -5,6 +5,27 @@
 > Prague map data © OpenStreetMap contributors, licensed under ODbL 1.0.
 > https://www.openstreetmap.org/copyright
 
+## What is covered
+
+The extract spans `50.0730,14.3960 → 50.0960,14.4420` — an **8.42 km² box** over the Prague
+city centre: Staré Město, Josefov, Nové Město, Malá Strana and Hradčany, reaching out to the
+western edge of Vinohrady and the northern edge of Smíchov so the boundary fades rather than
+ending at a wall. Whole ways that merely cross the box are returned intact, so the data's
+actual extent (4 556 × 2 993 m) is larger than the box itself.
+
+**Do not copy the counts into prose here or anywhere else.** They live in `meta.counts`
+inside `prague1.json` and are logged to the console on every build, which is the only place
+they cannot go stale. Earlier versions of this file and of `prague-world.js` both ended up
+describing an extract several expansions out of date.
+
+The player-facing credit is delivered three ways, all of which must keep working:
+
+1. `world.attribution` / `world.attributionUrl` on the live world object,
+2. the `attribution` field on the registered world definition (the map card), and
+3. a lit gantry sign standing over the spawn street, in-world. Its headline is **derived from
+   the bbox** rather than hardcoded, so widening the map cannot leave it claiming an area it
+   no longer describes.
+
 ## Obligations
 
 These files constitute a **Derivative Database** under the

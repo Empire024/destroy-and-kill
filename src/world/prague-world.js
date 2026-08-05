@@ -1,9 +1,18 @@
 /* ============================================================================
- * PRAGUE 1 — a genuine local map built from OpenStreetMap data
+ * PRAGUE CENTRE — a genuine local map built from OpenStreetMap data
  * ----------------------------------------------------------------------------
- * Real Prague 1: 1 427 building footprints and 2 284 road centrelines covering
- * ~1.66 x 1.51 km of the historic core (Old Town Square, Karlova, náměstí
- * Republiky, the east end of Charles Bridge, the top of Wenceslas Square).
+ * Real building footprints and road centrelines over the historic centre:
+ * Staré Město, Josefov, Nové Město, Malá Strana and Hradčany, running out to
+ * the edges of Vinohrady and Smíchov so the boundary is a fade rather than a
+ * wall. Old Town Square, Charles Bridge, Wenceslas Square and the Castle are
+ * all inside it.
+ *
+ * The counts are NOT repeated here. They live in `prague1.json`'s `meta.counts`
+ * and are printed to the console at every build, which means they cannot go
+ * stale the way a number typed into a comment does — an earlier version of
+ * this header confidently described an extract three expansions out of date.
+ * Change the covered area by re-running the extractor with a different bbox;
+ * nothing in this file needs to know the numbers.
  *
  * This runs entirely inside the game's own Three.js scene, camera, car mesh,
  * physics and collision. There is no iframe, no map service, no proxy, no
