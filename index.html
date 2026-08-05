@@ -2307,7 +2307,12 @@ function explosionAt(x,z,big=false,baseY=0){
 function igniteTraffic(t){ if(t.burning||t.dead) return; t.burning=true; t.spd=0;
   const fire=makeFire(); t.mesh.add(fire); t.mesh.rotation.z=rand(-.3,.3);
   burners.push({mesh:t.mesh, fire, fuse:rand(3,5), x:t.x, z:t.z, t}); }
-function igniteVehicle(){carState.hp=100;carState.burning=false;return; if(carState.burning||!car) return; carState.burning=true; carState.fuse=5;
+function igniteVehicle(){
+  // Historic invincibility: with no damage system present, ignition stays
+  // neutered exactly as it was. With vdamage registered, the real burn runs —
+  // vdamage is the only caller that can drive hp to 0.
+  if(!(window.GameSystems&&GameSystems.api('vdamage'))){carState.hp=100;carState.burning=false;return;}
+  if(carState.burning||!car) return; carState.burning=true; carState.fuse=5;
   carState.fire=makeFire(); car.add(carState.fire);
   addToast('🔥 Engine ablaze — bail out (E) before it blows!','#ff6b3b'); beep(140,0.3,'sawtooth',0.12); }
 function detachBurningCar(){ // called when the player leaves a burning car — it keeps burning where it sits
@@ -5064,7 +5069,10 @@ if(window.GameSystems){
         playerX=x;playerZ=z;cameraSmoothingReady=false;
       },
       resetCar,requestManualShift,
-      toggleFullMap,get fullMapOpen(){return showFullMap;}
+      toggleFullMap,get fullMapOpen(){return showFullMap;},
+      // Death path for the damage system: the full cinematic burn+bang.
+      explodePlayer(reason){explodePlayerNow(reason||'VEHICLE DESTROYED');},
+      ignitePlayerVehicle(){igniteVehicle();}
     },
 
     // Everything the camera module needs to fully replace updateCamera.
