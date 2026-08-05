@@ -303,7 +303,6 @@
       closed: new Int32Array(nodes.length),
       gScore: new Float64Array(nodes.length),
       fromNode: new Int32Array(nodes.length),
-      fromEdge: new Int32Array(nodes.length),
       run: 0,
       buildMs: 0, segCount: segs.length
     };
@@ -443,7 +442,7 @@
     const nodes = g.nodes, edges = g.edges;
     const ga = g.nodes[B.edge.a], gb = g.nodes[B.edge.b];
     const run = ++g.run;
-    const stamp = g.stamp, closed = g.closed, gs = g.gScore, fn = g.fromNode, fe = g.fromEdge;
+    const stamp = g.stamp, closed = g.closed, gs = g.gScore, fn = g.fromNode;
 
     function h(n) {
       const p = nodes[n];
@@ -452,7 +451,7 @@
     const open = new Heap();
     function seed(n, cost) {
       if (stamp[n] === run && gs[n] <= cost) return;
-      stamp[n] = run; gs[n] = cost; fn[n] = -1; fe[n] = -1;
+      stamp[n] = run; gs[n] = cost; fn[n] = -1;
       open.push(n, cost + h(n));
     }
     // Getting onto the start edge costs the walk to whichever end we leave by.
@@ -492,7 +491,7 @@
         const v = e.a === u ? e.b : e.a;
         const cand = gs[u] + edgeCost(g, e, u, v);
         if (stamp[v] === run && gs[v] <= cand) continue;
-        stamp[v] = run; gs[v] = cand; fn[v] = u; fe[v] = ei;
+        stamp[v] = run; gs[v] = cand; fn[v] = u;
         open.push(v, cand + h(v));
       }
     }

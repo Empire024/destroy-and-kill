@@ -13,23 +13,24 @@
  * active world's own road centrelines (`roadsRef.segs`), drawn as ONE
  * InstancedMesh per type, with a per-type mass model:
  *
- *   type              breaks at   behaviour   solid below its threshold?
- *   lampPost            20 mph    topple + sparks   no
- *   smallTree           25 mph    topple            no
- *   lightBarrier        10 mph    shatter           no
- *   trafficLightPole    30 mph    bend              YES
- *   bigTree             55 mph    topple (heavy)    YES
- *   concreteBarrier     45 mph    crack             YES, always
+ *   type              breaks at   behaviour         mass
+ *   lightBarrier        10 mph    shatter           light
+ *   lampPost            20 mph    topple + sparks   light
+ *   smallTree           25 mph    topple            light
+ *   trafficLightPole    30 mph    bend              medium
+ *   concreteBarrier     45 mph    crack (never moves) heavy
+ *   bigTree             55 mph    topple (slow)     heavy
  *
  * "SOLID BELOW ITS THRESHOLD" IS LITERAL
- * `obstaclesNear` reports a heavy prop's collider only while the player is
- * BELOW its break speed. Hit a big tree at 40 and it is a wall; arrive at 60 and
- * there is no collider to bounce off, so the impact test below topples it and
- * you go through. Without that gate the engine's push-out resolves first and
- * every "breakable" prop stops you dead a frame before it falls over.
- * concreteBarrier is the deliberate exception: it never moves, so its collider
- * is unconditional and stays after it cracks — a cracked barrier is still there,
- * and collision has to agree with what is drawn.
+ * `obstaclesNear` reports a prop's collider only while the player is BELOW its
+ * break speed. Nudge a lamp post at 15 and it is a post; arrive at 30 and there
+ * is no collider to bounce off, so the impact test below topples it and you go
+ * through. That gate is the whole design: without it the engine's push-out
+ * resolves first and every "breakable" prop stops you dead a frame before it
+ * falls over, and with no collider at all you ghost through street furniture at
+ * walking pace. concreteBarrier is the deliberate exception — it never moves, so
+ * its collider is unconditional and survives the crack. A cracked barrier is
+ * still standing there, and collision has to agree with what is drawn.
  *
  * DETECTION IS SWEPT, NOT SAMPLED
  * The player covers up to ~9 units in a frame at this game's top speeds, which
@@ -65,7 +66,8 @@
    * `boxes` are [ox,oy,oz,w,h,d,colour] in the prop's local frame with y=0 at
    * the GROUND, because every topple is a rotation about the origin. `radius`
    * is the impact test's radius, sized to the visual footprint. `collide` is
-   * the AABB reported to the engine, or null for a knock-over prop.
+   * the AABB reported to the engine while the prop is still solid (see the
+   * speed gate in the header); a type with `collide: null` is never solid.
    *
    * Colours are albedo under NEON's ~2.9 total light rig, not screen colour —
    * anything over ~0.35 per channel clips to white here. */
@@ -73,7 +75,7 @@
     lampPost: {
       massClass: 'light', minImpactMph: 20, fallBehaviour: 'topple', sparks: true,
       respawnSec: 90, radius: 2.6, fallMs: 520, debris: 5, debrisColor: 0x33363b,
-      collide: null,
+      collide: { w: 1.6, d: 1.6, h: 9.0 },
       boxes: [
         [0, 0, 0, 1.5, 0.35, 1.5, 0x2b2d31],
         [0, 0.35, 0, 0.5, 8.6, 0.5, 0x3a3d42],
@@ -84,7 +86,7 @@
     smallTree: {
       massClass: 'light', minImpactMph: 25, fallBehaviour: 'topple', sparks: false,
       respawnSec: 75, radius: 2.8, fallMs: 620, debris: 6, debrisColor: 0x2a3a20,
-      collide: null,
+      collide: { w: 2.4, d: 2.4, h: 8.0 },
       boxes: [
         [0, 0, 0, 0.9, 3.4, 0.9, 0x2e2318],
         [0, 3.0, 0, 4.4, 3.0, 4.4, 0x22381f],
@@ -94,7 +96,7 @@
     lightBarrier: {
       massClass: 'light', minImpactMph: 10, fallBehaviour: 'shatter', sparks: false,
       respawnSec: 60, radius: 2.6, fallMs: 260, debris: 7, debrisColor: 0x4a3410,
-      collide: null,
+      collide: { w: 1.2, d: 4.4, h: 1.4 },
       boxes: [
         [0, 0, 0, 0.9, 0.35, 4.4, 0x2f2b22],
         [0, 0.35, 0, 0.6, 0.95, 4.0, 0x4a3410],
@@ -126,7 +128,13 @@
     },
     concreteBarrier: {
       massClass: 'heavy', minImpactMph: 45, fallBehaviour: 'crack', sparks: false,
-      respawnSec: 150, radius: 3.6, fallMs: 1, debris: 8, debrisColor: 0x43454a,
+      // hitPad 6.2, not the default 3.2: this is the ONE prop that never stops
+      // colliding, so the engine's own push-out holds the car half the collider
+      // + the body radius (2.6) + the front sample offset (3) clear of it. A pad
+      // under 5.6 and it could never be cracked by driving into it at all —
+      // measured: an 80mph head-on into the END of a barrier stopped 8.7 units
+      // off centre and the crack never fired.
+      respawnSec: 150, radius: 3.6, hitPad: 6.2, fallMs: 1, debris: 8, debrisColor: 0x43454a,
       collide: { w: 2.0, d: 6.2, h: 1.5 },
       boxes: [
         [0, 0, 0, 1.7, 0.55, 6.2, 0x3d3f43],
@@ -367,8 +375,16 @@
       const p = {
         kind: kind, type: T, x: sl.x, y: sl.y, z: sl.z, ry: rot, s: scale,
         idx: byType[kind].length, state: 0,          // 0 intact 1 falling 2 fallen 3 retired
-        anim: 0, axX: 1, axZ: 0, respawnAt: 0, radius: T.radius * scale, col: null
+        anim: 0, axX: 1, axZ: 0, respawnAt: 0, radius: T.radius * scale, col: null,
+        // Impact footprint. A 6.2-long barrier hit end-on and hit broadside are
+        // not the same distance from its centre, so the test is against the
+        // prop's own oriented box, not a circle around it.
+        cosR: Math.cos(rot), sinR: Math.sin(rot),
+        hw: (T.collide ? T.collide.w * 0.5 : T.radius) * scale,
+        hd: (T.collide ? T.collide.d * 0.5 : T.radius) * scale,
+        pad: T.hitPad === undefined ? 3.2 : T.hitPad
       };
+      p.hitR = Math.hypot(p.hw, p.hd) + p.pad;       // cheap circle reject first
       byType[kind].push(p);
       props.push(p);
     }
@@ -537,13 +553,25 @@
   function sweep(x0, z0, x1, z1, y, mph, list) {
     if (!active) return 0;
     active.hash.query((x0 + x1) * 0.5, (z0 + z1) * 0.5, list);
+    const moved = Math.hypot(x1 - x0, z1 - z0);
+    const steps = moved > 2 ? Math.ceil(moved / 2) : 1;
     let hits = 0;
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       if (p.state !== 0) continue;
       if (Math.abs(y - p.y) > 6) continue;                 // a deck above or below it
       if (mph < p.type.minImpactMph) continue;
-      if (segDist(x0, z0, x1, z1, p.x, p.z) > p.radius + 2.4) continue;
+      if (segDist(x0, z0, x1, z1, p.x, p.z) > p.hitR) continue;
+      // Sampled point-in-oriented-box along the move. The move is at most ~9
+      // units at this game's top speed, so 2-unit samples cannot skip a prop.
+      let hit = false;
+      for (let k = 0; k <= steps && !hit; k++) {
+        const t = k / steps;
+        const dx = x0 + (x1 - x0) * t - p.x, dz = z0 + (z1 - z0) * t - p.z;
+        const lx = dx * p.cosR - dz * p.sinR, lz = dx * p.sinR + dz * p.cosR;
+        if (Math.abs(lx) <= p.hw + p.pad && Math.abs(lz) <= p.hd + p.pad) hit = true;
+      }
+      if (!hit) continue;
       if (breakProp(p, x1 - x0, z1 - z0, mph)) hits++;
     }
     return hits;

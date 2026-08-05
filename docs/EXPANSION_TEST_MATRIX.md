@@ -30,11 +30,14 @@ know them:
    `step(180, 1/60)` is three seconds. `step(1/60)` happens to run exactly one
    frame at the default `dt`, which is a coincidence of `for(i=0;i<0.0167;i++)`,
    not an interface. Always pass both arguments.
-3. **`GAME_DEBUG.step` does NOT tick the expansion systems.** It calls
-   `updateWheelSystem(dt); update(dt)` only (index.html:4908); `GameSystems.update`
-   is called from the rAF `loop()` (index.html:4916). In a hidden tab **no
-   system's `update()` ever runs** unless you pump it yourself. Any row below
-   that involves a system's per-frame behaviour must use `tick()`.
+3. **`GAME_DEBUG.step` ticks the expansion systems for you — do not pump them
+   yourself as well.** It used to drive only the engine simulation, which meant
+   no system's `update()` ever ran in a hidden tab; that was fixed on
+   2026-08-05 and `step()` now calls `GameSystems.update` the way the rAF
+   `loop()` does. Calling `GameSystems.update` alongside `step()` runs every
+   system **twice per frame** (measured: 20 updates for 10 frames), so anything
+   time-based — cooldowns, day/night, radio, pursuit timers — advances at
+   double rate and the run is quietly wrong. Just use `tick()` below.
 4. **`GAME_DEBUG.render` reads zero until something has actually rendered.**
    `renderer.info` is only populated by a real draw, and `step()` does not draw.
    Call `GAME_DEBUG.frame()` first — that is what `stats()` below does. Reading
@@ -46,13 +49,8 @@ know them:
 ```js
 const S = GameSystems, C = S.context();
 const api = id => S.api(id);                       // null when a system is absent
-/** One full frame: engine simulation AND expansion systems, the way loop() does it. */
-const tick = (n = 1, dt = 1/60) => {
-  for (let i = 0; i < n; i++) {
-    GAME_DEBUG.step(1, dt);
-    S.update(dt, C.engine.started && !C.engine.selectionOpen && !C.player.dead && !C.player.dying);
-  }
-};
+/** N fixed-step frames: engine simulation AND expansion systems, exactly once each. */
+const tick = (n = 1, dt = 1/60) => GAME_DEBUG.step(n, dt);
 /** Hold/release a driving key (bypasses system routing, like the real drive keys). */
 const hold = (k, down) => GAME_DEBUG.press(k, down);
 /** A real keypress through the engine's own routing — use this for system keys. */
@@ -70,12 +68,18 @@ should move the car roughly 190 units to about 210 mph in gear 3, and `stats()`
 should report a few hundred draw calls. All zeros means you are not driving the
 simulation.
 
-### Known routing quirk
+### Key routing
 
-`Escape` is handled at index.html:3109 **before** systems get first refusal, so
-while the game is started `Escape` never reaches `GameSystems.onKey`. Any row
-that expects a system to see `Escape` must use `sysKey('escape')` to isolate the
-system, and must say so. This is an engine ordering issue, not a system bug.
+Systems get first refusal on every key **except** the driving keys
+(`W A S D`, arrows, `Space`, `Shift`) — a broken system must never be able to
+eat the controls. `F2` and, while the wheel panel is open, `Escape` are handled
+by the engine before systems see them.
+
+`Escape` reaches systems as of 2026-08-05 (the branch was moved below the
+routing call). It should close whatever a system is showing, and fall through to
+the engine's vehicle-select menu only when no system claims it — verify both
+halves, since a system that consumes `Escape` unconditionally locks the player
+out of the menu.
 
 ### localStorage discipline
 
@@ -269,7 +273,7 @@ the harness note).
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Draw calls per map | `GAME_DEBUG.start(map,'proDrift')`; `tick(120)`; `stats()` | Record `calls` and `triangles` per map. Reference: NEON near spawn measured 290–325 calls / ~379k triangles on 2026-08-05 (call count varies with what is in view, so compare like for like). A step change means new geometry is not instanced or merged | untested | — |
+| Draw calls per map | `GAME_DEBUG.start(map,'proDrift')`; `tick(120)`; `stats()` | Record `calls` and `triangles` per map. Rough anchor: NEON near spawn measured 256–325 calls / 379–394k triangles across three runs on 2026-08-05, drifting upward as Wave 2 systems came online. The spread is real — call count follows what is in view — so treat a single number as meaningless and compare like for like: same map, same spawn, same frame count. A step change, not a wobble, means new geometry is not instanced or merged | untested | — |
 | Density sweep | `GAME_DEBUG.setDensity(0.5 / 1 / 2)`; `tick(300)` each; `stats()` + `GAME_DEBUG.population` | Cost scales roughly with density; nothing falls over at 2× | untested | — |
 | No geometry leak on map switch | `stats().geometries`; `setMap` through all three maps three times, `tick(30)` after each; `stats().geometries` again | Returns to roughly the starting count. Monotonic growth = a world is not disposing | untested | — |
 | No texture leak | Same, watching `stats().textures` | Same | untested | — |
@@ -295,6 +299,7 @@ the harness note).
 | Enter / exit car | `tap('e')` twice | Out on foot then back in; `C.player.onFoot` toggles; no camera jump through the ground | untested | — |
 | Mute is N, not M or U | `tap('n')`, then `tap('m')`, then `tap('u')` | `n` mutes with a toast; `m` opens the map; `u` upshifts. Any of the three doing another's job is a regression | untested | — |
 | Help panel toggles | `tap('h')` twice | Panel opens then closes; `api('help').isOpen` follows; `#helpPanel` has `pointer-events:auto` while `#helpRoot` and `#systemsUI` stay `none` | untested | — |
+| Escape closes help, not the game | `tap('h')` then `tap('escape')`; then `tap('escape')` again | First Escape closes the panel and does **not** open the vehicle-select menu; the second Escape (panel closed) does open it. A system that swallows Escape either way is a fail | untested | — |
 | Help lists real bindings | `tap('h')` and read every row | Every key listed actually does what it says. This table and the panel must not drift apart | untested | — |
 | Help grows with systems | `api('help').addControls('QA',[['J','test']])`; reopen | Section appears. Re-adding the same title replaces it in place rather than duplicating | untested | — |
 | Help hides touch buttons | On a touch build, open the panel | `#mobileControls` hidden while open, restored on close | untested | — |

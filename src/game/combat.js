@@ -384,9 +384,12 @@
   function buildWeaponUI(ctx) {
     const css = document.createElement('style');
     css.textContent =
-      '#cbWeapon{position:absolute;right:20px;bottom:230px;z-index:6;display:none;pointer-events:none;text-align:right;' +
+      // Left rail, stacked directly above the damage panel: the right-hand side
+      // is already the minimap and the radio widget, and a readout dropped on
+      // top of the radio was exactly what the first screenshot showed.
+      '#cbWeapon{position:absolute;left:20px;bottom:74px;z-index:6;display:none;pointer-events:none;text-align:left;' +
       'font:900 12px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:1.4px;color:#eaf2ff;' +
-      'background:rgba(6,8,16,.72);border-right:3px solid #20e3ff;border-radius:6px 0 0 6px;padding:7px 11px 8px 14px;' +
+      'background:rgba(6,8,16,.72);border-left:3px solid #20e3ff;border-radius:0 6px 6px 0;padding:7px 14px 8px 11px;' +
       'box-shadow:0 4px 18px rgba(0,0,0,.5)}' +
       '#cbWeapon.show{display:block}' +
       '#cbWeapon .cbName{color:#20e3ff;text-shadow:0 0 10px rgba(32,227,255,.7)}' +
@@ -405,8 +408,7 @@
       '#cbSwap{width:58px;height:36px;font-size:11px;color:var(--cyan,#20e3ff)}' +
       // On touch the right-hand column belongs to the pedals and the fire stack,
       // so the readout moves to the left rail, clear above the damage panel.
-      '@media(max-width:900px),(pointer:coarse){#cbWeapon{right:auto;left:12px;bottom:206px;font-size:11px;' +
-      'text-align:left;border-right:none;border-left:3px solid #20e3ff;border-radius:0 6px 6px 0;padding:6px 12px 7px 11px}}';
+      '@media(max-width:900px),(pointer:coarse){#cbWeapon{left:12px;bottom:206px;font-size:11px;padding:6px 12px 7px 11px}}';
     document.head.appendChild(css);
 
     wUI = document.createElement('div');
@@ -466,7 +468,30 @@
    * ====================================================================== */
   const officers = [];          // live officer figures, also shootable targets
   const officerPool = [];       // hidden character groups, reused
+  const FLANK_SLOTS = [.62, -.62, 1.35, -1.35];
   let idleTimer = 0, fleeTimer = 0, warnedAim = false;
+
+  /** Officers are people, not sprites: two of them may not occupy one point.
+      Four at most, so this is six distance tests a frame. */
+  function separateOfficers() {
+    for (let i = 0; i < officers.length; i++) {
+      const a = officers[i];
+      if (a.down) continue;
+      for (let j = i + 1; j < officers.length; j++) {
+        const b = officers[j];
+        if (b.down) continue;
+        let dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
+        if (d > 2.2) continue;
+        if (d < 1e-3) { dx = Math.cos(i * 2.4); dz = Math.sin(i * 2.4); d = 1; }
+        const push = (2.2 - d) * .5;
+        a.x += dx / d * push; a.z += dz / d * push;
+        b.x -= dx / d * push; b.z -= dz / d * push;
+        // poseOfficer has already placed the group this frame; keep it in step.
+        a.group.position.x = a.x; a.group.position.z = a.z;
+        b.group.position.x = b.x; b.group.position.z = b.z;
+      }
+    }
+  }
 
   function takeOfficer(ctx, x, y, z, heading) {
     let g = officerPool.pop();
@@ -567,7 +592,7 @@
       state: 'STOPPING', t: 0,
       speed: Math.hypot(cop.vx || 0, cop.vz || 0),
       x: cop.x, z: cop.z, y: cop.y === undefined ? 0 : cop.y, heading: cop.heading,
-      officer: null, shotCd: 0, firingTime: 0, side: Math.random() < .5 ? 1 : -1,
+      officer: null, shotCd: 0, firingTime: 0,
       flankX: 0, flankZ: 0,
       // The engine has already driven this cop once this frame; integrating our
       // own step on top of that would double its travel for one frame, which
@@ -641,9 +666,12 @@
           const oy = ctx.world.groundHeightAt(ex, ez, st.y);
           st.officer = takeOfficer(ctx, ex, oy, ez, st.heading);
           st.officer.cop = cop;
-          // Flank: stand 12-18 units off the player, swung ~35 degrees round from
-          // the bearing the car came in on, so two officers never share a spot.
-          const bearing = Math.atan2(st.x - px, st.z - pz) + st.side * .62;
+          // Flank: stand 12-18 units off the player, swung round from the bearing
+          // the car came in on. The swing comes from a SLOT, not a coin flip:
+          // two cars that arrive on the same bearing and pick the same side put
+          // their officers on the same square metre (measured: 0.7 units apart).
+          const slot = FLANK_SLOTS[(officers.length - 1) % FLANK_SLOTS.length];
+          const bearing = Math.atan2(st.x - px, st.z - pz) + slot;
           const d = 12 + Math.random() * 6;
           const fc = ctx.world.clampToBounds(px + Math.sin(bearing) * d, pz + Math.cos(bearing) * d);
           st.flankX = fc.x; st.flankZ = fc.z;
@@ -680,6 +708,8 @@
         if (left < 2.5 || stuck) { releaseCop(cop); }
       }
     }
+
+    separateOfficers();
 
     // Officers whose cop vanished (blown up, wanted cleared, world switched)
     // must not be left standing in the street.

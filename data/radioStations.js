@@ -228,7 +228,7 @@
    * DRIFT FM — breakbeat and a bassline. Fast, dry, made for the ×5 combo.
    * ========================================================================*/
   function driftFM(actx, dest) {
-    var out = rig(actx, dest, 0.8);
+    var out = rig(actx, dest, 0.85);
     var rnd = mulberry32(0x44524654);
     var BPM = 150, STEP = 60 / BPM / 4;
     var PATTERNS = ['Apex Break', 'Tandem Run', 'Wet Tarmac'];
@@ -311,7 +311,7 @@
       f.frequency.exponentialRampToValueAtTime(5200, t + dur);
       var g = actx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(0.12, t + dur * 0.85);
+      g.gain.linearRampToValueAtTime(0.10 * SWEEP_MAKEUP, t + dur * 0.85);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.1);
       n.connect(f); f.connect(g); g.connect(out);
       n.start(t); n.stop(t + dur + 0.15);
@@ -326,7 +326,11 @@
       if (SNARES[p][inBar]) snare(t, inBar % 4 !== 0 && rnd() < 0.55);
       if (inBar % 2 === 0 || rnd() < 0.35) hat(t, inBar === 14);
       var deg = RIFFS[p][inBar];
-      if (deg >= 0) bass(SCALE[deg % SCALE.length] - (bar % 4 === 3 ? 12 : 24), t);
+      // SCALE is already written in the bass register (E2 = 40). An earlier
+      // version dropped another two octaves off it and put the whole riff at
+      // 20–33 Hz, i.e. under the speaker: measured 21 dB down on NEON WAVE in
+      // the 120–300 Hz band. One octave down, and the last bar of four stays up.
+      if (deg >= 0) bass(SCALE[deg % SCALE.length] - (bar % 4 === 3 ? 0 : 12), t);
     }
 
     return {
@@ -346,7 +350,7 @@
    * a long feedback delay so the empty streets have some size to them.
    * ========================================================================*/
   function nightClassical(actx, dest) {
-    var out = rig(actx, dest, 0.85);
+    var out = rig(actx, dest, 1.0);
 
     // Not a reverb — a convolver would want an impulse response we do not have,
     // and will not download. A damped feedback delay is what a hall sounds like
@@ -454,12 +458,16 @@
     var PATTERNS = ['Dispatch 12', 'Night Watch', 'All Units'];
     var step = 0, next = 0, live = false, pat = 0, busyUntil = 0;
 
+    // A Q of 3.2 around 1.2 kHz keeps ~375 Hz of band; see noiseMakeup().
+    var VOICE_MAKEUP = noiseMakeup(actx, 1200 / 3.2);
+    var SQUELCH_MAKEUP = noiseMakeup(actx, actx.sampleRate / 2 - 1900);
+
     /** One "voice" through a comms channel: 340–2900 Hz, chopped into syllables. */
     function transmission(t, dur) {
       var n = noiseSource(actx);
       var hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 340;
       var lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2900;
-      var form = actx.createBiquadFilter(); form.type = 'bandpass'; form.Q.value = 5.5;
+      var form = actx.createBiquadFilter(); form.type = 'bandpass'; form.Q.value = 3.2;
       var g = actx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       n.connect(hp); hp.connect(lp); lp.connect(form); form.connect(g); g.connect(out);
@@ -467,7 +475,7 @@
       var tt = t, syl = 0;
       while (tt < t + dur) {
         var len = 0.055 + rnd() * 0.09;                  // 5–9 syllables a second
-        var lvl = 0.07 + rnd() * 0.09;
+        var lvl = (0.10 + rnd() * 0.11) * VOICE_MAKEUP;
         form.frequency.setValueAtTime(620 + rnd() * 1250, tt);
         g.gain.setValueAtTime(0.0001, tt);
         g.gain.linearRampToValueAtTime(lvl, tt + len * 0.3);
@@ -486,7 +494,7 @@
       var n = noiseSource(actx);
       var f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1900;
       var g = actx.createGain();
-      g.gain.setValueAtTime(0.11, t);
+      g.gain.setValueAtTime(0.13 * SQUELCH_MAKEUP, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
       n.connect(f); f.connect(g); g.connect(out);
       n.start(t); n.stop(t + 0.08);
@@ -498,8 +506,8 @@
         var at = t + i * 0.16;
         var o = osc(actx, 'square', i ? 1180 : 940, at), g = actx.createGain();
         g.gain.setValueAtTime(0.0001, at);
-        g.gain.linearRampToValueAtTime(0.05, at + 0.01);
-        g.gain.setValueAtTime(0.05, at + 0.10);
+        g.gain.linearRampToValueAtTime(0.085, at + 0.01);
+        g.gain.setValueAtTime(0.085, at + 0.10);
         g.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
         o.connect(g); g.connect(out); o.start(at); o.stop(at + 0.15);
       }
