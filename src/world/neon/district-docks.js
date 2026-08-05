@@ -3,24 +3,25 @@
  * ----------------------------------------------------------------------------
  * Footprint: x [-1400, 1400], z [1700, 3900]. Flat working level at y = 2, with
  * a 100-unit taper down to y = 0 at the west/east/north seams so neighbouring
- * districts stay flat.
+ * districts stay flat. Everything the player can reach sits inside the flat
+ * region (x |1300|, z >= 1800) — nothing is placed on the taper.
  *
  * This is the map's wide-open counterweight to downtown's tight grid: two huge
  * painted concrete skidpads, container stacks used as drift gates and slalom
- * rows, warehouse corridors, three jumps, and a quay wall you cannot drive past.
- * Mood is harsh sodium work-light, not neon signage.
+ * rows, two warehouse corridors, three jumps, and a quay wall you cannot drive
+ * past. The mood is harsh sodium work-light, not neon signage.
  *
- * Layout (x → east, z → south):
+ * Layout (x -> east, z -> south):
  *
- *      z1700  ── entry stubs at x=-30 and x=530 ────────────────  (to downtown)
- *      z1980  ── NORTH ACCESS ROAD ──────────────────────────────
- *              [ PAD ALPHA skidpad ][ W1 ][corr][ W2 ]  [ CONTAINER YARD ]
- *      z2860  ── MID YARD ROAD ──────────────────────────────────
- *              [ ............ PAD BRAVO skidpad ......... ]  [ W3 ]
- *      z3300                                                  ──corridor──
- *                                                                [ W4 ]
- *      z3580  ── QUAYSIDE ROAD ─────────────────────────────────
- *      z3720  ── quay wall / cranes / water ────────────────────
+ *   z1700  -- entry stubs at x=-30 and x=530 ---------------  (links -> downtown)
+ *   z1980  -- NORTH ACCESS ROAD -------------------------------------------
+ *            [ PAD ALPHA skidpad ][ BAY 3 ][corr][ BAY 4 ]  [ CONTAINER YARD ]
+ *   z2860  -- MID YARD ROAD -----------------------------------------------
+ *            [ .......... PAD BRAVO skidpad .......... ]     [ SHED 7 ]
+ *   z3300                                                    --corridor--
+ *                                                            [ SHED 8 ]
+ *   z3580  -- QUAYSIDE ROAD -----------------------------------------------
+ *   z3720  -- quay wall / ship-to-shore cranes / water --------------------
  * ==========================================================================*/
 (function () {
   'use strict';
@@ -29,17 +30,25 @@
   const X0 = -1400, X1 = 1400, Z0 = 1700, Z1 = 3900;
   const GY = 2;              // flat yard level
   const TAPER = 100;         // seam band where the yard eases down to 0
+  const FX0 = X0 + TAPER, FX1 = X1 - TAPER, FZ0 = Z0 + TAPER;   // flat region
   const QUAY_Z = 3720;       // where the concrete stops and the harbour starts
   const WATER_Y = -6;
 
   // ---- road centrelines ---------------------------------------------------
-  const ZN = 1980, ZM = 2860, ZQ = 3580, ZD = 3300;   // east–west
-  const XW = -1180, XA = -30, XC = 530, XE = 1180;    // north–south
+  const ZN = 1980, ZM = 2860, ZQ = 3580, ZD = 3300;   // east-west
+  const XW = -1180, XA = -30, XC = 530, XE = 1180;    // north-south
   const RW = 42;                                      // service road width
   const RHALF = RW / 2 + 4;                           // ribbon + curb half width
 
   // ---- shipping container module -----------------------------------------
   const CL = 34, CW = 9, CH = 9, CGAP = 0.35;
+
+  // ---- ground overlay heights (kept apart so nothing z-fights) ------------
+  const Y_APRON = GY + 0.04;   // plain concrete aprons
+  const Y_PAD = GY + 0.08;     // skidpad slabs
+  const Y_POOL = GY + 0.11;    // floodlight spill
+  const Y_RAIL = GY + 0.14;    // crane rails
+  const Y_PAINT = GY + 0.16;   // line markings
 
   // ---- palette ------------------------------------------------------------
   const CONTAINER = [0xa8442c, 0x1f4e79, 0x2f6b3f, 0xc2661f, 0x6b7280,
@@ -67,13 +76,12 @@
   let T = null;   // THREE, captured on build
 
   /* ------------------------------------------------------------------ props
-   * Every instanced prop key lives here so the count stays visible. Instanced
-   * props never register colliders, which is exactly what we want for ground
-   * clutter — anything solid gets an explicit b.collider() alongside it.
+   * Every instanced prop key lives here so the count stays visible (14 keys).
+   * Instanced props never register colliders, which is exactly what we want
+   * for ground clutter — anything solid gets an explicit collider alongside.
    * ---------------------------------------------------------------------- */
   const PROP = {
     beam:    { g: () => new T.BoxGeometry(1, 1, 1), m: () => new T.MeshStandardMaterial({ color: STEEL, roughness: 0.72, metalness: 0.28 }) },
-    beamH:   { g: () => new T.BoxGeometry(1, 1, 1), m: () => new T.MeshStandardMaterial({ color: 0xb4661d, roughness: 0.78 }) },
     drum:    { g: () => new T.CylinderGeometry(3.1, 3.1, 7, 10), m: () => new T.MeshStandardMaterial({ color: 0x8a4a2a, roughness: 0.85 }) },
     drumB:   { g: () => new T.CylinderGeometry(3.1, 3.1, 7, 10), m: () => new T.MeshStandardMaterial({ color: 0x2c5a6a, roughness: 0.85 }) },
     pallet:  { g: () => new T.BoxGeometry(11, 1.6, 9), m: () => new T.MeshStandardMaterial({ color: 0x6b5334, roughness: 0.95 }) },
@@ -92,12 +100,11 @@
   function prop(b, key, tr) { const p = PROP[key]; b.instance('dk_' + key, p.g, p.m, tr); }
 
   /* -------------------------------------------------------------- painting */
-  /** Filled axis-aligned ground rectangle (x0<x1, z0<z1) with an upward normal. */
+  /** Filled ground rectangle (x0<x1, z0<z1), wound so the normal points up. */
   function slab(b, x0, z0, x1, z1, y, color, emissive) {
     b.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], color, emissive);
   }
-  /** Painted stripe from (x0,z0) to (x1,z1). Always emissive — it is paint under
-   *  floodlights, and unlit vertex colours vanish on dark concrete at night. */
+  /** Painted stripe. Always emissive: unlit paint is invisible on night concrete. */
   function line(b, x0, z0, x1, z1, w, color, y) {
     let dx = x1 - x0, dz = z1 - z0;
     const L = Math.hypot(dx, dz); if (L < 0.01) return;
@@ -112,24 +119,36 @@
     for (let i = 0; i < segs; i++) {
       const a0 = i / segs * Math.PI * 2, a1 = (i + 1) / segs * Math.PI * 2;
       const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
-      b.quad([cx + c0 * r0, y, cz + s0 * r0], [cx + c0 * r1, y, cz + s1 * r0 * 0 + cz * 0 + s0 * r1],
+      b.quad([cx + c0 * r0, y, cz + s0 * r0], [cx + c0 * r1, y, cz + s0 * r1],
              [cx + c1 * r1, y, cz + s1 * r1], [cx + c1 * r0, y, cz + s1 * r0], color, true);
     }
   }
-  /** Dashed lane line along X or Z. */
+  /** Dashed lane line. */
   function dashes(b, x0, z0, x1, z1, w, color, y, dash, gap) {
     const L = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / L, uz = (z1 - z0) / L;
     for (let s = 0; s + dash < L; s += dash + gap) {
       line(b, x0 + ux * s, z0 + uz * s, x0 + ux * (s + dash), z0 + uz * (s + dash), w, color, y);
     }
   }
-  /** Chevron pair pointing along +dir (0 = +Z, PI/2 = +X). */
+  /** Chevron pointing along `dir` (0 = +Z, PI/2 = +X). */
   function chevron(b, cx, cz, size, dir, color, y) {
     const c = Math.cos(dir), s = Math.sin(dir);
     const P = (lx, lz) => [cx + lx * c + lz * s, cz - lx * s + lz * c];
     const tip = P(0, size), l = P(-size * 0.8, -size * 0.5), r = P(size * 0.8, -size * 0.5);
     line(b, l[0], l[1], tip[0], tip[1], 5, color, y);
     line(b, r[0], r[1], tip[0], tip[1], 5, color, y);
+  }
+  /** Diagonal "keep clear" hatching inside a rectangle. */
+  function hatch(b, x0, z0, x1, z1, y) {
+    line(b, x0, z0, x1, z0, 2.4, PAINT_Y, y);
+    line(b, x0, z1, x1, z1, 2.4, PAINT_Y, y);
+    line(b, x0, z0, x0, z1, 2.4, PAINT_Y, y);
+    line(b, x1, z0, x1, z1, 2.4, PAINT_Y, y);
+    const W = x1 - x0, D = z1 - z0;
+    for (let s = 26; s < W + D; s += 30) {
+      line(b, Math.min(x0 + s, x1), z0 + Math.max(0, s - W),
+              x0 + Math.max(0, s - D), Math.min(z0 + s, z1), 2, PAINT_Y, y);
+    }
   }
 
   /* ------------------------------------------------------------------ build */
@@ -139,18 +158,17 @@
 
     // ---- ground height field --------------------------------------------
     // Flat at GY, easing to 0 across TAPER at the west, east and north seams.
-    // The quay edge (+Z) keeps full height: the wall hides the step and nobody
-    // lives out there.
+    // The quay edge (+Z) keeps full height — the wall hides the step and the
+    // only thing past it is water.
     b.terrain.addZone((x, z) => {
       if (x < X0 || x > X1 || z < Z0 || z > Z1) return 0;
       let t = (x - X0) / TAPER;
-      const b1 = (X1 - x) / TAPER; if (b1 < t) t = b1;
-      const b2 = (z - Z0) / TAPER; if (b2 < t) t = b2;
+      const e = (X1 - x) / TAPER; if (e < t) t = e;
+      const n = (z - Z0) / TAPER; if (n < t) t = n;
       return t >= 1 ? GY : (t <= 0 ? 0 : GY * t);
     });
 
-    // ---- concrete ---------------------------------------------------------
-    // Patchy tone per cell so the yard reads as poured slabs, not one flat sheet.
+    // Patchy tone per cell so the yard reads as poured slabs, not one sheet.
     b.terrainPatch(X0, Z0, X1, QUAY_Z, 70, (x, z) => {
       const h = (((x | 0) * 73856093) ^ ((z | 0) * 19349663)) >>> 0;
       return CONCRETE[h % CONCRETE.length];
@@ -158,13 +176,13 @@
 
     harbour(b, r);
     roads(b);
-    padAlpha(b, r);
+    padAlpha(b);
     padBravo(b, r);
     warehouses(b, r);
     containerYard(b, r);
     quaySide(b, r);
     northGate(b, r);
-    perimeter(b, r);
+    perimeter(b);
     jumps(b);
     clutter(b, r);
 
@@ -176,65 +194,59 @@
 
   /* =======================================================================
    * Harbour edge — water, dock face, quay wall. The wall is the only thing
-   * standing between a drifting car and the void, so it runs unbroken.
+   * between a drifting car and the void, so it runs unbroken across the
+   * whole footprint. Its base is below the terrain taper so it never floats.
    * =====================================================================*/
   function harbour(b, r) {
-    // dock face: the vertical concrete the quay stands on. Top pokes 0.03 above
-    // the terrain patch so the two never z-fight.
+    // dock face: the concrete the quay stands on. Its top pokes 0.03 above the
+    // terrain patch so the two surfaces never z-fight.
     b.box({ x: 0, z: QUAY_Z + 12, y: WATER_Y - 4, w: X1 - X0, h: (GY + 0.03) - (WATER_Y - 4), d: 32, color: 0x353a44, noCollide: true });
-    // waterline staining
     b.box({ x: 0, z: QUAY_Z + 12.1, y: WATER_Y - 0.5, w: X1 - X0, h: 3.4, d: 32.2, color: 0x20262c, noCollide: true });
 
-    // water
     slab(b, X0, QUAY_Z + 28, X1, Z1, WATER_Y, 0x07141d);
-    // a few flat reflection streaks — cheap, and they stop the harbour reading
-    // as a single dead rectangle.
-    const streaks = [[-1100, 3790, 190], [-640, 3830, 240], [-120, 3800, 300], [430, 3850, 210], [900, 3800, 260]];
-    for (const s of streaks) {
+    // flat reflection streaks — cheap, and they stop the harbour reading as a
+    // single dead rectangle.
+    for (const s of [[-1100, 3790, 190], [-640, 3830, 240], [-120, 3800, 300], [430, 3850, 210], [900, 3800, 260]]) {
       slab(b, s[0], s[1], s[0] + s[2], s[1] + 3, WATER_Y + 0.05, 0x143845, true);
       slab(b, s[0] + 40, s[1] + 14, s[0] + s[2] - 60, s[1] + 16, WATER_Y + 0.05, 0x3a2a14, true);
     }
-    // far bank so the water does not just end in the fog
+    // far bank, so the water does not simply end in the fog
     b.box({ x: 0, z: Z1 - 6, y: WATER_Y, w: X1 - X0, h: 11, d: 14, color: 0x0b1017, noCollide: true });
     for (let x = X0 + 40; x < X1; x += 96) {
-      b.box({ x, z: Z1 - 12, y: WATER_Y + 10, w: 2.4, h: 2, d: 2, color: (x | 0) % 3 === 0 ? 0x2c5866 : 0x6a4416, emissive: true, noCollide: true });
+      b.box({ x, z: Z1 - 12, y: WATER_Y + 10, w: 2.4, h: 2, d: 2, color: ((x / 96) | 0) % 3 === 0 ? 0x2c5866 : 0x6a4416, emissive: true, noCollide: true });
     }
 
-    // quay wall — continuous, collides, hazard-striped.
-    const segW = 200;
-    for (let x = X0; x < X1; x += segW) {
-      const w = Math.min(segW, X1 - x);
-      b.box({ x: x + w / 2, z: QUAY_Z + 3, y: GY, w: w - 1, h: 6.4, d: 6, color: 0x4a505c });
-      // hazard chevrons on the seaward face
+    // quay wall — continuous, collides, hazard-striped on the landward face
+    for (let x = X0; x < X1; x += 200) {
+      const w = Math.min(200, X1 - x);
+      b.box({ x: x + w / 2, z: QUAY_Z + 3, y: GY - 3, w: w - 1, h: 9.4, d: 6, color: 0x4a505c });
       for (let k = 0; k < 5; k++) {
-        b.box({ x: x + w * (k + 0.5) / 5, z: QUAY_Z + 6.2, y: GY + 1.2, w: 12, h: 3.6, d: 0.5, color: HAZARD, emissive: true, noCollide: true });
+        b.box({ x: x + w * (k + 0.5) / 5, z: QUAY_Z - 0.4, y: GY + 1.2, w: 12, h: 3.6, d: 0.5, color: HAZARD, emissive: true, noCollide: true });
       }
     }
-    // painted keep-back line along the whole quay
-    line(b, X0 + 20, QUAY_Z - 16, X1 - 20, QUAY_Z - 16, 3, PAINT_Y, GY + 0.16);
+    line(b, FX0, QUAY_Z - 18, FX1, QUAY_Z - 18, 3, PAINT_Y, Y_PAINT);
 
     freighter(b, -210, 3822, r);
   }
 
-  /** Moored freighter — pure silhouette, sits beyond the wall so it never needs
-   *  colliders. It is the thing you look at while you are sideways. */
+  /** Moored freighter — pure silhouette. It sits beyond the wall where the car
+   *  can never reach, so none of it needs colliders. */
   function freighter(b, cx, cz, r) {
     const LEN = 620, HW = 44, DECK = GY + 7;
     b.box({ x: cx, z: cz, y: WATER_Y - 4, w: LEN, h: DECK - (WATER_Y - 4), d: HW * 2, color: 0x2b2126, noCollide: true });
     b.box({ x: cx, z: cz, y: WATER_Y + 0.2, w: LEN + 0.8, h: 2.2, d: HW * 2 + 0.8, color: 0x76302a, noCollide: true });
     b.box({ x: cx, z: cz, y: DECK - 1.4, w: LEN + 1.2, h: 1.6, d: HW * 2 + 1.2, color: 0x3d3238, noCollide: true });
-    // hatch coamings + deck containers
     for (let i = 0; i < 6; i++) {
       const hx = cx - LEN / 2 + 70 + i * 88;
       b.box({ x: hx, z: cz, y: DECK, w: 74, h: 2.4, d: HW * 1.6, color: 0x4a3f42, noCollide: true });
-      for (let lv = 0; lv < 2 + (r() * 2 | 0); lv++) {
-        for (let k = -1; k <= 1; k++) {
-          const col = CONTAINER[(r() * CONTAINER.length) | 0];
-          b.box({ x: hx, z: cz + k * (CL / 2 + 2), y: DECK + 2.4 + lv * (CH + CGAP), w: 68, h: CH, d: CL - 6, color: col, rot: 0, noCollide: true });
+      const levels = 2 + (r() * 2 | 0);
+      for (let lv = 0; lv < levels; lv++) {
+        for (const k of [-22, 0, 22]) {
+          b.box({ x: hx, z: cz + k, y: DECK + 2.4 + lv * (CH + CGAP), w: 68, h: CH, d: 20,
+                  color: CONTAINER[(r() * CONTAINER.length) | 0], noCollide: true });
         }
       }
     }
-    // stern superstructure + funnel
     const sx = cx + LEN / 2 - 62;
     for (let lv = 0; lv < 5; lv++) {
       b.box({ x: sx, z: cz, y: DECK + lv * 9, w: 76 - lv * 6, h: 9, d: HW * 1.5 - lv * 4, color: 0x8d9096, noCollide: true });
@@ -244,14 +256,13 @@
     b.box({ x: sx + 4, z: cz, y: DECK + 71, w: 22, h: 4, d: 26, color: 0x1c1c20, noCollide: true });
     b.box({ x: sx + 4, z: cz, y: DECK + 75, w: 2.4, h: 22, d: 2.4, color: 0x9aa2ad, noCollide: true });
     prop(b, 'bulb', { x: sx + 4, y: DECK + 98, z: cz });
-    // bow mast
     b.box({ x: cx - LEN / 2 + 24, z: cz, y: DECK, w: 2.6, h: 46, d: 2.6, color: 0x9aa2ad, noCollide: true });
     prop(b, 'bulb', { x: cx - LEN / 2 + 24, y: DECK + 47, z: cz });
   }
 
   /* =======================================================================
-   * Roads. East–west ribbons are drawn continuous; north–south ribbons are
-   * split around every crossing so the two sets of curbs never overlap.
+   * Roads. East-west ribbons run continuous; north-south ribbons are split
+   * around every crossing so the two sets of curbs never overlap.
    * =====================================================================*/
   function roads(b) {
     const OPT = { width: RW, color: 0x272a32, curbColor: 0x454c5a, lineColor: 0x8f8047 };
@@ -265,11 +276,11 @@
     nsRoad(b, XW, 2004, 3556, [ZM], YARD);
     nsRoad(b, XE, 2004, 3556, [ZM, ZD], YARD);
     // MANDATORY CONNECTION STUBS — these two polylines start exactly on the
-    // points `links` will join to.
+    // points the `links` district joins to.
     nsRoad(b, XA, Z0, 2940, [ZN, ZM], OPT);
     nsRoad(b, XC, Z0, 3556, [ZN, ZM, ZD], OPT);
   }
-  /** North–south ribbon, broken around each crossing z in `cuts`. */
+  /** North-south ribbon, broken around each crossing z in `cuts`. */
   function nsRoad(b, x, z0, z1, cuts, opts) {
     let cur = z0;
     for (const c of cuts.slice().sort((a, d) => a - d)) {
@@ -281,99 +292,79 @@
 
   /* =======================================================================
    * PAD ALPHA — 780 x 780 skidpad. Big painted circle, cross axes, corner
-   * bays. Deliberately obstacle-free inside the outer ring.
+   * hatching. Deliberately obstacle-free inside the outer ring.
    * =====================================================================*/
-  function padAlpha(b, r) {
+  function padAlpha(b) {
     const x0 = -1140, x1 = -360, z0 = 2030, z1 = 2810;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    const Y = GY + 0.08, PY = GY + 0.16;
 
-    slab(b, x0, z0, x1, z1, Y, 0x2d313a);
-    slab(b, x0 + 8, z0 + 8, x1 - 8, z1 - 8, Y + 0.01, 0x30343e);
+    slab(b, x0, z0, x1, z1, Y_PAD, 0x2d313a);
+    slab(b, x0 + 8, z0 + 8, x1 - 8, z1 - 8, Y_PAD + 0.01, 0x30343e);
 
-    ring(b, cx, cz, 300, 4, PAINT, 56, PY);
-    ring(b, cx, cz, 190, 3, PAINT, 44, PY);
-    ring(b, cx, cz, 80, 3, PAINT_Y, 28, PY);
-    line(b, x0 + 20, cz, x1 - 20, cz, 3, PAINT, PY);
-    line(b, cx, z0 + 20, cx, z1 - 20, 3, PAINT, PY);
-    // 45-degree quadrant marks
+    ring(b, cx, cz, 300, 4, PAINT, 56, Y_PAINT);
+    ring(b, cx, cz, 190, 3, PAINT, 44, Y_PAINT);
+    ring(b, cx, cz, 80, 3, PAINT_Y, 28, Y_PAINT);
+    line(b, x0 + 20, cz, x1 - 20, cz, 3, PAINT, Y_PAINT);
+    line(b, cx, z0 + 20, cx, z1 - 20, 3, PAINT, Y_PAINT);
     for (let i = 0; i < 4; i++) {
       const a = Math.PI / 4 + i * Math.PI / 2;
       line(b, cx + Math.cos(a) * 190, cz + Math.sin(a) * 190,
-              cx + Math.cos(a) * 300, cz + Math.sin(a) * 300, 3, PAINT, PY);
+              cx + Math.cos(a) * 300, cz + Math.sin(a) * 300, 3, PAINT, Y_PAINT);
     }
-    // entry chevrons off the north access road
-    for (let i = 0; i < 3; i++) chevron(b, cx, z0 + 40 + i * 34, 16, 0, HAZARD, PY);
+    for (let i = 0; i < 3; i++) chevron(b, cx, z0 + 40 + i * 34, 16, 0, HAZARD, Y_PAINT);
 
-    // hatched exclusion bays in the corners so the pad reads as marked-out,
-    // and the corners are not simply dead space.
-    hatch(b, x0 + 16, z0 + 16, x0 + 150, z0 + 130, PY);
-    hatch(b, x1 - 150, z1 - 130, x1 - 16, z1 - 16, PY);
+    hatch(b, x0 + 16, z0 + 16, x0 + 150, z0 + 130, Y_PAINT);
+    hatch(b, x1 - 150, z1 - 130, x1 - 16, z1 - 16, Y_PAINT);
 
-    // low kerb ring so the pad has an edge you can feel without walling it in
+    // soft markers only — nothing here is allowed to stop a slide
     for (let i = 0; i < 4; i++) {
       const a = i * Math.PI / 2;
-      prop(b, 'barrier', { x: cx + Math.cos(a) * 330, y: GY + 2, z: cz + Math.sin(a) * 330, ry: a });
+      prop(b, 'barrier', { x: cx + Math.cos(a) * 336, y: GY + 2, z: cz + Math.sin(a) * 336, ry: a });
     }
     for (let i = 0; i < 16; i++) {
       const a = i / 16 * Math.PI * 2;
-      prop(b, 'cone', { x: cx + Math.cos(a) * 300, y: GY + 2.2, z: cz + Math.sin(a) * 300 });
+      prop(b, 'cone', { x: cx + Math.cos(a) * 316, y: GY + 2.2, z: cz + Math.sin(a) * 316 });
     }
-    for (const m of [[x0 + 24, z0 + 24, 0.75], [x1 - 24, z0 + 24, -0.75], [x0 + 24, z1 - 24, 2.4], [x1 - 24, z1 - 24, -2.4]]) {
+    for (const m of [[x0 + 24, z0 + 24, 0.75], [x1 - 24, z0 + 24, -0.75],
+                     [x0 + 24, z1 - 24, 2.4], [x1 - 24, z1 - 24, -2.4]]) {
       mast(b, m[0], m[1], m[2], false);
     }
     mast(b, x0 + 24, cz, Math.PI / 2, true);
     mast(b, x1 - 24, cz, -Math.PI / 2, true);
   }
 
-  /** Diagonal hatching inside a rectangle — standard "keep clear" marking. */
-  function hatch(b, x0, z0, x1, z1, y) {
-    line(b, x0, z0, x1, z0, 2.4, PAINT_Y, y);
-    line(b, x0, z1, x1, z1, 2.4, PAINT_Y, y);
-    line(b, x0, z0, x0, z1, 2.4, PAINT_Y, y);
-    line(b, x1, z0, x1, z1, 2.4, PAINT_Y, y);
-    const span = (x1 - x0) + (z1 - z0);
-    for (let s = 24; s < span; s += 30) {
-      const ax = Math.min(x0 + s, x1), az = z0 + Math.max(0, s - (x1 - x0));
-      const bx = x0 + Math.max(0, s - (z1 - z0)), bz = Math.min(z0 + s, z1);
-      line(b, ax, az, bx, bz, 2, PAINT_Y, y);
-    }
-  }
-
   /* =======================================================================
    * PAD BRAVO — the long quayside skidpad, 1610 x 640. Two linked circles for
-   * a figure-eight plus a straight run to the west, which doubles as the
-   * landing field for both of the big jumps.
+   * a figure-eight, and a straight western run that doubles as the landing
+   * field for both of the big jumps.
    * =====================================================================*/
   function padBravo(b, r) {
-    const x0 = -1140, x1 = 470, z0 = 2900, z1 = 3540;
-    const Y = GY + 0.08, PY = GY + 0.16;
+    const x0 = -1140, x1 = 470, z0 = 2900, z1 = 3540, cz = (z0 + z1) / 2;
 
-    slab(b, x0, z0, x1, z1, Y, 0x2d313a);
-    slab(b, x0 + 8, z0 + 8, x1 - 8, z1 - 8, Y + 0.01, 0x31353f);
+    slab(b, x0, z0, x1, z1, Y_PAD, 0x2d313a);
+    slab(b, x0 + 8, z0 + 8, x1 - 8, z1 - 8, Y_PAD + 0.01, 0x31353f);
 
-    const cz = (z0 + z1) / 2;
-    ring(b, -820, cz, 250, 4, PAINT, 48, PY);
-    ring(b, -300, cz, 250, 4, PAINT, 48, PY);
-    ring(b, -820, cz, 110, 3, PAINT_Y, 30, PY);
-    ring(b, -300, cz, 110, 3, PAINT_Y, 30, PY);
-    line(b, x0 + 30, cz, x1 - 30, cz, 3, PAINT, PY);
-    dashes(b, x0 + 30, z0 + 90, x1 - 30, z0 + 90, 3, PAINT, PY, 22, 26);
-    dashes(b, x0 + 30, z1 - 90, x1 - 30, z1 - 90, 3, PAINT, PY, 22, 26);
+    ring(b, -820, cz, 250, 4, PAINT, 48, Y_PAINT);
+    ring(b, -300, cz, 250, 4, PAINT, 48, Y_PAINT);
+    ring(b, -820, cz, 110, 3, PAINT_Y, 30, Y_PAINT);
+    ring(b, -300, cz, 110, 3, PAINT_Y, 30, Y_PAINT);
+    line(b, x0 + 30, cz, x1 - 30, cz, 3, PAINT, Y_PAINT);
+    dashes(b, x0 + 30, z0 + 90, x1 - 30, z0 + 90, 3, PAINT, Y_PAINT, 22, 26);
+    dashes(b, x0 + 30, z1 - 90, x1 - 30, z1 - 90, 3, PAINT, Y_PAINT, 22, 26);
 
     // landing targets for the two jumps, so the flat runs read as intentional
-    for (let i = 0; i < 4; i++) chevron(b, -30, 3080 + i * 46, 18, 0, HAZARD, PY);
-    for (let i = 0; i < 4; i++) chevron(b, 100 - i * 46, 3130, 18, -Math.PI / 2, HAZARD, PY);
+    for (let i = 0; i < 4; i++) chevron(b, -30, 3080 + i * 46, 18, 0, HAZARD, Y_PAINT);
+    for (let i = 0; i < 4; i++) chevron(b, 100 - i * 46, 3130, 18, -Math.PI / 2, HAZARD, Y_PAINT);
 
-    // drift gates — container stack pairs. Placed clear of both landing lanes
-    // (x[-100,40] z[3020,3480]  and  z[3080,3180] across the whole pad).
-    const gates = [[-660, 2960], [-580, 2960], [-900, 3400], [-820, 3400],
-                   [-260, 3400], [-180, 3400], [300, 2960], [380, 2960],
-                   [250, 3400], [330, 3400]];
-    for (const g of gates) stack(b, g[0], g[1], Math.PI / 2, 2 + (r() * 2 | 0), r);
-    // gate markers
+    // drift gates — container stack pairs, kept clear of both landing lanes
+    // (x[-100,40] z[3020,3480], and z[3080,3180] right across the pad).
+    for (const g of [[-660, 2960], [-580, 2960], [-900, 3400], [-820, 3400],
+                     [-260, 3400], [-180, 3400], [300, 2960], [380, 2960],
+                     [250, 3400], [330, 3400]]) {
+      stack(b, g[0], g[1], Math.PI / 2, 2 + (r() * 2 | 0), r);
+    }
     for (const g of [[-620, 2960], [-860, 3400], [-220, 3400], [340, 2960], [290, 3400]]) {
-      line(b, g[0] - 34, g[1], g[0] + 34, g[1], 3, HAZARD, PY);
+      line(b, g[0] - 34, g[1], g[0] + 34, g[1], 3, HAZARD, Y_PAINT);
     }
 
     for (const m of [[x0 + 22, z0 + 30, 0.8], [x0 + 22, z1 - 30, 2.3],
@@ -385,31 +376,29 @@
   }
 
   /* =======================================================================
-   * Warehouses. W1/W2 make the north–south drift corridor either side of the
-   * x=-30 access road; W3/W4 make a tighter east–west one.
+   * Warehouses. BAY 3 / BAY 4 make the north-south drift corridor either side
+   * of the x=-30 access road; SHED 7 / SHED 8 make a tighter east-west one.
    * =====================================================================*/
   function warehouses(b, r) {
     warehouse(b, -320, 2080, -100, 2760, 40, r, 'BAY 3', 0x39404e);
     warehouse(b, 40, 2080, 300, 2760, 44, r, 'BAY 4', 0x333a46);
     warehouse(b, 600, 2930, 1140, 3255, 44, r, 'TRANSIT SHED 7', 0x363d4a);
     warehouse(b, 600, 3345, 1140, 3530, 36, r, 'TRANSIT SHED 8', 0x313743);
-    warehouse(b, -1370, 2200, -1230, 2900, 30, r, 'STORES', 0x343a46);
+    warehouse(b, -1288, 2200, -1218, 2900, 28, r, 'STORES', 0x343a46);
 
-    // loading apron + dock platform on the corridor exit, which is what the
+    // loading apron + dock platform at the corridor exit — this is what the
     // first jump launches off the end of
-    slab(b, -100, 2770, 40, 2900, GY + 0.07, 0x2a2e37);
-    b.box({ x: -210, z: 2790, y: GY, w: 200, h: 4.6, d: 44, color: 0x3c434f });
+    slab(b, -110, 2766, 50, 2900, Y_APRON, 0x2a2e37);
+    b.box({ x: -210, z: 2790, y: GY, w: 200, h: 4.6, d: 40, color: 0x3c434f });
     for (let i = 0; i < 5; i++) prop(b, 'bollard', { x: -300 + i * 45, y: GY + 4.6, z: 2790 });
-    line(b, -30, 2780, -30, 2900, 3, PAINT, GY + 0.16);
+    line(b, -30, 2780, -30, 2900, 3, PAINT, Y_PAINT);
 
     // corridor floodlighting: cyan one side, sodium the other
     for (let z = 2140; z <= 2740; z += 150) {
       mast(b, -86, z, Math.PI / 2, true);
       mast(b, 26, z, -Math.PI / 2, false);
     }
-    for (let x = 660; x <= 1080; x += 140) {
-      mast(b, x, 3272, 0, false);
-    }
+    for (let x = 660; x <= 1080; x += 140) mast(b, x, 3272, 0, false);
   }
 
   /**
@@ -422,7 +411,6 @@
     b.box({ x: cx, z: cz, y: GY, w, h, d, color: wallColor });
 
     const rib = shade(wallColor, 0.72);
-    // vertical cladding ribs on all four faces
     for (let x = x0 + 20; x < x1 - 10; x += 30) {
       b.box({ x, z: z0 - 0.3, y: GY, w: 2.2, h: h - 2, d: 0.8, color: rib, noCollide: true });
       b.box({ x, z: z1 + 0.3, y: GY, w: 2.2, h: h - 2, d: 0.8, color: rib, noCollide: true });
@@ -431,13 +419,14 @@
       b.box({ x: x0 - 0.3, z, y: GY, w: 0.8, h: h - 2, d: 2.2, color: rib, noCollide: true });
       b.box({ x: x1 + 0.3, z, y: GY, w: 0.8, h: h - 2, d: 2.2, color: rib, noCollide: true });
     }
+
     // roof: parapet, ribs, vents, dim skylights
-    const ry = GY + h;
-    b.box({ x: cx, z: z0, y: ry, w, h: 2.6, d: 2, color: shade(wallColor, 1.25), noCollide: true });
-    b.box({ x: cx, z: z1, y: ry, w, h: 2.6, d: 2, color: shade(wallColor, 1.25), noCollide: true });
-    b.box({ x: x0, z: cz, y: ry, w: 2, h: 2.6, d, color: shade(wallColor, 1.25), noCollide: true });
-    b.box({ x: x1, z: cz, y: ry, w: 2, h: 2.6, d, color: shade(wallColor, 1.25), noCollide: true });
-    for (let z = z0 + 40; z < z1 - 20; z += 62) {
+    const ry = GY + h, cap = shade(wallColor, 1.25);
+    b.box({ x: cx, z: z0, y: ry, w, h: 2.6, d: 2, color: cap, noCollide: true });
+    b.box({ x: cx, z: z1, y: ry, w, h: 2.6, d: 2, color: cap, noCollide: true });
+    b.box({ x: x0, z: cz, y: ry, w: 2, h: 2.6, d, color: cap, noCollide: true });
+    b.box({ x: x1, z: cz, y: ry, w: 2, h: 2.6, d, color: cap, noCollide: true });
+    for (let z = z0 + 40; z < z1 - 24; z += 62) {
       b.box({ x: cx, z, y: ry, w: w - 24, h: 1.2, d: 5, color: shade(wallColor, 0.85), noCollide: true });
       slab(b, cx - w * 0.22, z + 12, cx + w * 0.22, z + 20, ry + 0.4, 0x2e3a3e, true);
     }
@@ -448,29 +437,28 @@
     prop(b, 'bulb', { x: x1 - 6, y: ry + 4, z: z1 - 6 });
 
     // roller doors on the two long faces
-    const doorsAlongX = w >= d;
-    const n = Math.max(2, Math.floor((doorsAlongX ? w : d) / 78));
+    const alongX = w >= d;
+    const n = Math.max(2, Math.floor((alongX ? w : d) / 78));
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
-      const lit = ((i * 7 + (name.length)) % 3) === 0;
-      if (doorsAlongX) {
-        const dx = x0 + w * t;
-        rollerDoor(b, dx, z0 - 0.5, 0, lit);
-        rollerDoor(b, dx, z1 + 0.5, Math.PI, lit && i % 2 === 0);
+      const lit = ((i * 7 + name.length) % 3) === 0;
+      if (alongX) {
+        rollerDoor(b, x0 + w * t, z0 - 0.5, 0, lit);
+        rollerDoor(b, x0 + w * t, z1 + 0.5, Math.PI, lit && i % 2 === 0);
       } else {
-        const dz = z0 + d * t;
-        rollerDoor(b, x0 - 0.5, dz, -Math.PI / 2, lit);
-        rollerDoor(b, x1 + 0.5, dz, Math.PI / 2, lit && i % 2 === 0);
+        rollerDoor(b, x0 - 0.5, z0 + d * t, Math.PI / 2, lit);
+        rollerDoor(b, x1 + 0.5, z0 + d * t, -Math.PI / 2, lit && i % 2 === 0);
       }
     }
     // name board
-    b.box({ x: doorsAlongX ? cx : x0 - 0.9, z: doorsAlongX ? z0 - 0.9 : cz, y: GY + h - 12,
-            w: doorsAlongX ? 120 : 1, h: 7, d: doorsAlongX ? 1 : 120, color: 0x1b1f27, noCollide: true });
-    b.box({ x: doorsAlongX ? cx : x0 - 1.4, z: doorsAlongX ? z0 - 1.4 : cz, y: GY + h - 10.5,
-            w: doorsAlongX ? 100 : 0.6, h: 3.4, d: doorsAlongX ? 0.6 : 100, color: 0xd8b45e, emissive: true, noCollide: true });
+    b.box({ x: alongX ? cx : x0 - 0.9, z: alongX ? z0 - 0.9 : cz, y: ry - 12,
+            w: alongX ? 120 : 1, h: 7, d: alongX ? 1 : 120, color: 0x1b1f27, noCollide: true });
+    b.box({ x: alongX ? cx : x0 - 1.4, z: alongX ? z0 - 1.4 : cz, y: ry - 10.5,
+            w: alongX ? 100 : 0.6, h: 3.4, d: alongX ? 0.6 : 100, color: 0xd8b45e, emissive: true, noCollide: true });
   }
 
-  /** A roller shutter set into a wall face. `rot`: 0 = faces -Z. */
+  /** A roller shutter set into a wall face. `rot` is the wall's inward heading:
+   *  0 faces -Z, PI faces +Z, PI/2 faces -X, -PI/2 faces +X. */
   function rollerDoor(b, x, z, rot, lit) {
     b.box({ x, z, y: GY, w: 30, h: 24, d: 1.4, color: 0x2b313c, rot, noCollide: true });
     b.box({ x, z, y: GY + 0.6, w: 26, h: 22, d: 1.8, color: 0x434b59, rot, noCollide: true });
@@ -478,11 +466,9 @@
       b.box({ x, z, y: GY + 2 + i * 3.4, w: 26.2, h: 0.7, d: 2.1, color: 0x333a46, rot, noCollide: true });
     }
     if (lit) {
-      // an open bay: warm interior spill on the door and on the apron in front
       b.box({ x, z, y: GY, w: 22, h: 19, d: 2.4, color: 0x6a4114, rot, emissive: true, noCollide: true });
-      const c = Math.cos(rot), s = Math.sin(rot);
-      const px = x + 20 * s, pz = z + 20 * c;
-      slab(b, px - 18, pz - 18, px + 18, pz + 18, GY + 0.12, 0x35250f, true);
+      const px = x - 20 * Math.sin(rot), pz = z - 20 * Math.cos(rot);
+      slab(b, px - 18, pz - 18, px + 18, pz + 18, Y_POOL + 0.01, 0x35250f, true);
     }
     b.box({ x, z, y: GY + 25, w: 34, h: 1.6, d: 3, color: 0x4e5666, rot, noCollide: true });
     b.box({ x, z, y: GY + 24.4, w: 8, h: 1, d: 3.4, color: SODIUM, rot, emissive: true, noCollide: true });
@@ -493,22 +479,18 @@
    * rail gantries you drive under.
    * =====================================================================*/
   function containerYard(b, r) {
-    const yx0 = 560, yx1 = 1160, z0 = 2010, z1 = 2840;
-    slab(b, yx0, z0, yx1, z1, GY + 0.06, 0x282c34);
-    // painted lane grid
-    for (let x = 620; x <= 1120; x += 70) line(b, x, z0 + 10, x, z1 - 10, 2, PAINT, GY + 0.16);
+    slab(b, 562, 2010, 1148, 2840, Y_APRON, 0x282c34);
+    for (let x = 620; x <= 1120; x += 70) line(b, x, 2020, x, 2830, 2, PAINT, Y_PAINT);
 
-    const rows = [[2100, 690], [2280, 1030], [2460, 700], [2640, 1010]];
-    for (const [rz, gate] of rows) {
+    for (const [rz, gate] of [[2100, 690], [2280, 1030], [2460, 700], [2640, 1010]]) {
       for (let x = 620; x <= 1110; x += 35) {
         if (Math.abs(x - gate) < 44) continue;                 // the drift gate
-        if (Math.abs(x - 590) < 14 || Math.abs(x - 1140) < 14) continue;  // gantry legs
         stack(b, x, rz, 0, 1 + (r() * 3 | 0), r);
       }
-      line(b, gate - 40, rz - 24, gate - 40, rz + 24, 3, HAZARD, GY + 0.16);
-      line(b, gate + 40, rz - 24, gate + 40, rz + 24, 3, HAZARD, GY + 0.16);
+      line(b, gate - 40, rz - 26, gate - 40, rz + 26, 3, HAZARD, Y_PAINT);
+      line(b, gate + 40, rz - 26, gate + 40, rz + 26, 3, HAZARD, Y_PAINT);
     }
-    // a dense block of stacks east of BAY 4
+    // dense storage block east of BAY 4
     for (let x = 330; x <= 470; x += 70) {
       for (let z = 2120; z <= 2720; z += 46) stack(b, x, z, Math.PI / 2, 2 + (r() * 3 | 0), r);
     }
@@ -516,34 +498,31 @@
     yardGantry(b, 590, 1140, 2200);
     yardGantry(b, 590, 1140, 2600);
 
-    mast(b, 575, 2020, 0.6, false);
-    mast(b, 1145, 2020, -0.6, false);
-    mast(b, 575, 2830, 2.4, false);
-    mast(b, 1145, 2830, -2.4, true);
+    mast(b, 578, 2022, 0.6, false);
+    mast(b, 1142, 2022, -0.6, false);
+    mast(b, 578, 2828, 2.4, false);
+    mast(b, 1142, 2828, -2.4, true);
   }
 
-  /** Rail-mounted gantry: legs collide, the portal beam is 40 up and doesn't. */
+  /** Rail-mounted gantry: legs collide, the portal is 40 up and does not. */
   function yardGantry(b, xL, xR, cz) {
-    const H = 40;
+    const H = 40, span = xR - xL;
     for (const x of [xL, xR]) {
       for (const z of [cz - 26, cz + 26]) {
         b.box({ x, z, y: GY, w: 9, h: H, d: 9, color: 0x5a6270 });
-        b.box({ x, z, y: GY, w: 10, h: 5, d: 10, color: 0xb4661d, noCollide: true });
+        b.box({ x, z, y: GY, w: 10.4, h: 5, d: 10.4, color: 0xb4661d, noCollide: true });
       }
       b.box({ x, z: cz, y: GY + H, w: 11, h: 6, d: 70, color: 0x5a6270, noCollide: true });
-      // diagonal knee braces
-      prop(b, 'beam', { x, y: GY + H - 12, z: cz - 26 + 9, sx: 3, sy: 26, sz: 3, rx: 0.62 });
-      prop(b, 'beam', { x, y: GY + H - 12, z: cz + 26 - 9, sx: 3, sy: 26, sz: 3, rx: -0.62 });
+      prop(b, 'beam', { x, y: GY + H - 12, z: cz - 14, sx: 3, sy: 34, sz: 3, rx: Math.PI / 4 });
+      prop(b, 'beam', { x, y: GY + H - 12, z: cz + 14, sx: 3, sy: 34, sz: 3, rx: -Math.PI / 4 });
     }
-    const span = xR - xL;
     b.box({ x: (xL + xR) / 2, z: cz - 26, y: GY + H + 6, w: span + 14, h: 7, d: 8, color: 0x646d7c, noCollide: true });
     b.box({ x: (xL + xR) / 2, z: cz + 26, y: GY + H + 6, w: span + 14, h: 7, d: 8, color: 0x646d7c, noCollide: true });
     b.box({ x: (xL + xR) / 2, z: cz, y: GY + H + 13, w: 40, h: 9, d: 44, color: 0xb4661d, noCollide: true });
     prop(b, 'bulb', { x: xL, y: GY + H + 16, z: cz });
     prop(b, 'bulb', { x: xR, y: GY + H + 16, z: cz });
-    // painted rails on the ground
-    line(b, xL - 90, cz - 26, xL + 90, cz - 26, 4, 0x4a5260, GY + 0.14);
-    line(b, xR - 90, cz - 26, xR + 90, cz - 26, 4, 0x4a5260, GY + 0.14);
+    line(b, xL - 90, cz - 26, xL + 90, cz - 26, 4, 0x30363f, Y_RAIL);
+    line(b, xR - 90, cz - 26, xR + 90, cz - 26, 4, 0x30363f, Y_RAIL);
   }
 
   /** One column of containers plus a single collider for the whole stack. */
@@ -557,29 +536,26 @@
       const e = CL / 2 - 0.3;
       b.box({ x: x + e * c, z: z - e * s, y: y + 0.7, w: 1, h: CH - 1.4, d: CW - 1.6, color: shade(col, 0.6), rot, noCollide: true });
     }
-    const ex = Math.abs(CL / 2 * c) + Math.abs(CW / 2 * s);
-    const ez = Math.abs(CL / 2 * s) + Math.abs(CW / 2 * c);
-    b.collider(x, z, ex * 2, ez * 2, levels * (CH + CGAP), GY);
+    b.collider(x, z,
+      (Math.abs(CL / 2 * c) + Math.abs(CW / 2 * s)) * 2,
+      (Math.abs(CL / 2 * s) + Math.abs(CW / 2 * c)) * 2,
+      levels * (CH + CGAP), GY);
   }
 
   /* =======================================================================
    * Quayside — three ship-to-shore cranes, mooring furniture, apron markings.
    * =====================================================================*/
   function quaySide(b, r) {
-    slab(b, X0 + 40, ZQ + 24, X1 - 40, QUAY_Z - 4, GY + 0.06, 0x2a2e36);
-    dashes(b, X0 + 60, ZQ + 40, X1 - 60, ZQ + 40, 3, PAINT, GY + 0.16, 26, 30);
+    slab(b, FX0, ZQ + 28, FX1, QUAY_Z - 4, Y_APRON, 0x2a2e36);
+    dashes(b, FX0 + 20, ZQ + 42, FX1 - 20, ZQ + 42, 3, PAINT, Y_PAINT, 26, 30);
 
     for (const cx of [-900, -150, 620]) quayCrane(b, cx, 3668);
 
-    for (let x = X0 + 70; x < X1 - 40; x += 78) {
-      prop(b, 'bollard', { x, y: GY + 6.4, z: QUAY_Z + 3 });
-    }
-    for (let x = -1250; x < 1250; x += 260) {
-      mast(b, x, ZQ + 34, Math.PI, true);
-    }
-    // hose reels / drums / pallets along the apron
+    for (let x = X0 + 70; x < X1 - 40; x += 78) prop(b, 'bollard', { x, y: GY + 6.4, z: QUAY_Z + 3 });
+    for (let x = -1250; x < 1250; x += 260) mast(b, x, ZQ + 36, Math.PI, true);
+
     for (let i = 0; i < 26; i++) {
-      const x = X0 + 90 + r() * (X1 - X0 - 180), z = ZQ + 46 + r() * 50;
+      const x = FX0 + 20 + r() * (FX1 - FX0 - 40), z = ZQ + 52 + r() * 46;
       if (Math.abs(x + 900) < 90 || Math.abs(x + 150) < 90 || Math.abs(x - 620) < 90) continue;
       prop(b, r() < 0.5 ? 'drum' : 'drumB', { x, y: GY + 3.5, z });
       if (r() < 0.4) prop(b, 'pallet', { x: x + 12, y: GY + 0.8, z: z + 6, ry: r() * 3 });
@@ -587,61 +563,54 @@
   }
 
   /**
-   * Ship-to-shore gantry crane. Legs collide (they are the obstacle); the
-   * portal, boom and machinery are all above 55 and marked noCollide, so you
-   * can drive straight through the crane's footprint.
+   * Ship-to-shore gantry crane. The four legs collide — they are the obstacle.
+   * The portal, boom and machinery all sit above 58 and are noCollide, so you
+   * can drive straight through the crane's footprint at any speed.
    */
   function quayCrane(b, cx, cz) {
     const LX = 46, LZ = 44, H = 58;
+    const TOP = GY + H + 59;              // pylon top
+    const BOOM_Y = GY + H + 11;           // boom girder centre
     for (const x of [cx - LX, cx + LX]) {
       for (const z of [cz - LZ, cz + LZ]) {
         b.box({ x, z, y: GY, w: 11, h: H, d: 11, color: 0x646c7a });
-        b.box({ x, z, y: GY, w: 12, h: 6, d: 12, color: 0xb4661d, noCollide: true });
-        b.box({ x, z, y: GY + 6, w: 12.2, h: 2, d: 12.2, color: HAZARD, emissive: true, noCollide: true });
+        b.box({ x, z, y: GY, w: 12.4, h: 6, d: 12.4, color: 0xb4661d, noCollide: true });
+        b.box({ x, z, y: GY + 6, w: 12.6, h: 2, d: 12.6, color: HAZARD, emissive: true, noCollide: true });
       }
-      // portal beam and its knee braces
       b.box({ x, z: cz, y: GY + H, w: 12, h: 9, d: LZ * 2 + 22, color: 0x646c7a, noCollide: true });
-      prop(b, 'beam', { x, y: GY + H - 16, z: cz - LZ + 13, sx: 3.4, sy: 36, sz: 3.4, rx: 0.62 });
-      prop(b, 'beam', { x, y: GY + H - 16, z: cz + LZ - 13, sx: 3.4, sy: 36, sz: 3.4, rx: -0.62 });
-      // boom: back reach over the yard, main reach out over the water
-      b.box({ x, z: cz + 62, y: GY + H + 11, w: 10, h: 8, d: 286, color: 0x6d7684, noCollide: true });
-    }
-    // boom cross ties
-    for (const z of [cz - 66, cz + 10, cz + 90, cz + 170]) {
-      b.box({ x: cx, z, y: GY + H + 12, w: LX * 2, h: 4, d: 6, color: 0x5a6270, noCollide: true });
-    }
-    // machinery house + A-frame pylon
-    b.box({ x: cx, z: cz - 30, y: GY + H + 9, w: LX * 2 - 12, h: 16, d: 42, color: 0xb4661d, noCollide: true });
-    for (const x of [cx - LX, cx + LX]) {
+      prop(b, 'beam', { x, y: GY + H - 18, z: cz - LZ + 18, sx: 3.4, sy: 51, sz: 3.4, rx: Math.PI / 4 });
+      prop(b, 'beam', { x, y: GY + H - 18, z: cz + LZ - 18, sx: 3.4, sy: 51, sz: 3.4, rx: -Math.PI / 4 });
+      // boom: short back reach over the yard, long main reach over the water
+      b.box({ x, z: cz + 62, y: BOOM_Y, w: 10, h: 8, d: 286, color: 0x6d7684, noCollide: true });
+      // A-frame pylon and its stay cables
       b.box({ x, z: cz, y: GY + H + 19, w: 8, h: 40, d: 8, color: 0x6d7684, noCollide: true });
-      // stay cables: pylon top → boom tip, and pylon top → back reach
-      prop(b, 'beam', { x, y: GY + H + 40, z: cz + 100, sx: 2, sy: 214, sz: 2, rx: Math.atan2(200, -42) });
-      prop(b, 'beam', { x, y: GY + H + 40, z: cz - 46, sx: 2, sy: 105, sz: 2, rx: Math.atan2(-92, -42) });
+      prop(b, 'beam', { x, y: (TOP + BOOM_Y) / 2, z: cz + 102, sx: 2, sy: 211, sz: 2, rx: Math.atan2(205, BOOM_Y - TOP) });
+      prop(b, 'beam', { x, y: (TOP + BOOM_Y) / 2, z: cz - 40, sx: 2, sy: 94, sz: 2, rx: Math.atan2(-81, BOOM_Y - TOP) });
     }
-    b.box({ x: cx, z: cz, y: GY + H + 59, w: LX * 2, h: 5, d: 8, color: 0x6d7684, noCollide: true });
-    // trolley + warning beacons
+    for (const z of [cz - 66, cz + 10, cz + 90, cz + 170]) {
+      b.box({ x: cx, z, y: BOOM_Y + 1, w: LX * 2, h: 4, d: 6, color: 0x5a6270, noCollide: true });
+    }
+    b.box({ x: cx, z: cz - 30, y: GY + H + 9, w: LX * 2 - 12, h: 16, d: 42, color: 0xb4661d, noCollide: true });
+    b.box({ x: cx, z: cz, y: TOP, w: LX * 2, h: 5, d: 8, color: 0x6d7684, noCollide: true });
     b.box({ x: cx, z: cz + 118, y: GY + H + 4, w: 26, h: 7, d: 22, color: 0x8a9099, noCollide: true });
-    prop(b, 'bulb', { x: cx - LX, y: GY + H + 62, z: cz });
-    prop(b, 'bulb', { x: cx + LX, y: GY + H + 62, z: cz });
-    prop(b, 'bulb', { x: cx, y: GY + H + 13, z: cz + 205 });
-    // work lights hung off the portal, and the pools they throw
+    prop(b, 'bulb', { x: cx - LX, y: TOP + 6, z: cz });
+    prop(b, 'bulb', { x: cx + LX, y: TOP + 6, z: cz });
+    prop(b, 'bulb', { x: cx, y: BOOM_Y + 4, z: cz + 205 });
     for (const x of [cx - LX + 14, cx + LX - 14]) {
       prop(b, 'lampC', { x, y: GY + H - 3, z: cz - LZ });
       prop(b, 'lampC', { x, y: GY + H - 3, z: cz + LZ });
     }
-    slab(b, cx - 74, cz - 66, cx + 74, cz + 66, GY + 0.11, 0x11333c, true);
-    slab(b, cx - 44, cz - 38, cx + 44, cz + 38, GY + 0.12, 0x1b4d5a, true);
-    // ground rails
-    line(b, cx - 150, cz - LZ, cx + 150, cz - LZ, 5, 0x49515e, GY + 0.14);
-    line(b, cx - 150, cz + LZ, cx + 150, cz + LZ, 5, 0x49515e, GY + 0.14);
+    slab(b, cx - 74, cz - 66, cx + 74, cz + 66, Y_POOL, 0x11333c, true);
+    slab(b, cx - 44, cz - 38, cx + 44, cz + 38, Y_POOL + 0.01, 0x1b4d5a, true);
+    line(b, cx - 150, cz - LZ, cx + 150, cz - LZ, 5, 0x30363f, Y_RAIL);
+    line(b, cx - 150, cz + LZ, cx + 150, cz + LZ, 5, 0x30363f, Y_RAIL);
   }
 
   /* =======================================================================
-   * North gate — the face the district shows downtown: sign gantry, gatehouse,
-   * trailer park, security fence.
+   * North gate — the face this district shows downtown: sign gantry,
+   * gatehouse, trailer park, security fence.
    * =====================================================================*/
   function northGate(b, r) {
-    // gate gantry over the x=-30 stub
     for (const x of [XA - 40, XA + 40]) {
       b.box({ x, z: 1866, y: GY, w: 7, h: 32, d: 7, color: 0x4c5462 });
     }
@@ -650,31 +619,28 @@
     b.box({ x: XA, z: 1868.5, y: GY + 35, w: 82, h: 6, d: 0.8, color: 0xff8a2b, emissive: true, noCollide: true });
     b.box({ x: XA, z: 1866, y: GY + 44, w: 12, h: 3, d: 4, color: CYAN, emissive: true, noCollide: true });
 
-    // gatehouse
-    b.box({ x: 250, z: 1830, y: GY, w: 46, h: 16, d: 30, color: 0x39404e });
-    b.box({ x: 250, z: 1830, y: GY + 16, w: 52, h: 2, d: 36, color: 0x2a303c, noCollide: true });
-    b.box({ x: 250, z: 1814.6, y: GY + 6, w: 34, h: 6, d: 0.8, color: 0x6a5a24, emissive: true, noCollide: true });
-    prop(b, 'lampO', { x: 250, y: GY + 19, z: 1830 });
-    slab(b, 210, 1846, 290, 1900, GY + 0.1, 0x33240f, true);
-    for (let i = 0; i < 6; i++) prop(b, 'cone', { x: 300 + i * 16, y: GY + 2.2, z: 1900 });
+    b.box({ x: 250, z: 1836, y: GY, w: 46, h: 16, d: 30, color: 0x39404e });
+    b.box({ x: 250, z: 1836, y: GY + 16, w: 52, h: 2, d: 36, color: 0x2a303c, noCollide: true });
+    b.box({ x: 250, z: 1820.6, y: GY + 6, w: 34, h: 6, d: 0.8, color: 0x6a5a24, emissive: true, noCollide: true });
+    prop(b, 'lampO', { x: 250, y: GY + 19, z: 1836 });
+    slab(b, 212, 1854, 288, 1904, Y_POOL, 0x33240f, true);
+    for (let i = 0; i < 6; i++) prop(b, 'cone', { x: 300 + i * 16, y: GY + 2.2, z: 1904 });
 
     // trailer park between the fence and the access road
-    for (let i = 0; i < 9; i++) {
-      trailer(b, -1120 + i * 118, 1880, 0, r);
-    }
-    for (let i = 0; i < 5; i++) {
-      trailer(b, 720 + i * 118, 1880, 0, r);
-    }
-    for (let x = -1120; x <= 1180; x += 118) line(b, x - 59, 1832, x - 59, 1932, 2.5, PAINT, GY + 0.16);
-    for (const x of [-1180, -700, -220, 300, 800, 1240]) mast(b, x, 1946, Math.PI, false);
+    for (let i = 0; i < 9; i++) trailer(b, -1120 + i * 118, 1886, r);
+    for (let i = 0; i < 5; i++) trailer(b, 720 + i * 118, 1886, r);
+    for (let i = 0; i <= 9; i++) line(b, -1179 + i * 118, 1840, -1179 + i * 118, 1936, 2.5, PAINT, Y_PAINT);
+    for (let i = 0; i <= 5; i++) line(b, 661 + i * 118, 1840, 661 + i * 118, 1936, 2.5, PAINT, Y_PAINT);
+    for (const x of [-1180, -700, -220, 340, 800, 1240]) mast(b, x, 1950, Math.PI, false);
   }
 
-  /** Parked semi-trailer. Body floats on legs, so it gets its own full-height
-   *  collider rather than relying on the box AABB. */
-  function trailer(b, x, z, rot, r) {
+  /** Parked semi-trailer. The body floats on its legs, so it gets an explicit
+   *  full-height collider rather than relying on the box AABB (which the car
+   *  would be considered to be driving *under*). */
+  function trailer(b, x, z, r) {
     const col = [0x8d9299, 0x5d6a78, 0x7d5a4a, 0x4f6152][(r() * 4) | 0];
-    b.box({ x, z, y: GY + 7, w: 14, h: 13, d: 46, color: col, rot, noCollide: true });
-    b.box({ x, z: z + 23.4, y: GY + 7.6, w: 13, h: 11.6, d: 0.8, color: shade(col, 0.6), rot, noCollide: true });
+    b.box({ x, z, y: GY + 7, w: 14, h: 13, d: 46, color: col, noCollide: true });
+    b.box({ x, z: z + 23.4, y: GY + 7.6, w: 13, h: 11.6, d: 0.8, color: shade(col, 0.6), noCollide: true });
     b.box({ x, z: z - 16, y: GY, w: 4, h: 7, d: 4, color: 0x33383f, noCollide: true });
     b.box({ x, z: z + 12, y: GY + 1.2, w: 11, h: 6, d: 16, color: 0x1c1e22, noCollide: true });
     b.box({ x, z: z - 20, y: GY + 6.6, w: 14.4, h: 1.2, d: 3, color: 0x9a2b22, emissive: true, noCollide: true });
@@ -682,40 +648,33 @@
   }
 
   /* =======================================================================
-   * Perimeter — security fencing all the way round, with openings only where
-   * a road actually crosses.
+   * Perimeter — security fencing right round the flat region, with openings
+   * only where a road actually crosses.
    * =====================================================================*/
-  function perimeter(b, r) {
-    // north fence, broken for the two entry roads
-    const gapA = [XA - 46, XA + 46], gapC = [XC - 46, XC + 46];
-    let cur = X0 + 30;
-    for (const g of [gapA, gapC]) {
-      if (g[0] > cur) fence(b, cur, 1748, g[0], 1748);
+  function perimeter(b) {
+    let cur = FX0;
+    for (const g of [[XA - 46, XA + 46], [XC - 46, XC + 46]]) {
+      if (g[0] > cur) fence(b, cur, FZ0, g[0], FZ0);
       cur = g[1];
     }
-    fence(b, cur, 1748, X1 - 30, 1748);
-    fence(b, X0 + 30, 1748, X0 + 30, QUAY_Z - 20);
-    fence(b, X1 - 30, 1748, X1 - 30, QUAY_Z - 20);
+    fence(b, cur, FZ0, FX1, FZ0);
+    fence(b, FX0, FZ0, FX0, QUAY_Z - 24);
+    fence(b, FX1, FZ0, FX1, QUAY_Z - 24);
 
-    // internal yard fencing — reads as compound boundaries and gives the
-    // service roads something to run beside
-    fence(b, 552, 2010, 552, 2840);
-    fence(b, 1168, 2010, 1168, 2840);
-    fence(b, 560, 2004, 1160, 2004);
-
-    // west stores yard
+    // container-yard compound: fenced along both service roads, open at the
+    // north and south ends so you can still blast straight through it
+    fence(b, 558, 2010, 558, 2840);
+    fence(b, 1152, 2010, 1152, 2840);
     fence(b, -1210, 2180, -1210, 2920);
 
-    // pipe racks along the west edge
-    for (let z = 2000; z < 3500; z += 240) {
-      for (let k = 0; k < 3; k++) {
-        prop(b, 'pipe', { x: -1350, y: GY + 3 + k * 6, z, rx: Math.PI / 2 });
-      }
-      b.collider(-1350, z, 8, 48, 14, GY);
+    // pipe racks down the east strip
+    for (let z = 2060; z < 3480; z += 240) {
+      for (let k = 0; k < 3; k++) prop(b, 'pipe', { x: 1250, y: GY + 3 + k * 6, z, rx: Math.PI / 2 });
+      b.collider(1250, z, 8, 48, 16, GY);
     }
   }
 
-  /** Fence run: instanced posts + three rails + a screen panel, one collider. */
+  /** Fence run: instanced posts + rails + a screen panel, and one collider. */
   function fence(b, x0, z0, x1, z1) {
     const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz);
     if (L < 6) return;
@@ -729,50 +688,47 @@
     b.box({ x: mx, z: mz, y: GY + 6.2, w: 1.4, h: 1, d: L, color: 0x525a68, rot, noCollide: true });
     b.box({ x: mx, z: mz, y: GY + 0.6, w: 1.4, h: 0.9, d: L, color: 0x525a68, rot, noCollide: true });
     const c = Math.cos(rot), s = Math.sin(rot);
-    b.collider(mx, mz, (Math.abs(0.3 * c) + Math.abs(L / 2 * s)) * 2,
-                       (Math.abs(0.3 * s) + Math.abs(L / 2 * c)) * 2, 7, GY);
+    b.collider(mx, mz, (Math.abs(0.7 * c) + Math.abs(L / 2 * s)) * 2,
+                       (Math.abs(0.7 * s) + Math.abs(L / 2 * c)) * 2, 7, GY);
   }
 
   /* =======================================================================
    * Jumps. All three land on open painted concrete with nothing in the run.
    * =====================================================================*/
   function jumps(b) {
-    // 1. loading-dock ramp: fires you out of the warehouse corridor south into
-    //    PAD BRAVO. Landing run: x[-90,30], z 3030 → 3450, clear.
+    // 1. loading-dock ramp — fires you out of the warehouse corridor south into
+    //    PAD BRAVO. Landing run x[-90,30], z 3030 -> 3450: clear.
     b.ramp({ x: XA, z: 2980, dir: 0, w: 38, len: 96, height: 15, baseY: GY, color: 0xb4551f });
 
-    // 2. container-stack launch: through the slot between two stacks on the
-    //    east side of PAD BRAVO, west across the whole pad. Landing: z 3130,
-    //    x 190 → -1050, clear.
+    // 2. container-stack launch — through the slot between four stacks on the
+    //    east side of PAD BRAVO, west across the whole pad.
+    //    Landing run z 3130, x 190 -> -1050: clear.
     b.ramp({ x: 250, z: 3130, dir: -Math.PI / 2, w: 34, len: 100, height: 18, baseY: GY, color: 0xb4551f });
     stack(b, 250, 3060, Math.PI / 2, 3, rng(0x51));
-    stack(b, 250, 3208, Math.PI / 2, 3, rng(0x52));
-    stack(b, 288, 3060, Math.PI / 2, 2, rng(0x53));
+    stack(b, 288, 3060, Math.PI / 2, 2, rng(0x52));
+    stack(b, 250, 3208, Math.PI / 2, 3, rng(0x53));
     stack(b, 288, 3208, Math.PI / 2, 2, rng(0x54));
 
     // 3. stores-yard kicker on PAD ALPHA, launching east across the skidpad.
-    //    Landing: z 2420, x -1000 → -420, clear.
+    //    Landing run z 2420, x -1000 -> -420: clear.
     b.ramp({ x: -1050, z: 2420, dir: Math.PI / 2, w: 32, len: 86, height: 14, baseY: GY, color: 0xb4551f });
 
-    // approach markings
-    line(b, XA, 2900, XA, 2940, 4, HAZARD, GY + 0.16);
-    line(b, 330, 3130, 306, 3130, 4, HAZARD, GY + 0.16);
-    line(b, -1110, 2420, -1096, 2420, 4, HAZARD, GY + 0.16);
+    line(b, XA - 22, 2916, XA + 22, 2916, 4, HAZARD, Y_PAINT);
+    line(b, 306, 3112, 306, 3148, 4, HAZARD, Y_PAINT);
+    line(b, -1100, 2402, -1100, 2438, 4, HAZARD, Y_PAINT);
   }
 
   /* =======================================================================
    * Roadside detail. All of it is instanced and non-colliding — you can drive
-   * straight over the lot, which is what you want scattered around a skidpad.
+   * straight over the lot, which is what you want scattered near a skidpad.
    * =====================================================================*/
   function clutter(b, r) {
-    // drum + pallet + crate groups tucked against buildings and fences, never
-    // inside a pad or a landing lane
     const spots = [
-      [-1200, 2060], [-1200, 2960], [-1200, 3480], [-380, 2040], [-380, 2830],
-      [330, 2040], [330, 2830], [520, 3480], [520, 2960], [1200, 2100],
-      [1200, 2500], [1200, 2900], [1200, 3300], [-620, 1960], [80, 1960],
-      [900, 1960], [-1240, 3560], [560, 3560], [1160, 3560], [-100, 2800],
-      [40, 2800], [620, 2900], [1120, 2900], [640, 3560], [1100, 3300]
+      [-1240, 2060], [-1240, 2960], [-1240, 3480], [-380, 2040], [-380, 2830],
+      [330, 2040], [330, 2830], [510, 3480], [510, 2960], [1230, 2100],
+      [1230, 2500], [1230, 2900], [1230, 3300], [-620, 1960], [80, 1960],
+      [900, 1960], [-1240, 3560], [560, 3560], [1160, 3560], [-108, 2800],
+      [46, 2800], [620, 2900], [1120, 2900], [640, 3560], [1100, 3300]
     ];
     for (const [sx, sz] of spots) {
       const n = 3 + (r() * 5 | 0);
@@ -786,16 +742,16 @@
       }
       if (r() < 0.5) prop(b, 'spool', { x: sx + 22, y: GY + 4, z: sz + 14, rx: Math.PI / 2, ry: r() * 3.1 });
     }
-    // stacked tyre columns at the pad entrances — soft markers
-    for (const [sx, sz] of [[-360, 2420], [-1140, 2420], [470, 3240], [-1140, 3240]]) {
+    // stacked tyres marking the pad entrances
+    for (const [sx, sz] of [[-350, 2420], [-1148, 2420], [478, 3240], [-1148, 3240]]) {
       for (let i = 0; i < 4; i++) prop(b, 'tyre', { x: sx, y: GY + 1.2 + i * 2.4, z: sz });
     }
-    // cones lining the corridor
+    // cones lining the warehouse corridor
     for (let z = 2100; z <= 2760; z += 60) {
       prop(b, 'cone', { x: -78, y: GY + 2.2, z });
       prop(b, 'cone', { x: 18, y: GY + 2.2, z });
     }
-    // barriers protecting the gantry legs
+    // barriers guarding the yard-gantry legs
     for (const [x, z] of [[590, 2200], [1140, 2200], [590, 2600], [1140, 2600]]) {
       prop(b, 'barrier', { x, y: GY + 2, z: z - 20, ry: Math.PI / 2 });
       prop(b, 'barrier', { x, y: GY + 2, z: z + 20, ry: Math.PI / 2 });
@@ -803,9 +759,9 @@
   }
 
   /**
-   * Floodlight mast. The pole collides; the head and the pool of light it
-   * throws do not. `aim` is the heading the head faces; `cyan` picks the
-   * cold quayside lamp instead of the sodium yard lamp.
+   * Floodlight mast. The pole collides (via b.box); the head and the pool of
+   * light it throws do not. `aim` is the heading the head faces; `cyan` picks
+   * the cold quayside lamp instead of the sodium yard lamp.
    */
   function mast(b, x, z, aim, cyan) {
     const H = 30;
@@ -816,12 +772,9 @@
     for (let i = -1; i <= 1; i++) {
       prop(b, cyan ? 'lampC' : 'lampO', { x: x + i * 5.5 * c, y: GY + H - 0.4, z: z - i * 5.5 * s, ry: aim });
     }
-    // pool of light on the concrete, offset the way the head points
     const px = x + s * 30, pz = z + c * 30;
-    const outer = cyan ? 0x10262d : 0x2a1d0d, inner = cyan ? 0x1a3f4a : 0x46320f;
-    slab(b, px - 52, pz - 52, px + 52, pz + 52, GY + 0.09, outer, true);
-    slab(b, px - 26, pz - 26, px + 26, pz + 26, GY + 0.1, inner, true);
-    b.collider(x, z, 7, 7, H, GY);
+    slab(b, px - 52, pz - 52, px + 52, pz + 52, Y_POOL, cyan ? 0x10262d : 0x2a1d0d, true);
+    slab(b, px - 26, pz - 26, px + 26, pz + 26, Y_POOL + 0.01, cyan ? 0x1a3f4a : 0x46320f, true);
   }
 
   window.NeonDistricts.push({ id: 'docks', name: 'FREIGHT DOCKS', build });

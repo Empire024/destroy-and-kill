@@ -76,19 +76,25 @@
   const ATTRIBUTION = 'Prague map data © OpenStreetMap contributors, licensed under ODbL 1.0.';
   const ATTRIBUTION_URL = 'https://www.openstreetmap.org/copyright';
 
-  // Warm sandstone / ochre facades. The scene lights are cool (moon 0x9db0ff,
-  // hemi 0x6076aa, ambient 0x5a6690) so these are deliberately over-warm —
-  // under that light they land on a muted Prague stone rather than orange.
-  const FACADE = [0x8f7550, 0x9a7f56, 0x7d6746, 0xa38a5f, 0x86694a,
-                  0x94724a, 0x6f5c42, 0xa8916a, 0x7a6650, 0x8c6f4e];
-  const ROOF = [0x4a3228, 0x3e2c24, 0x55392c, 0x36302a, 0x452f26];
+  // Warm sandstone / ochre facades.
+  //
+  // These are raw albedos, and they look far too orange written down. That is
+  // deliberate. The renderer has no tone mapping and linear output, so a lit
+  // surface lands at roughly albedo x irradiance — and the scene's irradiance is
+  // strongly blue (moon 0x9db0ff, hemi sky 0x6076aa, ambient 0x5a6690, summing
+  // to about R 0.73 / G 0.88 / B 1.25 on an upward face). An albedo that already
+  // looks like stone comes out blue-grey and dead; these come out as warm
+  // Prague stone. The night look is calibrated on the OUTPUT, not on the hex.
+  const FACADE = [0xb08048, 0xbf8c50, 0x9c6f3e, 0xc99a5e, 0xa87742,
+                  0xb87e44, 0x8f6a42, 0xd0a86c, 0x9a7550, 0xa87b4a];
+  const ROOF = [0x6a3a26, 0x5a3020, 0x74402a, 0x584a3c, 0x633824];
   const WINDOW = [0xffd8a0, 0xffc271, 0xf7e6c4, 0xffb85c, 0xa8ccf0];
 
-  const C_GROUND = 0x27231e;
-  const C_ASPHALT = 0x2b2926;
-  const C_STONE = 0x3b362e;
-  const C_KERB = 0x574f42;
-  const C_MARK = 0xd9d2bd;
+  const C_GROUND = 0x4a3f30;   // generic paving / courtyards / the river flats
+  const C_ASPHALT = 0x5d4c36;  // carriageway
+  const C_STONE = 0x82694a;    // pedestrian streets and squares — pale cobble
+  const C_KERB = 0xa08a68;
+  const C_MARK = 0xd9d2bd;     // unlit material: this hex is what you see
   const FOG = 0x141a26;
 
   // ------------------------------------------------------------- data loading
@@ -489,13 +495,16 @@
             const k0 = hw * 0.9, kw = 0.55;
             const cax = a[0] + dx * k0, caz = a[1] + dz * k0;
             const cbx = b[0] - dx * k0, cbz = b[1] - dz * k0;
+            // walk the perimeter the other way round on the left-hand kerb, or
+            // half of them end up with a -Y normal and vanish
             const o0 = hw, o1 = hw + kw;
             for (let sgn = 1; sgn >= -1; sgn -= 2) {
-              flat.quad(
-                [cax + nx * sgn * o0, Y_KERB, caz + nz * sgn * o0],
-                [cbx + nx * sgn * o0, Y_KERB, cbz + nz * sgn * o0],
-                [cbx + nx * sgn * o1, Y_KERB, cbz + nz * sgn * o1],
-                [cax + nx * sgn * o1, Y_KERB, caz + nz * sgn * o1], C_KERB);
+              const p0 = [cax + nx * sgn * o0, Y_KERB, caz + nz * sgn * o0];
+              const p1 = [cbx + nx * sgn * o0, Y_KERB, cbz + nz * sgn * o0];
+              const p2 = [cbx + nx * sgn * o1, Y_KERB, cbz + nz * sgn * o1];
+              const p3 = [cax + nx * sgn * o1, Y_KERB, caz + nz * sgn * o1];
+              if (sgn > 0) flat.quad(p3, p2, p1, p0, C_KERB);
+              else flat.quad(p0, p1, p2, p3, C_KERB);
             }
           }
 
@@ -864,7 +873,19 @@
       const ahead = raster.probe(mx, mz, s.ux, s.uz, 60);
       const side = Math.min(left, right);
       if (side < 4.5 || ahead < 30) continue;
-      const score = side * 3 + Math.min(s.len, 120) + ahead;
+      // Prefer a street inside the city, not the empty riverbank: the extract
+      // has no river polygon, so the Vltava is just unbuilt ground and scores
+      // beautifully on clearance alone. Require real frontage nearby.
+      let built = 0;
+      for (let a = 0; a < 12; a++) {
+        const th = a * Math.PI / 6;
+        const dx = Math.cos(th), dz = Math.sin(th);
+        if (raster.at(mx + dx * 45, mz + dz * 45)) built++;
+        if (raster.at(mx + dx * 80, mz + dz * 80)) built++;
+      }
+      if (built < 9) continue;                       // fewer than ~40% built up
+      // clearance is worth having but not worth maximising — 12 m is plenty
+      const score = Math.min(side, 12) * 4 + Math.min(s.len, 120) + built * 3;
       if (score > bestScore) {
         bestScore = score;
         best = { x: mx, z: mz, heading: s.heading, seg: s, side: side, ahead: ahead };

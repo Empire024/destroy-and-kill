@@ -348,10 +348,26 @@
       this.stats.roadSegs++;
 
       if (deck) {
-        // drivable elevated deck matching this piece of ribbon
+        // Drivable elevated deck matching this piece of ribbon.
+        //
+        // Each segment becomes one rotated rectangle. Where the polyline turns,
+        // consecutive rectangles would leave a wedge-shaped hole on the outside
+        // of the bend — and a hole in a deck is a car falling 30 units. So each
+        // deck is deliberately extended past its segment at both ends and made
+        // wider than the road, so neighbours overlap. Overlap is free: the deck
+        // resolver picks whichever surface is nearest the car's current height,
+        // and at a shared boundary both agree.
         const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
         const rot = Math.atan2(dx, dz);
-        this.decks.add({ x: mx, z: mz, w: width + cw * 2, d: len, rot: rot, y0: a.y + 0.06, y1: b.y + 0.06 });
+        const OVERLAP = 7;                                   // units past each end
+        const slope = (b.y - a.y) / len;                     // keep the plane identical
+        this.decks.add({
+          x: mx, z: mz,
+          w: width + cw * 2 + 10,
+          d: len + OVERLAP * 2, rot: rot,
+          y0: a.y + 0.06 - slope * OVERLAP,
+          y1: b.y + 0.06 + slope * OVERLAP
+        });
         this.stats.decks++;
         // soffit + pillars
         const soff = 1.6;

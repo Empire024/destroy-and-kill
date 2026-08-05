@@ -113,12 +113,28 @@ function checkWorlds() {
   const srcs = [...html.matchAll(/<script[^>]*\bsrc="(src\/world\/[^"]+)"/g)].map(m => m[1]);
   if (!srcs.length) { fail('worlds', 'no world modules are loaded'); return; }
 
-  // execute the world modules in a sandbox and see what registers
+  // Execute the world modules in a sandbox and see what registers. World
+  // modules may touch browser globals at load time (e.g. kicking off a fetch
+  // for packaged map data), so stub enough of the DOM that reaching for one is
+  // not mistaken for a real error.
+  const nullProxy = () => new Proxy(function () {}, { get: () => nullProxy(), apply: () => nullProxy() });
   const sandbox = {
     window: {}, console: { log() {}, warn() {}, error() {} },
-    THREE: new Proxy(function () {}, { get: () => new Proxy(function () {}, { get: () => () => {} }), apply: () => ({}) })
+    document: { createElement: () => ({ style: {}, setAttribute() {}, appendChild() {}, addEventListener() {} }),
+      head: { appendChild() {} }, body: { appendChild() {} },
+      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+    location: { href: 'http://127.0.0.1/', protocol: 'http:', hostname: '127.0.0.1' },
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}), text: () => Promise.resolve('') }),
+    XMLHttpRequest: function () { this.open = () => {}; this.send = () => {}; this.status = 0; this.responseText = ''; },
+    performance: { now: () => 0 },
+    requestAnimationFrame: () => 0,
+    THREE: nullProxy()
   };
   sandbox.window.window = sandbox.window;
+  sandbox.window.document = sandbox.document;
+  sandbox.window.location = sandbox.location;
+  sandbox.window.fetch = sandbox.fetch;
+  sandbox.self = sandbox.window;
   vm.createContext(sandbox);
   for (const src of srcs) {
     if (!exists(src)) continue;
