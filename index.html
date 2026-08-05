@@ -424,6 +424,11 @@ HOT</span>
   </div>
 </div>
 <canvas class="hud" id="map" width="190" height="190"></canvas>
+<!-- Root for every expansion system's UI (compass, radio, shop panels, weapon
+     HUD, race widgets). Systems create their own children in here; nothing
+     outside this div is theirs to touch. pointer-events pass through the root
+     itself so it never blocks driving input — panels opt back in individually. -->
+<div id="systemsUI" style="position:fixed;inset:0;pointer-events:none;z-index:40"></div>
 <div id="fullmap">
   <canvas id="fullmapcv" width="960" height="640"></canvas>
 </div>
@@ -559,6 +564,31 @@ window.addEventListener('unhandledrejection', (e) => {
 <script src="src/world/neon/district-links.js"></script>
 <script src="src/world/neon/district-signals.js"></script>
 <script src="src/world/prague-world.js"></script>
+<!-- Expansion: data first (plain declarations), then the systems that read them.
+     Each file registers itself with GameSystems; the engine boots the registry
+     once it has built the world manager. A missing file 404s loudly in the
+     console and its system is reported as disabled — never a silent gap. -->
+<script src="src/game/registry.js"></script>
+<script src="data/vehicles.js"></script>
+<script src="data/bodyShops.js"></script>
+<script src="data/races.js"></script>
+<script src="data/driftZones.js"></script>
+<script src="data/collectibles.js"></script>
+<script src="data/radioStations.js"></script>
+<script src="data/trafficProfiles.js"></script>
+<script src="src/game/save.js"></script>
+<script src="src/game/roadgraph.js"></script>
+<script src="src/game/progression.js"></script>
+<script src="src/game/nav.js"></script>
+<script src="src/game/events.js"></script>
+<script src="src/game/bodyshop.js"></script>
+<script src="src/game/daynight.js"></script>
+<script src="src/game/radio.js"></script>
+<script src="src/game/traffic-ai.js"></script>
+<script src="src/game/combat.js"></script>
+<script src="src/game/vehicle-damage.js"></script>
+<script src="src/game/destructibles.js"></script>
+<script src="src/game/camera-orbit.js"></script>
 <script>
 (() => {
 "use strict";
@@ -690,8 +720,18 @@ const moon=new THREE.DirectionalLight(0x9db0ff,0.9);
 moon.position.set(-400,600,300); moon.castShadow=true; moon.shadow.mapSize.set(2048,2048);
 const sc=1200; moon.shadow.camera.left=-sc;moon.shadow.camera.right=sc;moon.shadow.camera.top=sc;moon.shadow.camera.bottom=-sc; moon.shadow.camera.far=3200;
 scene.add(moon);
-scene.add(new THREE.HemisphereLight(0x6076aa,0x2a3350,1.2));   // brighter sky/ground fill (free)
-scene.add(new THREE.AmbientLight(0x5a6690,0.8));               // lift the shadows
+// Named, not anonymous: the day/night system re-colours and re-levels all three
+// of these every frame. `moon` keeps its (misleading) historic name — it is the
+// single key directional light, and day/night drives it as sun OR moon.
+const hemiLight=new THREE.HemisphereLight(0x6076aa,0x2a3350,1.2);   // sky/ground fill (free)
+const ambLight=new THREE.AmbientLight(0x5a6690,0.8);                // lift the shadows
+scene.add(hemiLight); scene.add(ambLight);
+// The light rig's authored night look, so day/night can express itself as a
+// multiplier over the original tuning instead of replacing it with new magic
+// numbers — and so a disabled day/night system leaves the game exactly as it was.
+const LIGHT_BASE={key:{color:moon.color.getHex(),intensity:moon.intensity},
+                  hemi:{sky:hemiLight.color.getHex(),ground:hemiLight.groundColor.getHex(),intensity:hemiLight.intensity},
+                  amb:{color:ambLight.color.getHex(),intensity:ambLight.intensity}};
 
 // The legacy map's container, declared up here rather than beside the world
 // manager at the bottom of the file. It used to be created there, and the only
@@ -2158,7 +2198,9 @@ function axleWheelWorldPositions(axle='rear'){
   return {left:{x:axleX-rx*half,z:axleZ-rz*half},right:{x:axleX+rx*half,z:axleZ+rz*half}};
 }
 function spawnTireSmoke(x,z,intensity){
-  const mat=new THREE.MeshBasicMaterial({color:0xc9c9c9,transparent:true,opacity:.30+intensity*.28,depthWrite:false});
+  // On sand the "smoke" is kicked-up dust: warm ochre, a touch denser.
+  const sandFx=carSurface.fx==='sand';
+  const mat=new THREE.MeshBasicMaterial({color:sandFx?0xcbb083:0xc9c9c9,transparent:true,opacity:(sandFx?.34:.30)+intensity*.28,depthWrite:false});
   const mesh=new THREE.Mesh(tireSmokeGeo,mat),scale=.55+intensity*1.15;
   mesh.position.set(x+rand(-.35,.35),carState.y+.38,z+rand(-.35,.35));mesh.scale.set(scale*.8,scale*.45,scale*.8);scene.add(mesh);
   tireSmoke.push({mesh,vx:carState.vx*.10+rand(-1.8,1.8),vy:1.1+intensity*2.1,vz:carState.vz*.10+rand(-1.8,1.8),life:.72+intensity*.65,max:.72+intensity*.65});
@@ -2212,7 +2254,7 @@ function emitTireEffects(dt,intensity,axle='rear',frontIntensity=0){
       tireSmokeClock=lerp(.105,.032,tireEffectIntensity);
     }
   }else tireSmokeClock=0;
-  if(tireEffectIntensity>.40&&mph>8){
+  if(tireEffectIntensity>.40&&mph>8&&carSurface.fx!=='sand'){   // no rubber laid on sand
     tireMarkClock-=dt;
     if(tireMarkClock<=0){
       addTireMark(lastL,primary.left,tireEffectIntensity);addTireMark(lastR,primary.right,tireEffectIntensity);
@@ -2294,6 +2336,16 @@ let driveMode='D', manualModeTimer=0, manualModeHardTimer=0, shiftHoldTimer=0, s
 let playerHearts=3, copRamCooldown=0, heartFlashTimer=0;
 let pendingPowerShift=false, powerShiftTimer=0, powerShiftReady=false, rpmSettleTimer=0, rpmSettleDuration=0, rpmSettleFrom=900, shiftTorqueCarryTimer=0, shiftTorqueCarry=0, postShiftPullTimer=0, postShiftPullDuration=0, postShiftPullFrom=1;
 let driftYawRate=0, driftAngle=0, rearSlip=0, frontSlip=0, gripLost=false, gripUsage=0, carSurfacePitch=0;
+// ---------- Surface under the car ----------
+// One authoritative surface state, written once per frame by whoever knows the
+// ground (the sea/coast module claims the beach; worlds may claim others), read
+// by the physics, the tire FX and the tire audio. Defaults are exactly the
+// historic on-road behaviour, so with no claimant nothing changes.
+//   grip: lateral+braking grip multiplier   drag: added rolling resistance (1/s)
+//   spin: driven-wheel slip multiplier      fx:  'smoke' | 'sand'
+const SURFACE_ROAD={type:'road',grip:1,drag:0,spin:1,fx:'smoke'};
+let carSurface=SURFACE_ROAD;
+function setCarSurface(s){ carSurface=s&&s.type?s:SURFACE_ROAD; }
 // Brakes and weight transfer. brakePressure is the pedal after the hydraulic
 // ramp — a keyboard S is a step input and a real pedal is not, and slamming the
 // full force on frame one is most of what made braking feel like an anchor.
@@ -2645,10 +2697,21 @@ const DRIFT_LEVELS=[
   {name:'LEGEND',at:3400,next:6000,mult:5,color:'#ff3b3b'}
 ];
 let driftComboActive=false,driftComboValue=0,driftComboAwarded=0,driftComboGrace=0,driftLevelIndex=0,driftLevelPulseTimer=0;
+// Drift-zone bonus. A zone system sets this >1 while the player is drifting
+// validly inside a zone corridor; it multiplies the combo level's own
+// multiplier through one explicit, capped formula (see updateDriftCombo).
+// Cap 12 = LEGEND(×5) would only ever gain ×2.4 from a ×5 zone — deliberate:
+// stacked multipliers must reward, not explode.
+let driftZoneMult=1;const DRIFT_EFFECTIVE_MULT_CAP=12;
+function setDriftZoneMult(m){ driftZoneMult=clamp(+m||1,1,5); }
+function driftEffectiveMult(){ return Math.min(DRIFT_EFFECTIVE_MULT_CAP,DRIFT_LEVELS[driftLevelIndex].mult*driftZoneMult); }
 function driftLevelFor(v){let idx=0;for(let i=1;i<DRIFT_LEVELS.length;i++)if(v>=DRIFT_LEVELS[i].at)idx=i;return idx;}
 function updateDriftComboHud(){
   const lvl=DRIFT_LEVELS[driftLevelIndex],span=Math.max(1,lvl.next-lvl.at),pct=clamp((driftComboValue-lvl.at)/span,0,1);
-  driftBonusEl.style.setProperty('--drift-color',lvl.color);driftLevelEl.textContent=lvl.name;driftPointsEl.textContent=Math.floor(driftComboValue).toLocaleString();driftMultiplierEl.textContent='×'+lvl.mult.toFixed(1);driftFillEl.style.width=(pct*100).toFixed(1)+'%';driftBonusEl.classList.toggle('show',driftComboActive||driftComboGrace>0);
+  driftBonusEl.style.setProperty('--drift-color',lvl.color);driftLevelEl.textContent=lvl.name;driftPointsEl.textContent=Math.floor(driftComboValue).toLocaleString();
+  // Show the whole calculation when a zone is boosting: "×2.0 ×5 ZONE = ×10".
+  driftMultiplierEl.textContent=driftZoneMult>1?('×'+lvl.mult.toFixed(1)+' ×'+driftZoneMult.toFixed(0)+' ZONE = ×'+driftEffectiveMult().toFixed(1)):('×'+lvl.mult.toFixed(1));
+  driftFillEl.style.width=(pct*100).toFixed(1)+'%';driftBonusEl.classList.toggle('show',driftComboActive||driftComboGrace>0);
 }
 function resetDriftCombo(){driftComboActive=false;driftComboValue=0;driftComboAwarded=0;driftComboGrace=0;driftLevelIndex=0;driftBonusEl.classList.remove('show','levelUp');updateDriftComboHud();}
 function bankDriftCombo(crashed=false){
@@ -2663,7 +2726,7 @@ function updateDriftCombo(dt,throttle,handbrake,counterSteer=0){
     // Opposite lock is worth up to a third more than the same angle held on the
     // stick, because with the tail out that is the only thing keeping it there.
     driftComboActive=true;driftComboGrace=1.05;const angleFactor=clamp((angle-.09)/.62,.18,1.35),speedFactor=clamp((mph-20)/150,.25,1.65),controlFactor=.72+Math.min(.35,Math.max(0,throttle))+(handbrake?.12:0)+clamp(counterSteer,0,1)*.34;
-    const before=driftLevelIndex,lvl=DRIFT_LEVELS[before],gain=(18+angleFactor*38+speedFactor*24)*controlFactor*lvl.mult*dt;driftComboValue+=gain;
+    const before=driftLevelIndex,lvl=DRIFT_LEVELS[before],gain=(18+angleFactor*38+speedFactor*24)*controlFactor*driftEffectiveMult()*dt;driftComboValue+=gain;
     driftLevelIndex=driftLevelFor(driftComboValue);if(driftLevelIndex>before){driftBonusEl.classList.remove('levelUp');void driftBonusEl.offsetWidth;driftBonusEl.classList.add('levelUp');beep(720+driftLevelIndex*145,.11,'triangle',.16);}
     const whole=Math.floor(driftComboValue)-driftComboAwarded;if(whole>0){stats.score+=whole;driftComboAwarded+=whole;}
   }else if(driftComboActive){
@@ -3038,12 +3101,19 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   if(k==='f2'){e.preventDefault();wheelSetupOpen?closeWheelSetup():openWheelSetup();return;}
   if(wheelSetupOpen){if(k==='escape')closeWheelSetup();return;}
   if(k==='escape'&&started){e.preventDefault();openVehicleSelection();return;}
+  // Expansion systems get first refusal on keys (map, radio, weapons, …), but
+  // never on the driving keys — a broken system must not eat the controls.
+  const DRIVE_KEYS=[' ','w','a','s','d','arrowup','arrowdown','arrowleft','arrowright','shift'];
+  if(window.GameSystems&&!DRIVE_KEYS.includes(k)&&GameSystems.onKey(k,e)){e.preventDefault();return;}
   keys[k]=true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright','tab'].includes(k)) e.preventDefault();
   if(dead||dying) return;   // no controls once the car is on fire, nor on the WASTED screen
   if(k==='c'){camMode=(camMode+1)%4;cameraSmoothingReady=false;}
   if(k==='r') resetCar();
-  if(k==='m'){ muted=!muted; addToast(muted?'🔇 Muted':'🔊 Sound on','#9ab'); }
+  // Mute moved M -> U: M is the full map now (the nav system owns it, with the
+  // engine fallback below so the map still opens if nav ever fails to boot).
+  if(k==='u'){ muted=!muted; addToast(muted?'🔇 Muted':'🔊 Sound on','#9ab'); }
+  if(k==='m') toggleFullMap();
   if(k==='tab') toggleFullMap();
   if(k==='e') { if(onFoot) enterNearestCar(); else exitCar(); }
   // Z upshifts as well as X: on QWERTY that is the key immediately left of X, so
@@ -3987,7 +4057,12 @@ function updateDrive(dt){
   const nitroAccel=nitroOn&&!engineSeized?gearBaseAccel*vehicleTune.power*(.50+.25*powerCurve)*Math.max(.55,engineHealth):0;
   const powerShiftAccel=throttle>0&&powerShiftTimer>0?gearBaseAccel*vehicleTune.power*.08*throttle*engineHealth:0;
   const baseAccel=throttle>0?engineAccel*throttle:throttle<0?vehicleTune.reverseAccel*throttle:0;   // reverse scales with the pedal too
-  const accel=((baseAccel+turboAccel+powerShiftAccel)*shiftCut*limiterCut)+nitroAccel;
+  // Sand (or any claimed surface): driven wheels spin up (thrust loses bite as
+  // wheelspin rises) and the loose surface adds real rolling resistance. On the
+  // default road surface spin=1 and drag=0, so this whole block is a no-op.
+  let accel=((baseAccel+turboAccel+powerShiftAccel)*shiftCut*limiterCut)+nitroAccel;
+  if(carSurface.spin>1&&throttle>0){ const spinLoss=clamp((carSurface.spin-1)*(.55+.45*throttle),0,.6); accel*=1-spinLoss; }
+  if(carSurface.drag>0){ vx-=vx*carSurface.drag*dt; vz-=vz*carSurface.drag*dt; }
   vx+=dirx*accel*dt;vz+=dirz*accel*dt;
 
   // ---------------------------------------------------------------- BRAKES ---
@@ -4133,7 +4208,7 @@ function updateDrive(dt){
   dirx=Math.sin(carState.heading);dirz=Math.cos(carState.heading);rightx=Math.cos(carState.heading);rightz=-Math.sin(carState.heading);
   localFwd=vx*dirx+vz*dirz;localLat=vx*rightx+vz*rightz;driftAngle=Math.atan2(localLat,Math.max(8,Math.abs(localFwd)));
   const lateralDemand=Math.abs(localLat)*2.75+Math.abs(driftYawRate)*sp*.18;
-  const baseGripLimit=lerp(154,94,speedNorm)*vehicleTune.grip;
+  const baseGripLimit=lerp(154,94,speedNorm)*vehicleTune.grip*carSurface.grip;
   const axleCapacity=vehicleTune.drive==='FWD'?frontCapacity:vehicleTune.drive==='AWD'?Math.min(1,(rearCapacity+frontCapacity)*.64):rearCapacity;
   const maxGripAccel=baseGripLimit*(.58+.42*axleCapacity)*(braking?.16:1);gripUsage=lateralDemand/Math.max(1,maxGripAccel);
   if(vehicleTune.drive==='AWD')gripLost=braking||Math.abs(driftAngle)>.36||gripUsage>1.65;
@@ -4340,7 +4415,9 @@ function updateDrive(dt){
   // A locked service brake slides all four tyres, so all four lay rubber. The
   // handbrake only locks the rears, which is why it stays on the driven axle.
   const lockFx=brakeLock*clamp((sp-6)/14,0,1),fourWheelLock=!braking&&lockFx>.34;
-  const tireFx=Math.max(gripLost?.68:0,drivenSlip*.92,Math.abs(driftAngle)*2.15,braking?.92:0,lockFx*.95,throttle>0&&steerLoad>.28?slipOver*.92:0);
+  let tireFx=Math.max(gripLost?.68:0,drivenSlip*.92,Math.abs(driftAngle)*2.15,braking?.92:0,lockFx*.95,throttle>0&&steerLoad>.28?slipOver*.92:0);
+  // Loose surfaces kick up dust from ordinary rolling, not just from slip.
+  if(carSurface.fx==='sand'&&Math.abs(carState.speed)*1.6>14)tireFx=Math.max(tireFx,.42+Math.min(.3,Math.abs(throttle)*.3));
   emitTireEffects(dt,tireFx,fourWheelLock?'both':(vehicleTune.drive==='FWD'?'front':'rear'),Math.max(lockFx*.92,frontSlip*.85));
 }
 
@@ -4354,6 +4431,11 @@ function applySmoothCamera(desired,target,dt,posRate,lookRate,rotRate){
   camLookRig.position.copy(camera.position);camLookRig.lookAt(camSmoothedTarget);camera.quaternion.slerp(camLookRig.quaternion,dampAlpha(rotRate,dt));
 }
 function updateCamera(dt){
+  // The camera module (src/game/camera-orbit.js) takes over the whole camera
+  // when healthy — orbit, garage/tunnel probes, split smoothing. If it is
+  // missing or has been disabled by the registry, this original engine camera
+  // is the fallback, so a broken module can never leave the game with no view.
+  if(window.GameSystems){const cs=GameSystems.api('camera');if(cs&&cs.updateCamera&&cs.updateCamera(dt))return;}
   if(onFoot){
     const fx=Math.sin(foot.heading),fz=Math.cos(foot.heading),fy=WORLD_groundHeightAt(foot.x,foot.z,footChar.position.y);
     camDesired.set(foot.x-fx*13,fy+9,foot.z-fz*13);camTarget.set(foot.x+fx*6,fy+3.5,foot.z+fz*6);applySmoothCamera(camDesired,camTarget,dt,8,10,12);return;
@@ -4506,6 +4588,9 @@ function renderMap(g,size,detailed){
   // orange markers for jumps that are not in the world you are driving
   for(const r of WORLD_rampsNear(playerX,playerZ)){g.fillStyle='#ff6b3b';g.fillRect(x2(r.x)-2,z2(r.z)-2,4,4);}
   for(const c of cops){g.fillStyle='#ff3b3b';g.fillRect(x2(c.x)-2,z2(c.z)-2,4,4);}
+  // Expansion overlays (waypoints, routes, POI icons) draw between the world
+  // layer and the player arrow, so the player is never buried under an icon.
+  if(window.GameSystems){const proj={x2,z2,scale,k,detailed,minX,maxX,minZ,maxZ};if(detailed)GameSystems.drawFullMap(g,proj);else GameSystems.drawMinimap(g,proj);}
   const ph=onFoot?foot.heading:carState.heading;g.save();g.translate(x2(playerX),z2(playerZ));g.rotate(Math.PI-ph);g.fillStyle=onFoot?'#fff':'#20e3ff';g.beginPath();g.moveTo(0,-7*k);g.lineTo(5*k,6*k);g.lineTo(-5*k,6*k);g.closePath();g.fill();g.restore();
 }
 function drawMap(){ renderMap(mctx,190,false); if(showFullMap) renderMap(fctx,fullCanvas.width,true); }
@@ -4516,7 +4601,10 @@ const cashEl=document.getElementById('cash'),starsEl=document.getElementById('st
       rpmValueEl=document.getElementById('rpmValue'),rpmNeedleEl=document.getElementById('rpmNeedle'),clusterGearEl=document.getElementById('clusterGear'),
       shiftLightsEl=[...document.querySelectorAll('#shiftLights i')],boostGaugeEl=document.getElementById('boostGauge'),boostNeedleEl=document.getElementById('boostNeedle'),boostPsiEl=document.getElementById('boostPsi'),nitroMeterEl=document.getElementById('nitroMeter'),nitroFillEl=document.getElementById('nitroFill'),rpmMeterEl=document.getElementById('rpmMeter'),
       driveModeEl=document.getElementById('driveMode'),shiftPromptEl=document.getElementById('shiftPrompt'),heartHealthEl=document.getElementById('heartHealth'),heartEls=[...document.querySelectorAll('#heartHealth .heart')],engineWarningEl=document.getElementById('engineWarning'),engineHeatValueEl=document.getElementById('engineHeatValue');
-function hud(){stats.cash=999999999999;stats.health=playerHearts/3*100;if(!engineBlown)carState.hp=100;
+function hud(){stats.cash=999999999999;stats.health=playerHearts/3*100;
+  // Historic invincibility line. The unified damage system (vehicle-damage.js)
+  // owns carState.hp when present; only fall back to "hp never drops" without it.
+  if(!engineBlown&&!(window.GameSystems&&GameSystems.api('vdamage')))carState.hp=100;
   // Nitrous: updateDrive already drains and refills stats.nitro. This used to
   // slam it back to 100 every frame, which made the whole system inert.
   if(nitroFillEl){
@@ -4600,6 +4688,23 @@ const legacyWorld={
 let activeWorld=legacyWorld;
 const worldInstances=new Map([['legacy',legacyWorld]]);
 
+// --- atmosphere tint (day/night) --------------------------------------------
+// Worlds lerp scene.background / scene.fog toward their authored colours every
+// frame. Day/night must tint the *displayed* colour without polluting the value
+// the worlds lerp — otherwise the lerp reads the tinted colour back and the two
+// systems fight. So: restore() puts the raw colour back before the world's
+// updateAtmosphere runs, apply() saves the new raw colour and multiplies the
+// tint on top for rendering. With tint 1,1,1 both are exact no-ops.
+const ATMOS={r:1,g:1,b:1,fogMul:1,_raw:null,_rawFog:null,_rawDensity:null,
+  setTint(r,g,b,fogMul){this.r=r;this.g=g;this.b=b;this.fogMul=fogMul==null?1:fogMul;},
+  restore(){ if(this._raw){scene.background.copy(this._raw); if(scene.fog){scene.fog.color.copy(this._rawFog); scene.fog.density=this._rawDensity;} } },
+  apply(){ if(this.r===1&&this.g===1&&this.b===1&&this.fogMul===1){this._raw=null;return;}
+    if(!this._raw){this._raw=new THREE.Color();this._rawFog=new THREE.Color();}
+    this._raw.copy(scene.background); if(scene.fog){this._rawFog.copy(scene.fog.color);this._rawDensity=scene.fog.density;}
+    scene.background.multiplyScalar(1).multiply(new THREE.Color(this.r,this.g,this.b));
+    if(scene.fog){scene.fog.color.multiply(new THREE.Color(this.r,this.g,this.b)); scene.fog.density*=this.fogMul;}
+  }};
+
 // --- dispatchers the engine calls -------------------------------------------
 function WORLD_groundHeightAt(x,z,curY){ return activeWorld.groundHeightAt(x,z,curY); }
 function WORLD_surfacePitchAt(x,z,h){ return activeWorld.surfacePitchAt(x,z,h); }
@@ -4617,7 +4722,7 @@ function WORLD_isDrowningAt(x,z,y){ return activeWorld.isDrowningAt(x,z)||GameSe
 function WORLD_inBounds(x,z){ return activeWorld.inBounds(x,z); }
 function WORLD_clampToBounds(x,z){ return activeWorld.clampToBounds(x,z); }
 function WORLD_updateStreaming(px,pz,dt){ activeWorld.updateStreaming(px,pz,dt); }
-function WORLD_updateAtmosphere(x,z){ activeWorld.updateAtmosphere(x,z); }
+function WORLD_updateAtmosphere(x,z){ ATMOS.restore(); activeWorld.updateAtmosphere(x,z); ATMOS.apply(); }
 
 /** Build (once) and activate a map by id. Returns true on success. */
 function activateWorld(id){
@@ -4659,12 +4764,14 @@ function activateWorld(id){
   // map's declared colour here, then let its own lerp take over from a correct
   // starting point. Fog *density* is deliberately left alone: it is engine state
   // shared by all three maps, and prague-world.js says so at its own lerp.
+  ATMOS._raw=null;   // the saved raw colour belongs to the outgoing map
   const fogHex=(def&&def.fog!==undefined)?def.fog:inst.fog;
   if(fogHex!==undefined&&fogHex!==null){
     scene.background.setHex(fogHex); if(scene.fog) scene.fog.color.setHex(fogHex);
   }
   WORLD_updateAtmosphere(carState.x,carState.z);
   currentMapId=id;
+  if(window.GameSystems)GameSystems.worldChanged(inst);
   return true;
 }
 let currentMapId='legacy';
@@ -4782,7 +4889,9 @@ window.GAME_DEBUG={
 // ---------- Loop ----------
 let last=performance.now();
 function loop(now){ const dt=Math.min(.045,(now-last)/1000); last=now;
-  updateWheelSystem(dt); update(dt); hud(); drawMap();
+  updateWheelSystem(dt); update(dt);
+  if(window.GameSystems)GameSystems.update(dt,started&&!carSelectionOpen&&!dead&&!dying);
+  hud(); drawMap();
   if(bannerTimer>0){ bannerTimer-=dt; if(bannerTimer<=0) bannerEl.classList.remove('show'); }
   renderer.render(scene,camera); requestAnimationFrame(loop); }
 camera.position.set(carState.x,20,carState.z-30); camera.lookAt(carState.x,0,carState.z);
@@ -4858,6 +4967,104 @@ document.querySelectorAll('.vehicleCard').forEach(card=>card.addEventListener('c
   selectPlayerVehicle(card.dataset.vehicle);resetCar();begin();}));
 const unlockAudio=()=>{if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();};
 addEventListener('pointerdown',unlockAudio,{passive:true});addEventListener('keydown',unlockAudio);
+
+// ============================================================================
+// EXPANSION SEAM — the one context object every game system builds against.
+// ----------------------------------------------------------------------------
+// This is the ONLY doorway into the engine. If a system needs something that is
+// not here, the lead adds it here — systems never reach into engine internals
+// another way. Getters are used for every mutable primitive so systems always
+// read live values, and the engine keeps ownership of its own state.
+// ============================================================================
+if(window.GameSystems){
+  const gameCtx={
+    THREE, scene, camera, renderer,
+    events:GameSystems.events,
+    utils:{rand,clamp,lerp,pick,smooth01,dist2,dampAlpha},
+    quality:{mobile:MOBILE_UI,get tier(){return MOBILE_UI?'low':'high';}},
+    dom:{ui:document.getElementById('systemsUI'),overlay,fullmap:document.getElementById('fullmap'),
+         fullmapCanvas:fullCanvas,minimapCanvas:mapCanvas},
+    input:{keys,mobileInput,get muted(){return muted;}},
+
+    player:{
+      get x(){return playerX;},get z(){return playerZ;},get y(){return onFoot?0:carState.y;},
+      get heading(){return onFoot?foot.heading:carState.heading;},
+      get speed(){return onFoot?0:carState.speed;},get mph(){return onFoot?0:Math.abs(carState.speed)*1.6;},
+      get onFoot(){return onFoot;},get dead(){return dead;},get dying(){return dying;},
+      get carMesh(){return car;},foot,
+      get hearts(){return playerHearts;},
+      enterNearestCar,exitCar
+    },
+    carState,stats,   // live references, deliberately: the damage + progression systems co-own these
+
+    drift:{
+      get angle(){return driftAngle;},get yawRate(){return driftYawRate;},
+      get comboActive(){return driftComboActive;},get comboValue(){return driftComboValue;},
+      get levelIndex(){return driftLevelIndex;},get gripLost(){return gripLost;},get rearSlip(){return rearSlip;},
+      get zoneMult(){return driftZoneMult;},setZoneMult:setDriftZoneMult,
+      bank:()=>bankDriftCombo(false),break:breakDriftCombo,LEVELS:DRIFT_LEVELS
+    },
+
+    world:{
+      get active(){return activeWorld;},get id(){return currentMapId;},
+      groundHeightAt:WORLD_groundHeightAt,surfacePitchAt:WORLD_surfacePitchAt,
+      obstaclesNear:WORLD_obstaclesNear,rampsNear:WORLD_rampsNear,nearestRoad:WORLD_nearestRoad,
+      isDrowningAt:WORLD_isDrowningAt,inBounds:WORLD_inBounds,clampToBounds:WORLD_clampToBounds,
+      activate:activateWorld
+    },
+
+    actors:{traffic,peds,cops,makeCar,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,killCivilian,
+            removeTrafficObject,removePedObject,
+            get densityScale(){return densityScale;},set densityScale(v){densityScale=clamp(+v||1,.2,3);}},
+
+    vehicles:{
+      TUNES:VEHICLE_TUNES,get currentKey(){return vehicleTuneKey;},get tune(){return vehicleTune;},
+      select:selectPlayerVehicle,get color(){return carColor;},
+      setColor(hex){carColor=hex;if(car&&car.children[0]&&car.children[0].material)car.children[0].material.color.setHex(hex);},
+      selectionUI:{get open(){return carSelectionOpen;},vehicleSelectEl,mapSelectEl,openVehicleSelection,begin,showVehicleStage}
+    },
+
+    fx:{toast:addToast,banner:setBanner,flash:doFlash,explosionAt,shatterVehicle,spawnTireSmoke},
+    audio:{get ctx(){return audioCtx;},get muted(){return muted;},ensure:initAudio,
+           beep,chord,playPickup,playSuccess,playCrash,playExplosion},
+
+    lights:{key:moon,hemi:hemiLight,amb:ambLight,base:LIGHT_BASE,headlights:[spotL,spotR],
+            setAtmosphereTint:(r,g,b,f)=>ATMOS.setTint(r,g,b,f)},
+
+    engine:{
+      setSurface:setCarSurface,get surface(){return carSurface;},
+      get started(){return started;},get selectionOpen(){return carSelectionOpen;},
+      get camMode(){return camMode;},
+      addScore(n){stats.score+=Math.max(0,n|0);},
+      addWanted(n){stats.wanted=clamp(stats.wanted+(n|0),0,5);},
+      setWanted(n){stats.wanted=clamp(n|0,0,5);},
+      teleportCar(x,z,heading){
+        carState.x=x;carState.z=z;if(heading!=null)carState.heading=heading;
+        carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;
+        carState.y=WORLD_groundHeightAt(x,z,carState.y);resetDriftPhysics();
+        if(car){car.position.set(x,carState.y,z);car.rotation.set(0,carState.heading,0);}
+        playerX=x;playerZ=z;cameraSmoothingReady=false;
+      },
+      resetCar,requestManualShift,
+      toggleFullMap,get fullMapOpen(){return showFullMap;}
+    },
+
+    // Everything the camera module needs to fully replace updateCamera.
+    cameraInternals:{
+      camDesired,camTarget,applySmoothCamera,
+      get smoothingReady(){return cameraSmoothingReady;},set smoothingReady(v){cameraSmoothingReady=!!v;},
+      get crashShake(){return crashShake;},get carSurfacePitch(){return carSurfacePitch;},
+      get camMode(){return camMode;},get keys(){return keys;}
+    }
+  };
+  // Engine-side event taps: systems hear the world without polling.
+  const _origDie=die;   // die() is engine-owned; wrap to announce it
+  die=function(){GameSystems.events.emit('player:died',{x:playerX,z:playerZ});return _origDie.apply(this,arguments);};
+  const _origSave=saveGame;
+  saveGame=function(){const r=_origSave.apply(this,arguments);GameSystems.events.emit('game:saved',{});return r;};
+  const boot=GameSystems.boot(gameCtx);
+  if(boot.dead.length)addToast('⚠ '+boot.dead.length+' game system(s) failed — see console','#ff6b6b');
+}
 
 })();
 </script><canvas width="2560" height="1305" style="display: block; width: 2560px; height: 1305px;" class=""></canvas>
