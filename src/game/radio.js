@@ -41,7 +41,7 @@
 
   /* ---------- mixer ---------- */
   var actx = null;
-  var radioMaster = null, duckGain = null;
+  var radioMaster = null, duckGain = null, analyser = null;
   var current = null;          // {station, gain, gen} — the live station
   var fading = [];             // stations on their way out
   var CROSSFADE = 0.35;
@@ -415,6 +415,34 @@
     duck: function () { duck('debug'); return DUCK_TIME; },
     /** Force the gesture gate open for headless tests. Never call from game code. */
     unlock: function () { onGesture(); return unlocked; },
+    /** RMS + six octave-ish bands off the master bus. "Do the stations actually
+     *  sound different" and "did the crossfade dip to silence" are otherwise
+     *  unanswerable from a test harness that has no ears. */
+    spectrum: function () {
+      if (!radioMaster || !actx) return null;
+      if (!analyser) {
+        analyser = actx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.3;
+        radioMaster.connect(analyser);   // a tap, not a link in the chain
+      }
+      var bins = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(bins);
+      var wave = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(wave);
+      var rms = 0;
+      for (var i = 0; i < wave.length; i++) rms += wave[i] * wave[i];
+      rms = Math.sqrt(rms / wave.length);
+      var hzPerBin = actx.sampleRate / analyser.fftSize;
+      var edges = [0, 120, 300, 800, 2000, 5000, 22050], bands = [];
+      for (var b = 0; b < 6; b++) {
+        var lo = Math.floor(edges[b] / hzPerBin), hi = Math.min(bins.length, Math.ceil(edges[b + 1] / hzPerBin));
+        var sum = 0, n = 0;
+        for (var k = lo; k < hi; k++) { if (isFinite(bins[k])) { sum += bins[k]; n++; } }
+        bands.push(n ? +(sum / n).toFixed(1) : null);   // mean dBFS in the band
+      }
+      return { rms: +rms.toFixed(5), bandsDb: bands };
+    },
     stations: function () { return stations.map(function (s) { return s.id + ' (' + s.kind + ')'; }); },
     state: function () {
       return {

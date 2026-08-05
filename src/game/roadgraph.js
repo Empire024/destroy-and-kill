@@ -300,6 +300,7 @@
       // Persistent A* scratch. Refilling three arrays of 30k entries per call is
       // the expensive part of a short route, so they are stamped instead.
       stamp: new Int32Array(nodes.length),
+      closed: new Int32Array(nodes.length),
       gScore: new Float64Array(nodes.length),
       fromNode: new Int32Array(nodes.length),
       fromEdge: new Int32Array(nodes.length),
@@ -442,7 +443,7 @@
     const nodes = g.nodes, edges = g.edges;
     const ga = g.nodes[B.edge.a], gb = g.nodes[B.edge.b];
     const run = ++g.run;
-    const stamp = g.stamp, gs = g.gScore, fn = g.fromNode, fe = g.fromEdge;
+    const stamp = g.stamp, closed = g.closed, gs = g.gScore, fn = g.fromNode, fe = g.fromEdge;
 
     function h(n) {
       const p = nodes[n];
@@ -466,8 +467,14 @@
 
     while (open.n.length) {
       const u = open.pop();
+      if (closed[u] === run) continue;            // stale heap entry, already settled
+      closed[u] = run;
       const f = gs[u] + h(u);
       if (f >= bestTotal) break;                 // nothing left can beat what we have
+      // Only DISTINCT settlements are counted, so an exhaustive search of a
+      // disconnected island ends by emptying the heap and returns null quietly
+      // — a waypoint on an unreachable street must not warn every 3 seconds.
+      // Tripping this cap means something pathological, and that is worth saying.
       if (++pops > cap) {
         console.warn('[roadgraph] route abandoned after ' + cap +
           ' node expansions (' + Math.round(from.x) + ',' + Math.round(from.z) + ') -> (' +

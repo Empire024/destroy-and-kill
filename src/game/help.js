@@ -32,8 +32,14 @@
   const sections = [];
 
   /* ---------- the engine's own bindings ----------
-   * Read off the keydown handler at index.html:3106 and the mobile control
-   * markup at index.html:363. Keep this in sync if the engine rebinds. */
+   * Read off the engine's window keydown handler in index.html (search
+   * `requestManualShift`) and the #mobileControls markup. Line numbers move, so
+   * grep rather than trusting one. Keep this in sync if the engine rebinds:
+   * a help panel that lies is worse than no help panel.
+   *
+   * X/U upshift and Y/Z downshift are deliberate pairs — Z and Y swap places on
+   * QWERTZ, so whichever two keys sit under your left hand, one pair shifts.
+   * Mute is N because M is the full map and U went to the shifters. */
   const ENGINE_SECTIONS = [
     ['DRIVING', [
       ['W  ↑', 'Throttle'],
@@ -41,8 +47,8 @@
       ['A  D  ←  →', 'Steer'],
       ['Space', 'Handbrake — the drift button'],
       ['Shift', 'Nitro'],
-      ['X  or  Z', 'Shift up'],
-      ['Y', 'Shift down'],
+      ['X  or  U', 'Shift up'],
+      ['Y  or  Z', 'Shift down'],
       ['R', 'Reset car — unstick, repair, clear 2 wanted stars']
     ]],
     ['ON FOOT & WORLD', [
@@ -55,7 +61,7 @@
       ['H', 'This panel']
     ]],
     ['SYSTEM', [
-      ['U', 'Mute / unmute'],
+      ['N', 'Mute / unmute'],
       ['Esc', 'Menu — map and vehicle select'],
       ['F2', 'Steering wheel & pedals setup']
     ]]

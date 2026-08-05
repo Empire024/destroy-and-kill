@@ -53,7 +53,13 @@ edited directly.
 - **Windows PowerShell 5.1 mangles the HTML's UTF-8** — never edit files with
   `Set-Content`/`Get-Content`. Use the editor tools or Node.
 - **rAF freezes in hidden tabs** — automated playtests must drive frames with
-  `GAME_DEBUG.step(1/60)`.
+  `GAME_DEBUG.step(frameCount, dt)` — the FIRST argument is how many frames
+  (default 1), the second the per-frame delta (default 1/60). `step(180)` is
+  three seconds. `step(1/60)` runs ONE frame, not one sixtieth of one — the
+  loop condition truncates. step() ticks GameSystems too (since commit after
+  the QA finding; before that, system update() was dead under step).
+- **`GAME_DEBUG.render` reads zeros until a real render** — step() never draws.
+  Call `GAME_DEBUG.frame()` once before sampling render stats.
 - `groundHeightAt(x,z,currentY)` — currentY disambiguates stacked surfaces;
   forgetting it breaks garages/overpasses.
 - Colliders may carry `baseY`/`h`; ignore them and you collide with overpass

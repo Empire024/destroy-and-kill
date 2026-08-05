@@ -62,15 +62,26 @@
   var SUN_TWILIGHT = 0xffa055; // low orange sun
   var HEMI_SKY_DAY = 0x9fc4f0, HEMI_GROUND_DAY = 0x6b6858;
   var HEMI_SKY_TW = 0xd08a5e, HEMI_GROUND_TW = 0x4a3a30;
-  var AMB_DAY = 0xbfc9dd, AMB_TW = 0x9a7a70;
+  var AMB_DAY = 0x9aa8bd, AMB_TW = 0x8a6c64;
 
   // Absolute sky/fog targets the tint solver aims at (see the header).
   var SKY_DAY = 0x9dbbe0;
   var SKY_TWILIGHT = 0xc2703c;
   var FOGMUL_DAY = 0.72, FOGMUL_TWILIGHT = 0.9;
 
-  // Intensity multipliers over ctx.lights.base at full day.
-  var KEY_DAY_MUL = 2.2, HEMI_DAY_MUL = 1.9, AMB_DAY_MUL = 1.45;
+  /* Intensity multipliers over ctx.lights.base at full day.
+   *
+   * These are lower than they look like they should be, on purpose. The colour
+   * lerp above is ALSO a brightening — #9db0ff → #fff2dc is +32% luminance on the
+   * key, #6076aa → #9fc4f0 is +65% on the hemisphere — so the two compound. The
+   * first pass ran 2.2 / 1.9 / 1.45 with brighter day colours, which put the
+   * combined day-vs-night illumination at 3.0× and clipped Prague's pale render
+   * to flat white: this renderer has no tone mapping, so everything past 1.0 is
+   * simply lost. Measured as intensity × colour luminance, these land at 2.0×,
+   * which reads as daylight on worlds whose materials were authored for a night
+   * city. Ambient goes DOWN by day (0.85) — it exists to lift night shadows, and
+   * keeping it up in sunlight only flattens the contrast the sun just created. */
+  var KEY_DAY_MUL = 1.75, HEMI_DAY_MUL = 1.15, AMB_DAY_MUL = 0.85;
   var HEADLIGHT_DAY_MUL = 0.25;
   var EMISSIVE_DAY_MUL = 0.32;   // neon signs pull back in daylight
 

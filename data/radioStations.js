@@ -67,6 +67,26 @@
     return s;
   }
 
+  /* Make-up gain for a band-limited noise voice.
+   *
+   * This exists because the first version of this file was measured and found
+   * to be wrong. Full-scale white noise has an RMS near 0.577, but pushing it
+   * through a bandpass throws away everything outside the band: a Q of 5.5 at
+   * 1.2 kHz keeps a 218 Hz slice of a 22 kHz spectrum, which is ~20 dB of loss
+   * before the note's own gain is applied at all. Gains picked by eye as if that
+   * loss did not happen produced a SCANNER whose transmissions measured QUIETER
+   * than its own room tone (peak RMS 0.0078 against a 0.0054 noise floor — i.e.
+   * inaudible), and a DRIFT FM snare 18 dB under its kick.
+   *
+   * So: every filtered-noise voice states the band it keeps, and this returns
+   * the factor that puts it back at full-scale RMS. The gain written at the call
+   * site is then an honest 0..1 level again. */
+  function noiseMakeup(actx, bandwidthHz) {
+    var nyquist = actx.sampleRate / 2;
+    var keep = Math.max(20, Math.min(nyquist, bandwidthHz)) / nyquist;
+    return 1 / Math.sqrt(keep);
+  }
+
   /** MIDI note number -> Hz. The patterns below are written in note numbers
    *  because transposing a chord is then addition, not a frequency table. */
   function hz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
@@ -234,10 +254,14 @@
 
     var step = 0, next = 0, live = false, pat = 0;
 
+    var SNARE_MAKEUP = noiseMakeup(actx, 1750 / 0.85);
+    var HAT_MAKEUP = noiseMakeup(actx, actx.sampleRate / 2 - 7200);
+    var SWEEP_MAKEUP = noiseMakeup(actx, 2000 / 1.6);
+
     function kick(t) {
       var o = osc(actx, 'sine', 165, t), g = actx.createGain();
       o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
-      g.gain.setValueAtTime(1.0, t);
+      g.gain.setValueAtTime(0.75, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
       o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.22);
     }
@@ -246,7 +270,7 @@
       var n = noiseSource(actx);
       var f = actx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1750; f.Q.value = 0.85;
       var g = actx.createGain();
-      g.gain.setValueAtTime(soft ? 0.16 : 0.5, t);
+      g.gain.setValueAtTime((soft ? 0.11 : 0.34) * SNARE_MAKEUP, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + (soft ? 0.06 : 0.16));
       n.connect(f); f.connect(g); g.connect(out);
       n.start(t); n.stop(t + 0.2);
@@ -261,7 +285,7 @@
       var n = noiseSource(actx);
       var f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7200;
       var g = actx.createGain();
-      g.gain.setValueAtTime(open ? 0.10 : 0.055, t);
+      g.gain.setValueAtTime((open ? 0.13 : 0.07) * HAT_MAKEUP, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + (open ? 0.16 : 0.035));
       n.connect(f); f.connect(g); g.connect(out);
       n.start(t); n.stop(t + 0.2);

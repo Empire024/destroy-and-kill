@@ -142,14 +142,14 @@
   function clearFx() { while (fxLive.length) retireFx(fxLive.length - 1); }
 
   function muzzleFlash(ctx, x, y, z, heading) {
-    const e = takeFx(ctx, flashGeo, 0xffd66b, .9);
+    const e = takeFx(ctx, 'flash', 0xffd66b, .9);
     const fx = Math.sin(heading), fz = Math.cos(heading);
     e.mesh.position.set(x + fx * 1.1, y, z + fz * 1.1);
     e.mesh.scale.set(.5, .5, .5);
     e.life = e.max = .055; e.peak = .9; e.shrink = false;
   }
   function tracer(ctx, x, y, z, heading, len) {
-    const e = takeFx(ctx, tracerGeo, 0xfff2c4, .5);
+    const e = takeFx(ctx, 'tracer', 0xfff2c4, .5);
     const fx = Math.sin(heading), fz = Math.cos(heading);
     e.mesh.position.set(x + fx * len * .5, y, z + fz * len * .5);
     e.mesh.rotation.set(0, heading + Math.PI / 2, 0);
@@ -157,7 +157,7 @@
     e.life = e.max = .05; e.peak = .5; e.shrink = false;
   }
   function impact(ctx, x, y, z, color) {
-    const e = takeFx(ctx, sparkGeo, color === undefined ? 0xffc46b : color, .95);
+    const e = takeFx(ctx, 'spark', color === undefined ? 0xffc46b : color, .95);
     e.mesh.position.set(x, y, z);
     e.mesh.scale.set(.35, .35, .35);
     e.life = e.max = .2; e.peak = .95; e.shrink = true; e.grow = true; e.size = .45;
@@ -499,8 +499,9 @@
     of.group.rotation.set(-Math.PI / 2, of.heading, 0);
     ctx.fx.toast('👮 Officer down', '#ff3b3b');
     ctx.engine.addScore(25);
-    // The car is his; with him out of the picture it goes back to the engine.
-    if (of.cop && of.cop._foot) { of.cop._foot = null; }
+    // The car is his; with him out of the picture it goes back to the engine —
+    // and it is marked spent, so the same car does not produce a second officer.
+    if (of.cop) { of.cop._foot = null; of.cop._footSpent = true; }
   }
 
   function poseOfficer(of, dt, moving, aiming) {
@@ -567,7 +568,11 @@
       speed: Math.hypot(cop.vx || 0, cop.vz || 0),
       x: cop.x, z: cop.z, y: cop.y === undefined ? 0 : cop.y, heading: cop.heading,
       officer: null, shotCd: 0, firingTime: 0, side: Math.random() < .5 ? 1 : -1,
-      flankX: 0, flankZ: 0
+      flankX: 0, flankZ: 0,
+      // The engine has already driven this cop once this frame; integrating our
+      // own step on top of that would double its travel for one frame, which
+      // reads as a hitch. Take the wheel from the NEXT frame.
+      fresh: true
     };
   }
 
@@ -603,7 +608,7 @@
     if (wanted >= 2 && idleTimer > ENGAGE_HOLD && !fleeing && !ctx.player.dead && !ctx.player.dying) {
       for (const c of cops) {
         if (engaged >= MAX_FOOT_OFFICERS) break;
-        if (c._foot || c._bDead) continue;
+        if (c._foot || c._bDead || c._footSpent) continue;
         if (dist2d(c.x, c.z, px, pz) > ENGAGE_RANGE) continue;
         beginStop(ctx, c); engaged++;
       }
@@ -622,9 +627,12 @@
       if (st.state === 'STOPPING') {
         // Braking to a stop under our own control — 26 u/s^2, which is a firm but
         // survivable stop from chase speed, and visibly a car pulling over.
-        st.speed = Math.max(0, st.speed - 26 * dt);
-        st.x += Math.sin(st.heading) * st.speed * dt;
-        st.z += Math.cos(st.heading) * st.speed * dt;
+        if (st.fresh) st.fresh = false;
+        else {
+          st.speed = Math.max(0, st.speed - 26 * dt);
+          st.x += Math.sin(st.heading) * st.speed * dt;
+          st.z += Math.cos(st.heading) * st.speed * dt;
+        }
         st.y = ctx.world.groundHeightAt(st.x, st.z, st.y);
         pinCop(cop, st);
         if (st.speed < 1 || st.t > 3) {
@@ -756,7 +764,9 @@
     onKey(k, ev, ctx) {
       if (!ctx.engine.started || ctx.engine.selectionOpen || ctx.player.dead || ctx.player.dying) return false;
       if (k === 'q') { cycleWeapon(ctx); return true; }
-      if (BY_SLOT[k]) { equip(ctx, inv.equipped === BY_SLOT[k] ? null : BY_SLOT[k]); return true; }
+      // Direct select, not a toggle: 2 always means "pistol in hand", however
+      // many times it is pressed. Holstering is Q's job.
+      if (BY_SLOT[k]) { equip(ctx, BY_SLOT[k]); return true; }
       // Everything below only exists while something is drawn — holstered, these
       // keys belong to whoever else wants them.
       if (!inv.equipped) return false;

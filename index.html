@@ -577,6 +577,7 @@ window.addEventListener('unhandledrejection', (e) => {
 <script src="data/radioStations.js"></script>
 <script src="data/trafficProfiles.js"></script>
 <script src="src/game/save.js"></script>
+<script src="src/game/help.js"></script>
 <script src="src/game/interact.js"></script>
 <script src="src/game/roadgraph.js"></script>
 <script src="src/game/progression.js"></script>
@@ -3148,11 +3149,13 @@ let carSelectionOpen=true;
 addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
   if(k==='f2'){e.preventDefault();wheelSetupOpen?closeWheelSetup():openWheelSetup();return;}
   if(wheelSetupOpen){if(k==='escape')closeWheelSetup();return;}
-  if(k==='escape'&&started){e.preventDefault();openVehicleSelection();return;}
   // Expansion systems get first refusal on keys (map, radio, weapons, …), but
   // never on the driving keys — a broken system must not eat the controls.
+  // Escape routes through them too (a system may consume it ONLY to close its
+  // own open panel — help does this); an unconsumed Escape still opens the menu.
   const DRIVE_KEYS=[' ','w','a','s','d','arrowup','arrowdown','arrowleft','arrowright','shift'];
   if(window.GameSystems&&!DRIVE_KEYS.includes(k)&&GameSystems.onKey(k,e)){e.preventDefault();return;}
+  if(k==='escape'&&started){e.preventDefault();openVehicleSelection();return;}
   keys[k]=true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright','tab'].includes(k)) e.preventDefault();
   if(dead||dying) return;   // no controls once the car is on fire, nor on the WASTED screen
@@ -4951,7 +4954,12 @@ window.GAME_DEBUG={
       rotX:+e.mesh.rotation.x.toFixed(2),rotZ:+e.mesh.rotation.z.toFixed(2),
       vy:+e.vy.toFixed(1),bounces:e.bounces,life:+e.life.toFixed(1),inScene:!!e.mesh.parent});},
   /** Run the fixed-step simulation without rAF — lets headless tests drive. */
-  step(n,dt){n=n||1;dt=dt||1/60;for(let i=0;i<n;i++){updateWheelSystem(dt);update(dt);}return this.car;},
+  // step(FRAME COUNT, dt) — n is how many frames, dt the per-frame delta.
+  // Ticks the expansion systems too: rAF is frozen in a hidden tab, so if this
+  // didn't pump GameSystems, every automated playtest of a system's update()
+  // would be testing dead code (found the hard way — thanks, QA).
+  step(n,dt){n=n||1;dt=dt||1/60;for(let i=0;i<n;i++){updateWheelSystem(dt);update(dt);
+    if(window.GameSystems)GameSystems.update(dt,started&&!carSelectionOpen&&!dead&&!dying);}return this.car;},
   frame(){renderer.render(scene,camera);return this.render;}
 };
 

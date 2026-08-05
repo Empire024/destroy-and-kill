@@ -220,7 +220,7 @@
     // Anything the blast could not take (already dying, already burning) is
     // handed to the population cull rather than left driving around at 0 hp.
     if (ctx.actors.traffic.indexOf(obj) >= 0 && !obj.burning) obj.dead = true;
-    ctx.events.emit('vehicle:stage', { target: obj, stage: 'exploded', x: x, z: z, y: y });
+    ctx.events.emit('vehicle:stage', { target: obj, stage: 'exploded', integrity: 0, x: x, z: z, y: y });
   }
 
   /* ---- public damage entry ------------------------------------------------ */

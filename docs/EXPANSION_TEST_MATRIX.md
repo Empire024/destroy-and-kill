@@ -155,7 +155,7 @@ Contract: `api('nav').addPOI({id,worldId,x,z,icon,label,kind,state})` and
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Full map opens | `tap('m')`, then `tap('tab')` | Map opens both ways; `C.engine.fullMapOpen` true. Mute must NOT toggle (mute is `U`) | untested | — |
+| Full map opens | `tap('m')`, then `tap('tab')` | Map opens both ways; `C.engine.fullMapOpen` true. Mute must NOT toggle (mute is `N`) | untested | — |
 | Map closes again | `tap('m')` twice | Closes; no stuck overlay; driving input still reaches the car (`hold('w',true); tick(30)` moves it) | untested | — |
 | Minimap draws the world | Compare the minimap against `GAME_DEBUG.world` road data on all three maps | Roads drawn per world, player arrow at `C.player.x/z`, correct rotation | untested | — |
 | POIs render on both maps | `api('nav').addPOI({id:'qa1',worldId:C.world.id,x:C.player.x+50,z:C.player.z,icon:'★',label:'QA',kind:'test',state:()=>({open:true,done:false})})`; open both maps | Icon appears on minimap and full map at the right spot | untested | — |
@@ -288,12 +288,12 @@ the harness note).
 | Steering both ways | `hold('a',true); tick(60)`, then `hold('d',true)` | Heading changes in opposite directions; no drift in the neutral position | untested | — |
 | Handbrake drifts | At speed, `hold(' ',true); hold('a',true); tick(90)` | `GAME_DEBUG.car.driftAngle` and `rearSlip` rise; drift meter shows; combo banks | untested | — |
 | Nitro | `hold('shift',true)` with `stats.nitro > 0` | Speed rises; `GAME_DEBUG.nitro` drains and refills after release | untested | — |
-| Manual shifting | `tap('x')`, `tap('z')`, `tap('y')` | `x` and `z` both upshift, `y` downshifts; `GAME_DEBUG.car.gear` follows | untested | — |
+| Manual shifting | Test each key **alone**: `GAME_DEBUG.start('neon','proDrift')`, `hold('w',true); tick(240); hold('w',false); tick(90)`, note `GAME_DEBUG.car.gear`, `tap(k)`, `tick(90)`, re-read. Repeat for `x`, `u`, `y`, `z` | `x` and `u` both upshift; `y` and `z` both downshift. The pairs are QWERTZ-proof — `z` upshifting is the old binding and now a regression, and `u` must NOT mute. **Do not tap two shift keys in quick succession**: a shift lockout swallows the second one and it reads as an unbound key. Measured 2026-08-05: 20 frames apart the second tap is eaten, 90 frames apart all four work | untested | — |
 | Reverse | Brake to a full stop, keep holding `s`, `tick(120)` | `GAME_DEBUG.car.reverse` true, speed goes negative | untested | — |
 | Rev limiter is not an alarm | Hold throttle in first to the limiter for `tick(300)` | Limiter engages, `car.limiter` true, and the sound is a limiter, not a repeating alarm tone (regression from 61a8c34) | untested | — |
 | Reset unsticks | `GAME_DEBUG.teleport()` out of bounds; `tap('r')` | Returns to world spawn, hp 100, wanted reduced by 2 | untested | — |
 | Enter / exit car | `tap('e')` twice | Out on foot then back in; `C.player.onFoot` toggles; no camera jump through the ground | untested | — |
-| Mute is U, not M | `tap('u')` | Audio mutes, toast shown. `tap('m')` must open the map instead | untested | — |
+| Mute is N, not M or U | `tap('n')`, then `tap('m')`, then `tap('u')` | `n` mutes with a toast; `m` opens the map; `u` upshifts. Any of the three doing another's job is a regression | untested | — |
 | Help panel toggles | `tap('h')` twice | Panel opens then closes; `api('help').isOpen` follows; `#helpPanel` has `pointer-events:auto` while `#helpRoot` and `#systemsUI` stay `none` | untested | — |
 | Help lists real bindings | `tap('h')` and read every row | Every key listed actually does what it says. This table and the panel must not drift apart | untested | — |
 | Help grows with systems | `api('help').addControls('QA',[['J','test']])`; reopen | Section appears. Re-adding the same title replaces it in place rather than duplicating | untested | — |

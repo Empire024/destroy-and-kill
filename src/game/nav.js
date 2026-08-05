@@ -501,7 +501,14 @@
       if (routeTimer <= 0) { recomputeRoute(); return; }
       if (strayTimer <= 0) {
         strayTimer = STRAY_CHECK;
-        if (routePoly && distToPoly(routePoly, ctx.player.x, ctx.player.z) > STRAY_DIST) recomputeRoute();
+        if (routePoly && distToPoly(routePoly, ctx.player.x, ctx.player.z) > STRAY_DIST) {
+          // A player who is off the network entirely — in a car park, on a roof,
+          // wrecked in a field — is off the line on every single test. Rerouting
+          // four times a second there would cost more than the feature is worth,
+          // so a stray reroute buys a second of quiet.
+          strayTimer = 1;
+          recomputeRoute();
+        }
       }
     },
 
