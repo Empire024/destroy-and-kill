@@ -5,21 +5,30 @@ written** — exact keys, exact `GAME_DEBUG` / `GameSystems` calls, exact expect
 values. If a row cannot be run as written, that is a bug in this document; fix
 the row rather than improvising, so the next run means the same thing.
 
-Status vocabulary: `untested` · `pass` · `fail` · `blocked` (dependency missing)
-· `n/a` (feature cut). Evidence = the console output, number, or screenshot path
-that proves the result. "Looked fine" is not evidence.
+Status vocabulary: `untested` · `pass` · `partial` · `fail` · `blocked`
+(dependency missing) · `n/a` (feature cut). Evidence = the console output,
+number, or screenshot path that proves the result. "Looked fine" is not
+evidence.
+
+**Last run: 2026-08-05, commit `86e1b92`, Chrome 150 / Windows 11 (Win32).**
+Findings and totals: `docs/EXPANSION_TEST_REPORT.md`.
 
 ---
 
 ## How to run these tests
 
-Serve the game (`START_GAME.bat`, or `node serve_game.js`) and open
-<http://127.0.0.1:8765/> **in your own tab**; close it when you are done. Other
-agents share this origin.
+Serve the game (`START_GAME.bat`, or `node serve_game.js`) and open it **in your
+own tab**; close it when you are done.
+
+**Use `http://localhost:8765/`, not `http://127.0.0.1:8765/`.** They are
+different origins with different `localStorage`, and the 127.0.0.1 origin is
+where every other agent's tab lives. The 2026-08-05 run lost a block of
+progression evidence to another session overwriting `dk_save_v2` mid-run before
+switching. Isolate first, then trust your numbers.
 
 ### The harness, accurately
 
-Three things about the test harness will silently invalidate a run if you do not
+Four things about the test harness will silently invalidate a run if you do not
 know them:
 
 1. **`requestAnimationFrame` is throttled to a near-stop in a hidden or
@@ -27,63 +36,50 @@ know them:
    explicitly. **Never report an FPS number measured this way** — draw calls and
    triangle counts are real, frame rate is not.
 2. **`GAME_DEBUG.step(n, dt)` takes a frame COUNT first, not a delta.**
-   `step(180, 1/60)` is three seconds. `step(1/60)` happens to run exactly one
-   frame at the default `dt`, which is a coincidence of `for(i=0;i<0.0167;i++)`,
-   not an interface. Always pass both arguments.
+   `step(180, 1/60)` is three seconds. Always pass both arguments.
 3. **`GAME_DEBUG.step` ticks the expansion systems for you — do not pump them
-   yourself as well.** It used to drive only the engine simulation, which meant
-   no system's `update()` ever ran in a hidden tab; that was fixed on
-   2026-08-05 and `step()` now calls `GameSystems.update` the way the rAF
-   `loop()` does. Calling `GameSystems.update` alongside `step()` runs every
-   system **twice per frame** (measured: 20 updates for 10 frames), so anything
-   time-based — cooldowns, day/night, radio, pursuit timers — advances at
-   double rate and the run is quietly wrong. Just use `tick()` below.
+   yourself as well.** Calling `GameSystems.update` alongside `step()` runs
+   every system twice per frame, so cooldowns, day/night, radio and pursuit
+   timers advance at double rate and the run is quietly wrong.
 4. **`GAME_DEBUG.render` reads zero until something has actually rendered.**
    `renderer.info` is only populated by a real draw, and `step()` does not draw.
-   Call `GAME_DEBUG.frame()` first — that is what `stats()` below does. Reading
-   the counters straight after `tick()` reports `{calls:0, triangles:0}` and
-   looks like a catastrophic optimisation win rather than an empty measurement.
+   Call `GAME_DEBUG.frame()` first — that is what `stats()` below does.
 
 ### Paste this preamble first
 
 ```js
 const S = GameSystems, C = S.context();
 const api = id => S.api(id);                       // null when a system is absent
-/** N fixed-step frames: engine simulation AND expansion systems, exactly once each. */
 const tick = (n = 1, dt = 1/60) => GAME_DEBUG.step(n, dt);
-/** Hold/release a driving key (bypasses system routing, like the real drive keys). */
 const hold = (k, down) => GAME_DEBUG.press(k, down);
-/** A real keypress through the engine's own routing — use this for system keys. */
 const tap = k => window.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
-/** Route a key straight at the systems, skipping the engine. Use only to isolate. */
 const sysKey = k => S.onKey(k, new KeyboardEvent('keydown', {key: k}));
 const toasts = () => Array.from(document.querySelectorAll('.toast')).map(e => e.textContent);
-/** Renderer counters. Draws a real frame first — they are zero until something renders. */
 const stats = () => { GAME_DEBUG.frame(); return GAME_DEBUG.render; };
 ```
 
-Sanity check that the preamble is live before you trust a run — on NEON with
-`proDrift`, `GAME_DEBUG.start('neon','proDrift'); hold('w',true); tick(180)`
-should move the car roughly 190 units to about 210 mph in gear 3, and `stats()`
-should report a few hundred draw calls. All zeros means you are not driving the
-simulation.
+Sanity check before you trust a run: `GAME_DEBUG.start('neon','streetDrift');
+hold('w',true); tick(180)` moves the car ~190 units to ~210 mph in gear 3, and
+`stats()` reports a few hundred draw calls. All zeros means you are not driving
+the simulation.
+
+**Do not leave a probe system registered.** Registering
+`{id:'qa-greedy', onKey:()=>true}` for the greedy-system row and forgetting it
+eats every non-drive key for the rest of the session; in the 2026-08-05 run it
+silently failed six unrelated rows before it was spotted. Run that row last, or
+reload after it.
 
 ### Key routing
 
 Systems get first refusal on every key **except** the driving keys
-(`W A S D`, arrows, `Space`, `Shift`) — a broken system must never be able to
-eat the controls. `F2` and, while the wheel panel is open, `Escape` are handled
-by the engine before systems see them.
-
-`Escape` reaches systems as of 2026-08-05 (the branch was moved below the
-routing call). It should close whatever a system is showing, and fall through to
-the engine's vehicle-select menu only when no system claims it — verify both
-halves, since a system that consumes `Escape` unconditionally locks the player
-out of the menu.
+(`W A S D`, arrows, `Space`, `Shift`). `F2` and, while the wheel panel is open,
+`Escape` are handled by the engine before systems see them. `Escape` otherwise
+reaches systems and should close whatever a system is showing, falling through
+to the vehicle-select menu only when no system claims it.
 
 ### localStorage discipline
 
-Snapshot before, restore after — several agents share this origin:
+Snapshot before, restore after:
 
 ```js
 const KEYS = ['dk_save_v2','dk_save_v2_corrupt','gta6vc_save'];
@@ -92,103 +88,94 @@ const snap = Object.fromEntries(KEYS.map(k => [k, localStorage.getItem(k)]));
 KEYS.forEach(k => snap[k] === null ? localStorage.removeItem(k) : localStorage.setItem(k, snap[k]));
 ```
 
-**Never touch `destroy_kill_wheel_v1`** — it is the wheel calibration, engine
-owned, and re-pairing a wheel by hand is not a two-minute job.
+**Never touch `destroy_kill_wheel_v1`** — wheel calibration, engine owned.
 
 ---
 
 ## 0. Preflight
 
-Run before every session. If preflight fails, stop and report — downstream rows
-will produce noise, not information.
-
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Systems boot clean | Load the page, then `S.report()` | `disabled` empty, `failures` empty. Record `live` — every later row depends on which ids are present | untested | — |
-| No console errors | Open devtools before loading; read all console output | No errors from the game. A Chrome extension message-channel warning is pre-existing noise and does not count | untested | — |
-| No failed requests | Network tab, filter by status ≥ 400 | Nothing. A 404 on a `data/*.js` or `src/game/*.js` file means a system silently did not register | untested | — |
-| Legacy build still runs | Open `gta_vice_city_destroy_and_kill_v31.html` | Loads and drives. The baseline promises it stays runnable | untested | — |
-| All three maps boot | `GAME_DEBUG.start('legacy','proDrift')`, then `setMap('neon')`, `setMap('prague')`, `tick(30)` after each | Each returns true, no console error, `GAME_DEBUG.mapId` matches | untested | — |
+| Systems boot clean | Load the page, then `S.report()` | `disabled` empty, `failures` empty | pass | 16/16 live: save, roadgraph, nav, progression, interact, daynight, coast, vdamage, radio, bodyshop, combat, events, destructibles, traffic, camera, help. `disabled:[]`, `failures:[]` |
+| No console errors | Read all console output | No errors from the game | pass | Only the pre-existing Chrome extension message-channel warning, plus the `[save]` error from the deliberate corrupt-save row. 3 `[quarry] pillar … skipped — it stands in a road` warnings are authored-content notices, not errors |
+| No failed requests | Watch for 404s on `data/*.js` / `src/game/*.js` | Nothing | pass | All 16 systems registered and all 6 coin routes / 4 zones / 5 races resolved, which cannot happen with a missing data file. No load errors in console |
+| Legacy v31 build preserved | `git show v31-pristine:gta_vice_city_destroy_and_kill_v31.html` | The pristine build is recoverable | partial | Preserved at tag **`v31-pristine`** (commit `cde55e5`, "Preservation checkpoint: pristine v31 package"), extracted clean at **273,443 bytes / 2785 lines**. The file of that name at the repo root is now a 265-byte redirect stub for old bookmarks — by design, see README. **Not launched in a browser**, and note it loads Three r128 from `cdnjs.cloudflare.com`, so unlike the shipping build it is not offline-runnable — its "still runs" promise depends on that CDN |
+| Both maps boot | `GAME_DEBUG.start('neon',…)`, `setMap('prague')`, `setMap('neon')`, `tick(60)` after each | Each returns true, no console error, `GAME_DEBUG.mapId` matches | pass | 3 full NEON↔Prague cycles clean, `mapId` tracked each time. (Was "all three maps" — `legacy` is removed by design) |
+| Events resolve once | Count `[events] resolved …` lines at boot | One block | partial | Every coin route, zone and race resolves **twice** at boot (boot + `worldChanged` replay). Idempotent — 8 POIs, no duplicate ids, 278 coin instances either way — but the work is done twice. See finding F10 |
 
 ---
 
 ## 1. Progression
 
-Depends on `save`. Contract: `docs/SAVE_SCHEMA.md`. Owner detail (conversion
-rates, prices) lives in `docs/handoffs/progression.md` — where a row says
-"record the rate", fill the number in on first run and treat later drift as a
-regression.
+Contract: `docs/SAVE_SCHEMA.md`. Unlock rules read from `api('progression').catalogue()`.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Wallet exists and persists | `GAME_DEBUG.start('neon','proDrift')`; `api('save').set('progression.wallet', 5000)`; `api('save').flush()`; reload; `api('save').get('progression.wallet')` | `5000` | untested | — |
-| Score converts to wallet | Note `api('save').get('progression.wallet',0)`; `C.engine.addScore(10000)`; `tick(120)`; re-read | Wallet rises. Record the rate and whether score is spent or mirrored | untested | — |
-| Cheat cash is not money | `C.stats.cash` after `tick(60)` | Still pinned at 999999999999 by `hud()`, and **not** equal to the wallet. If the wallet ever shows ≥ 1e9 the cheat has leaked into progression | untested | — |
-| Buy a vehicle | With enough wallet, buy via `api('progression')`'s documented purchase call | `progression.ownedVehicles` gains the tune key; wallet drops by the price; a toast confirms | untested | — |
-| Cannot buy twice | Repeat the purchase | Rejected, wallet unchanged, honest toast. No duplicate in `ownedVehicles` | untested | — |
-| Cannot overspend | Set wallet below the cheapest price; attempt a purchase | Rejected with a toast naming the shortfall; wallet unchanged | untested | — |
-| Owned vehicles survive reload | Buy, `api('save').flush()`, reload, read `progression.ownedVehicles` | Same array | untested | — |
-| Current vehicle restored | Select a vehicle, reload, start | `C.vehicles.currentKey` matches `progression.currentVehicle` | untested | — |
-| Paint persists per vehicle | Set a colour on two different tunes; reload | `progression.paintByVehicle` has both; each vehicle loads its own colour. With no entry, `progression.defaultPaint` is used | untested | — |
-| Unlocks gate content | Read `progression.unlocks`; attempt a gated action while the flag is false, then set it true and retry | Blocked then allowed, with a toast explaining the gate both times | untested | — |
-| Reset clears progression only | `api('save').set('prefs.radioVolume',0.42)`; `GAME_DEBUG_SAVE.reset()` | `progression` is `{}`; `prefs.radioVolume` still `0.42`; `meta` intact; `destroy_kill_wheel_v1` still non-null; a `save:reset` event fires | untested | — |
+| Wallet exists and persists | `set('progression.wallet',…)`, `flush()`, reload | Value returns | pass | Survived reload as part of the full progression reload row below |
+| Score converts to wallet | `C.engine.addScore(10000)`, `tick(120)`, re-read wallet | Wallet rises; record the rate | untested | Not isolated. Wallet does rise from race rewards (`payReward`) and `credit()`; the score→wallet path specifically was not measured |
+| Cheat cash is not money | `C.stats.cash` vs `p.wallet()` while running | Pinned cheat value, not the wallet | pass | `stats.cash` 999999999999 while running, `wallet` 10830 — separate. (Reads 0 before `start()`; sample only while running) |
+| Buy a vehicle | `p.credit(1500)`, `p.purchase('hauler')` (costs 1200) | Owned, wallet drops | pass | `{ok:true}`, wallet 1500→300, `isOwned('hauler')` true |
+| Cannot buy twice | Repeat the purchase | Rejected, no duplicate | pass | `{ok:false, reason:"already owned"}`, wallet 300, exactly 1 `hauler` in `owned()` |
+| Cannot overspend | Wallet 0, buy a 1200 car | Rejected naming the shortfall | pass | `{ok:false, reason:"need $1,200 more"}`, wallet unchanged 0, not owned. (Reason is returned to the caller and shown in the shop modal, not as a toast) |
+| Owned vehicles survive reload | Buy, `flush()`, reload | Same array | pass | After reload: `["commuter","streetDrift","proDrift","hauler"]`, wallet 300, raceWins 3 |
+| Current vehicle restored | Select, reload | `currentVehicle()` matches | pass | `hauler` before and after reload |
+| Paint persists per vehicle | Paint two cars, reload | Both entries survive | pass | `paintByVehicle {streetDrift:65280, hauler:16711680}` before and after reload |
+| 3-wins unlock (PRO DRIFT) | Win 3 races; check after each | Locked at 1 and 2, unlocked at 3 | pass | Granted path: false, false, then unlocked+owned with toast `🔑 PRO DRIFT is yours…`. Real-race path: CHROMA SPRINT 87.03s → DOCKYARD CIRCUIT 156.63s → SUMMIT DESCENT 134.42s, `raceWins` 1→2→3, PRO DRIFT unlocked+owned on the third |
+| GRIPPER gate | `p.unlockProgress('gripper')` | Gated with a legible requirement | pass | Rule `{mixed, raceWins:10, zoneRecords:3, coins:150}`; progress string `3/10 race wins · 0/3 zone records · 0/150 coins`; `isUnlocked` false |
+| Coins unlock fires organically | Collect 25 coins | PEPPER GT unlocks | pass | Fired mid-race at 25 coins: `🔑 PEPPER GT is yours — press V to switch…` |
+| Reset clears progression only | `GAME_DEBUG_SAVE.reset()` | progression cleared, prefs/meta kept | pass | `progression` re-seeded to starter cars only; `prefs.radioVolume` still 0.42, `prefs.helpSeen` kept; `meta.lastWorld` kept; `save:reset` fired; `destroy_kill_wheel_v1` byte-identical |
 
 ---
 
 ## 2. Body shops
 
-Depends on `progression`, `nav` (POI icons), `save` (`shopCooldowns`).
-
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Shops registered as POIs | `api('nav')` POI list after `GAME_DEBUG.start('neon','proDrift')` | Every body shop appears with `kind`, `label`, and a `state()` that reports open/closed | untested | — |
-| Shop icons on both maps | Open the minimap and press `M` for the full map | Shop icons drawn on both, at the same world positions | untested | — |
-| Enter a shop | `GAME_DEBUG.teleport(x, z, 0, y)` onto a shop (use its POI coords, and pass `atY` on multi-level maps); `tick(60)` | `shop:enter` event fires; the interaction prompt appears | untested | — |
-| Repaint applies and persists | Buy a colour; check `C.vehicles.color` and the car mesh material; reload | Mesh colour changed immediately; `progression.paintByVehicle[key]` updated; survives reload | untested | — |
-| Tuning applies to handling | Record `GAME_DEBUG.car.mph` after `hold('w',true); tick(180)`; buy an engine upgrade; repeat | Measurably faster, and `progression.tuneByVehicle[key]` records it | untested | — |
-| Cooldown honoured | Use a shop, leave, return immediately | Refused until the cooldown expires; `progression.shopCooldowns[shopId]` is an absolute epoch ms in the future | untested | — |
-| Cooldown survives reload | Use a shop, reload, return | Still on cooldown — the stored value is absolute, not a countdown | untested | — |
-| Closed at night | `api('daynight')` set to night (or wait for `time:phase` = `night`); approach a shop | Refused with an honest toast, `state().open` false, icon dimmed | untested | — |
+| Shops registered as POIs | `api('nav').pois()` filtered to `kind==='shop'` | One per shop, with `state()` | pass | 3 on NEON — CHROME & CO., DOCKSIDE PANEL, plus the strip shop — each `{open:true}`; 4th (`prague-nove`) on Prague |
+| Shops built in world | `GAME_DEBUG_SHOPS.list()` | All `built:true` with a mechanic | pass | 4 shops, all `built:true`, each with a mechanic at a fixed offset. Boot log: `[bodyshop] ready — 4 shops, 0 on cooldown` |
+| Enter a shop | `GAME_DEBUG_SHOPS.teleportTo('neon-downtown')`, `tick(120)` | `shop:enter` fires | pass | `shop:enter` emitted; `GAME_DEBUG_SHOPS.open()` returned true |
+| Repaint persists | `p.setPaint(id, hex)`, `flush()`, reload | `paintByVehicle` updated and restored | pass | Covered by the progression paint row |
+| Mechanic cooldown | `GAME_DEBUG_SHOPS.hit('neon-downtown')` | 180 s cooldown, `shop:closed`, cops sent | pass | `closedFor:180`, `shop:closed {reason:'mechanic'}`, wanted 1, 2 cops. Saved as absolute epoch `1785954543066` (179769 ms in the future). **Corrected row** — the cooldown comes from running over the mechanic, not from using the shop |
+| Cooldown survives reload | Trigger it, reload, re-read | Still counting down | untested | The absolute-epoch storage was verified; the reload half was not re-run this cycle (progression handoff §311 reports it passing) |
+| Tuning applies to handling | Buy an upgrade, re-measure top speed | Measurably faster | untested | Not run this cycle |
+| ~~Closed at night~~ | — | — | n/a | **Never a feature.** `bodyshop.js` has no night logic; shops report `{open:true}` at 03:00 (phase `night`). The row was an assumption from the architecture doc and has been removed |
 
 ---
 
 ## 3. Navigation
 
-Contract: `api('nav').addPOI({id,worldId,x,z,icon,label,kind,state})` and
-`setWaypoint(x,z)`; road data from `api('roadgraph')`.
-
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Full map opens | `tap('m')`, then `tap('tab')` | Map opens both ways; `C.engine.fullMapOpen` true. Mute must NOT toggle (mute is `N`) | untested | — |
-| Map closes again | `tap('m')` twice | Closes; no stuck overlay; driving input still reaches the car (`hold('w',true); tick(30)` moves it) | untested | — |
-| Minimap draws the world | Compare the minimap against `GAME_DEBUG.world` road data on all three maps | Roads drawn per world, player arrow at `C.player.x/z`, correct rotation | untested | — |
-| POIs render on both maps | `api('nav').addPOI({id:'qa1',worldId:C.world.id,x:C.player.x+50,z:C.player.z,icon:'★',label:'QA',kind:'test',state:()=>({open:true,done:false})})`; open both maps | Icon appears on minimap and full map at the right spot | untested | — |
-| Waypoint set and cleared | `api('nav').setWaypoint(C.player.x+200, C.player.z)`; drive toward it | Compass ribbon points at it; distance counts down; arriving (or clearing) removes it | untested | — |
-| Waypoint persists | Set a waypoint, reload | `prefs.waypoint` holds `{worldId,x,z}`; restored only on the matching map | untested | — |
-| Compass heading correct | Face north (`GAME_DEBUG.teleport(x,z,0)`), then `Math.PI/2` | Ribbon reads N, then E. A mirrored ribbon is a sign convention bug, not a rounding issue | untested | — |
-| Route follows roads | `api('roadgraph').route({x:C.player.x,z:C.player.z}, {x:…,z:…})` | Returns a point array; every point within a road width of a `roadsRef.segs` centreline; level-aware on NEON (no route that teleports between deck and street) | untested | — |
-| Nearest node is sane | `api('roadgraph').nearest(C.player.x, C.player.z)` while parked on a road | Distance under one road width | untested | — |
-| Survives a map switch | Add a POI on NEON, `GAME_DEBUG.setMap('prague')`, `tick(30)` | NEON POIs not drawn on Prague; no console error; graph rebuilt for the new world | untested | — |
+| Full map opens | `tap('m')`, then `tap('tab')` | Opens both ways; mute must NOT toggle | pass | `fullMapOpen` false→true→false on `m`; `tab` also opens; `C.input.muted` unchanged |
+| Map closes again | `tap('m')` twice, then drive | Closes, driving still works | pass | Closed cleanly; `hold('w')` + `tick(30)` moved the car 5.8 units |
+| POIs render | `addPOI({id:'qa1',…})` | POI registered and drawn | pass | `getPOI('qa1')` non-null, POI count 8→9 |
+| Waypoint set and counts down | `setWaypoint()`, drive toward it | Distance decreases | pass | 400 → 231 units driving at the waypoint's own bearing. (Driving *forward* regardless of bearing increases it — aim first) |
+| Compass heading correct | Face north, then east; read `playerBearing()` | N then E | pass | Heading π drives −Z (north) → bearing `0.00`; heading π/2 drives +X (east) → bearing `1.57`. Ribbon screenshot shows **N** centred with NW/NE flanking. **`playerBearing()` and `bearingOf()` return RADIANS**, and north is heading π, not 0 |
+| Route follows roads | `api('roadgraph').route(a,b)` | Point array along roads | pass | 11 points from (−30, 337) to (1350, 1130) |
+| Nearest node is sane | `nearest(x,z)` while on a road | Within a road width | pass | `d: 0` parked on a road |
+| Road graph builds | Boot console | One connected network | pass | `[roadgraph] built "neon": 1783 nodes, 2762 edges from 1585 segments … largest connected piece 100% of the network, 1 island(s)` |
+| Survives a map switch | Add a POI, `setMap('prague')` | No error, graph rebuilt | pass | 3 NEON↔Prague cycles, no console errors |
 
 ---
 
-## 4. Races
-
-Events bus: `race:start`, `race:finish`. Data: `data/races.js`.
+## 4. Races, zones and coins
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Race POIs exist | Start NEON; list nav POIs of race kind | One per entry in `data/races.js`, on the road, reachable | untested | — |
-| Start a race | Drive onto a race POI; accept via `Enter` | `race:start` fires with the race id; countdown then GO; HUD shows checkpoint and timer | untested | — |
-| Checkpoints in order | Drive the route; skip one deliberately | Skipped checkpoint does not count; the HUD keeps pointing at the one you owe | untested | — |
-| Finish records a best | Finish once; note the time; `api('save').get('progression.raceResults.<id>')` | `best` = your time, `runs` incremented. Use `recordBest(path, t, false)` semantics — **lower is better** | untested | — |
-| Slower run does not overwrite | Run again slower | `best` unchanged; `runs` incremented; `wins` only on a win | untested | — |
-| Faster run does overwrite | Run again faster | `best` updated to the new time | untested | — |
-| Best survives reload | Reload; re-read `raceResults` | Same best | untested | — |
-| Abandoning cleans up | Start a race, drive away / press reset (`R`) | `race:finish` (or an abort event) fires; HUD widgets removed; no orphan checkpoint meshes in `GAME_DEBUG.scene` | untested | — |
-| Dying mid-race cleans up | Start a race, `GAME_DEBUG.killMe()`, `tick(180)` | `player:died` fires; race torn down; no stuck timer on respawn | untested | — |
-| Drift zones score | Enter a drift zone; handbrake-drift (`hold(' ',true)` + steer); leave | `zone:enter`/`zone:exit`; `C.drift.zoneMult` rises while inside (capped, per the HUD formula) and returns to 1 outside; best written to `progression.driftZoneBests.<id>` with higher-is-better | untested | — |
-| Coins collect once | Drive over a coin; note `coin:collected`; reload; drive over the same spot | Collected once, recorded in `progression.coinsCollected[worldId]`, and **not** collectable again after reload | untested | — |
+| Race POIs exist | `pois()` filtered to `kind==='race'` | One per race | pass | 5: CHROMA SPRINT, DOCKYARD CIRCUIT, SUMMIT DESCENT, COASTAL FREEWAY, QUARRY RUN |
+| Run CHROMA SPRINT | `GAME_DEBUG_RACE.run('nr-city-sprint',0.75)` | Starts, runs, finishes | pass | 23 cps / 5320 len / 1 lap. Finished 1st at **87.03 s** (opponents at 4644/4579/3775 progress). `race:start` + `race:finish` fired |
+| Run DOCKYARD CIRCUIT | `run('nr-docks-circuit',0.8)` | 2 laps, finishes | pass | 21 cps / 4860 len / 2 laps. Finished 1st at **156.63 s**, `lap 2/2` |
+| Finish records a best | Read `progression.raceResults` | best = time, runs+1, wins on a win | pass | `nr-city-sprint {best:87.03, wins:1, runs:1}`, `nr-docks-circuit {best:156.63, wins:1, runs:1}` |
+| Slower run does not overwrite | Re-run the same race at low skill | best unchanged, runs+1, no extra win | pass | After a 0.30-skill re-run: `{best:87.03, wins:1, runs:2}` |
+| Losing records no win | Finish 2nd | `wins:0`, best still stored | pass | QUARRY RUN: HIGHWALL 105 s vs YOU 112.6 s → `{best:112.6, wins:0, runs:1}`; `raceWins` counter stayed 2 |
+| Best survives reload | Reload, re-read | Same bests | pass | Verified as part of the progression reload row |
+| Manual join flow | Drive onto a race POI, press `Enter` | Prompt then countdown | untested | Only the `GAME_DEBUG_RACE.run()` path was exercised. The interact prompt fires for shops (`shop:enter`), so the mechanism exists, but the race join was not driven manually |
+| Drift zone enter/exit | Drive the GRID RUNNER corridor (anchors from `data/driftZones.js`, x −310…810 along z −870) | `zone:enter`/`zone:exit`, ×5 while inside | pass | `zone:enter {zoneId:'nz-downtown-tech', name:'GRID RUNNER'}`, HUD toast `🌀 GRID RUNNER — ×5 drift`, `zoneMult` reached **5** inside and returned to **1** outside |
+| Anti-farm void rule | Leave the corridor anywhere but the exit gate | Run voided | pass | `zone:exit {score:388, banked:false}` + toast `✖ left GRID RUNNER — run void`. A second run voided at 192. This is the intended rule (`events.js:615`) |
+| Zone best recorded | Reach the corridor **exit gate** (`ZONE_GATE_R` of `zn.exit`) with a score | `driftZoneBests.<id>` written, ZONE RECORD banner, reward paid | untested | Could not complete a full clean corridor lap to the gate headlessly — every attempt voided (crash, water, or combo collapse) before the gate. **Banking the drift combo is NOT what banks the zone run** — only reaching the exit gate is. `driftZoneBests` stayed absent and `zoneRecords` 0 all session |
+| Coins collect and count | Drive coin routes | `coin:collected`, counter rises | pass | 35 coins collected across races; `stats.coins` 35 = sum of per-route `got` |
+| Coins restore after reload | `flush()`, reload, compare per-route counts | Identical | pass | Before and after reload identical, route by route: `downtown-loop 1/57, freeway-sweep 0/43, docks-slalom 14/45, hills-climb 13/48, strip-run 0/41, quarry-descent 7/44`; total 35; 278 instances; saved sets byte-identical |
+| Coin save shape | Inspect `progression.coinsCollected` | `{worldId:{routeId:[sorted ints]}}` | pass | `{"neon":{"nc-downtown-loop":[32],"nc-docks-slalom":[0,1,6,7,8,9,17,18,19,20,24,35,39,40],…}}` — matches `docs/SAVE_SCHEMA.md` |
 
 ---
 
@@ -196,17 +183,15 @@ Events bus: `race:start`, `race:finish`. Data: `data/races.js`.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Population within budget | `tick(300)` while driving; `GAME_DEBUG.population` | `alive` near `target`; ~72 cars desktop / 40 mobile per the baseline. Pool not leaking (`pool` stable over time) | untested | — |
-| Traffic follows roads | `GAME_DEBUG.trafficSample()` | For each car `roadDist` under a road width, and `meshY` ≈ `roadY` — a car on a deck road with a street-level mesh is the classic NEON bug | untested | — |
-| Recycling does not leak | Drive 3000 units; sample `population` every 500 | `traffic.length` bounded; `pool` returns to a steady value; no unbounded growth in `wrecks` | untested | — |
-| Personalities differ | With `traffic-ai` live, sample following distance and lane discipline across several cars | Measurably different behaviour between profiles in `data/trafficProfiles.js` — not all cars identical | untested | — |
-| Traffic reacts to the player | Drive at oncoming traffic head on | Cars brake or swerve rather than driving through you | untested | — |
-| Wanted stars spawn cops | `GAME_DEBUG.wanted(2)`; `tick(300)`; `GAME_DEBUG.copSample()` | Cops spawn and close distance. `dyToPlayer` near 0 — a cop sunk inside a hillside is a known failure shape | untested | — |
-| Pursuit event fires | Same, watching the bus | `police:pursuit` emitted on engagement | untested | — |
-| Stars decay | `GAME_DEBUG.wanted(3)`; drive away; `tick(1800)` | `C.stats.wanted` decays to 0; cops despawn and are removed from the scene | untested | — |
-| Reset clears two stars | `GAME_DEBUG.wanted(4)`; `tap('r')` | Wanted drops by exactly 2, cops cleared (index.html:3141) | untested | — |
-| Patrols exist without stars | `GAME_DEBUG.wanted(0)`; `tick(600)`; `copSample()` | Patrol cars present and moving on roads, not chasing | untested | — |
-| Peds are alive and avoid cars | `GAME_DEBUG.pedSample(5)` | `alive` non-zero, `stride` non-zero for walkers, ground height matching. Peds react to an approaching car | untested | — |
+| Population within budget | `tick(600)` driving, `GAME_DEBUG.population` | `alive` near `target` | pass | `alive 72 / target 72`, peds 54, pool 0 |
+| Traffic follows roads | `GAME_DEBUG.trafficSample()` | `roadDist` under a road width, `meshY ≈ roadY` | pass | max `roadDist` 11, max `|meshY − roadY|` **0** |
+| Peds alive and walking | `GAME_DEBUG.pedSample(3)` | Non-zero, striding, on the ground | pass | 54 alive / 0 dead; strides 0.43–0.61; every `y` equals its `ground` |
+| Patrols exist without stars | `api('traffic').stats()` and `patrolInfo()` | Patrols on routes, not pursuing | pass | `patrols: 5` at wanted 0 — 3 driving routes (spd 34, 34, 17.7), 2 parked, all `pursuing:false`. **Corrected probe** — patrols live in the traffic system, not in `cops[]`, so `copSample()` reads 0 and is the wrong instrument |
+| Wanted stars spawn cops | `GAME_DEBUG.wanted(3)`, `tick(300)`, `copSample()` | Cops spawn and chase | pass | 3 cops at wanted 3; 4 cops at wanted 4 |
+| Pursuit event fires | Watch the bus | `police:pursuit` | pass | Emitted; `vehicle:stage` also seen |
+| Reset clears two stars | `wanted(4)`, `tap('r')` | Drops by exactly 2 | pass | 4 → 2, hp 100, car returned to spawn (distance 0) |
+| Traffic profiles differ | `api('traffic').stats()` / `profileOf()` | Distinct profiles | untested | `stats()` reports `overtaking`/`patrols`/`cars` but per-car profile ids were not sampled this cycle |
+| Stars decay | `wanted(3)`, drive away, `tick(1800)` | Decays to 0 | untested | Not run this cycle |
 
 ---
 
@@ -214,19 +199,17 @@ Events bus: `race:start`, `race:finish`. Data: `data/races.js`.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Sea drowns the player | `GAME_DEBUG.teleport()` into open water on NEON; `tick(300)` | Wallow, then sink, then death. `C.player.dead` true; `player:died` fires | untested | — |
-| Shore grace is honest | Drive just into the shallows and straight out within ~1 s | No drowning — the commit distance/time grace (index.html:3151) must not kill a car that clips the shore | untested | — |
-| Water detection agrees | Compare `GameSea.isWaterAt(x,z)` with `C.world.isDrowningAt(x,z)` over a grid across the coast | No disagreement — two sources of truth here means one of them kills you on dry land | untested | — |
-| Sand changes handling | Drive onto sand; read `C.engine.surface` | `setSurface` reports the sand profile; grip/drag differ from tarmac; measurably longer stopping distance | untested | — |
-| Sand suppresses skid marks | Handbrake on sand; `GAME_DEBUG.markSample(5)` | No new tarmac skid marks; dust FX instead | untested | — |
-| Skid marks sit on the ground | Drift on a slope and on a NEON deck; `markSample(5)` | Each mark's `y` ≈ its `ground`; `pitch` follows the slope | untested | — |
-| Trees knock over | Drive into a tree at speed | Falls, does not stop the car dead, does not vanish | untested | — |
-| Barriers break | Hit a breakable road barrier | Breaks and produces debris; the collider goes with it (drive through the gap afterwards) | untested | — |
-| Wrecks persist then despawn | `GAME_DEBUG.blastNearest()`; poll the probe over `tick(1800)` | Lands, settles, stays `inScene` while nearby, and is cleaned up on the documented rule — not instantly, not forever | untested | — |
-| Day/night runs | `tick` through a full cycle (or force phases) | `time:phase` fires dawn/day/dusk/night in order; `GAME_DEBUG.atmosphere` background and fog change; headlights come on at night | untested | — |
-| Night does not black out | At night, on all three maps | The road is still readable. A night that needs headlights to see the kerb is a fail | untested | — |
-| Radio plays and persists | Tune a station; set volume; reload | Audio plays, `prefs.radioStation` and `prefs.radioVolume` restored. Every track's licence is recorded in `docs/RADIO_SOURCE_POLICY.md` | untested | — |
-| Radio ducks under events | Trigger an explosion / mission audio | Radio ducks and recovers, no clipping | untested | — |
+| Sea drowns the player | `GAME_DEBUG.teleport(-30, 4900, 0)`, `tick(900)` | Sinks, dies, respawns | pass | Car sank to `y −6.7`, toast `🌊 In the water — get out!`, `player:died` fired, respawned at world spawn |
+| Water detection agrees | `GameSea.isWaterAt(world,x,z,y)` vs `C.world.isDrowningAt(x,z)` over a grid | No disagreement | pass | 264 points across the map: 175 water / 175 drowning, **0 disagreements**. Shore distance ramps sensibly: z 3000→0, z 4000→20, z 4900→797. **Signatures take the world first** — `isWaterAt(world,x,z,y)`, `shoreDistance(world,x,z)`; calling them `(x,z)` returns false/0 everywhere and looks like a broken sea |
+| Coast builds | Boot console | Beach, furniture, colliders | pass | `[sea] coast for "neon": 1493 beach cells (2986 tris), 958 furniture modules in 25 runs with 43 access gaps, 4 draw calls`; shore field 242×217 from 208380 land triangles |
+| Destructible props placed | Boot console + `worldStats()` | Props along roads | pass | `[destructibles] "neon": 1118 props (lampPost:407 smallTree:233 lightBarrier:180 trafficLightPole:74 bigTree:131 concreteBarrier:93) every 141 units of 157113 road, 7 draw calls`; `worldStats().breakables` 2423, `broken` 0 |
+| Tarmac surface baseline | Brake from speed on road | Surface reported, marks laid | pass | `surface {type:'road', grip:1, drag:0, spin:1, fx:'smoke'}`; 134 mph → stop in 105 units over 110 frames, 104 new skid marks |
+| Sand changes handling (A/B) | Same test on a beach cell | Longer stop, different surface, no tarmac marks | blocked | Could not locate a beach cell: `GameSea.isBeachAt(world,x,z)` returned false along every lane sampled (x −3000…3000 at the z 4000 shore edge, and z 3000…4200 at x −1000…1000), despite 1493 beach cells existing. Handed to the environment owner with the probe — the tarmac baseline above is the A-side, ready to compare |
+| Prop destruction thresholds | Hit props at varied speeds | Break above threshold only | untested | Environment owner is running the full 8-stub set separately |
+| Wrecks persist then despawn | `blastNearest()`, poll | Lands, settles, cleaned up later | untested | Not run this cycle |
+| Day/night runs | `GAME_DEBUG_TIME.set()` / `phase()` | Phases change, lighting follows | pass | `set(3)` → phase `night`; `set(12)`/`set(23)` change draw counts (404 day → 471 night at the same spot, extra light geometry). Boot: `[daynight] ready — 21:30 (night), 840s per in-game day` |
+| Radio plays and persists | Tune, set volume, reload | Station and volume restored | pass | `K` tuned off→`neonwave`; `prefs.radioStation`/`radioVolume` present in the save and restored (`neonwave`, 0.6) |
+| Radio ducks under events | `GAME_DEBUG_RADIO.duck()` and a real pursuit | Ducks and recovers | partial | The duck **state machine** works: `ducking` false→true→false. Audible attenuation not verifiable headlessly — `masterGain` reads 0 and `duckGain` stays 1 in a tab with no running audio context. Needs a human ear or a live-audio harness |
 
 ---
 
@@ -234,52 +217,52 @@ Events bus: `race:start`, `race:finish`. Data: `data/races.js`.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Delegation active | `api('camera')` and `GAME_DEBUG.camera` after `tick(60)` | If the camera system publishes `updateCamera(dt) -> true` it owns the camera; if absent, the engine camera still works. Both paths must be checked | untested | — |
-| Four modes cycle | `tap('c')` four times, sampling `GAME_DEBUG.camera` each time | chase → bonnet → side → far → chase. Each distinct and pointed at the car | untested | — |
-| Camera tracks the car | `hold('w',true); tick(300)` | Camera stays 7–16 units behind (the PLAYTEST_LOG range), never inside the car, never left behind | untested | — |
-| No clipping through geometry | Drive into a NEON underpass and a tight alley | Camera pulls in rather than passing through walls (AABB sampling) | untested | — |
-| Orbit input works | Drag with the mouse / one finger | Camera orbits; releases back to follow after the documented delay; does not fight the chase camera | untested | — |
-| Orbit prefs persist | Change an orbit setting; reload | `prefs.cameraOrbit` restored | untested | — |
-| Teleport does not smear | `GAME_DEBUG.teleport(x+500, z+500)`; `tick(5)` | Camera snaps (`smoothingReady` false → re-armed), no long interpolation across the map | untested | — |
-| Multi-level correctness | Teleport onto a NEON deck with `atY` set to the deck height; `tick(60)` | Camera resolves the deck surface, not the street below | untested | — |
+| Delegation active | `api('camera').updateCamera` | Camera system owns the camera | pass | `api('camera')` live with `updateCamera` present |
+| Four modes cycle | `tap('c')` ×4, sampling `GAME_DEBUG.camera` | 4 distinct positions, back to the first | pass | mode 0 `(−30, 13, 494)` → 1 `(−30, 2.4, 468.9)` → 2 `(−42, 15, 490)` → 3 `(−30, 27, 512)` → 0 (identical to the first). **Mode 1 is bonnet — the camera sits ~1 unit from the car there, which is correct, not a follow-distance failure** |
+| Camera tracks the car | Chase mode (`camMode 0`), drive | Stays behind, never inside, never lost | pass | Distance behind: **29.7 at rest, 31.4 at 95 mph, 48.0 at 283 mph** — smooth, always behind. Note this is well outside the 7–16 range in `docs/PLAYTEST_LOG.md`; the camera was reworked since. See finding F8 |
+| Teleport does not smear | `teleport(x+600, z+600)`, `tick(3)` | Snaps, no long interpolation | pass | 24 units from the car 3 frames after a 600-unit jump |
+| No clipping through geometry | Drive an underpass and a tight alley | Camera pulls in | untested | Not run this cycle |
+| Orbit input works | Drag with mouse / one finger | Orbits, releases back to follow | untested | Not run this cycle — needs real pointer input |
+| Orbit prefs persist | Change a setting, reload | `prefs.cameraOrbit` restored | untested | Not run this cycle |
 
 ---
 
 ## 8. Combat and damage
 
-Contract: `api('vdamage').damage(target,{amount,channel,from})` is the only way
-anything hurts a vehicle. Stages: healthy → damaged → critical → burning →
-exploded, announced on `vehicle:stage`.
+Contract: `api('vdamage').damage(target,{amount,channel,from})`.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Cheat lines are off | With `vdamage` live, `tick(120)`, then read `C.carState.hp` after a collision | HP stays reduced. If it snaps back to 100 every frame the `hud()` cheat gate did not disengage (baseline flags this) | untested | — |
-| Collision damages | Ram a wall at speed; sample `C.carState.hp` | Drops proportionally to impact; `vehicle:stage` fires at each threshold | untested | — |
-| Stage order holds | Damage a car in steps through every threshold | healthy → damaged → critical → burning → exploded, in order, no skipping, no going backwards without a repair | untested | — |
-| Fire kills eventually | Drive until burning; `tick(600)` | Burns, then explodes; `player:died` fires; WASTED screen | untested | — |
-| Ignite is live | With `vdamage` present, force ignition on a traffic car | It actually ignites — the baseline notes `igniteVehicle()` was neutered with an early return; that must be gone | untested | — |
-| Weapons fire | Equip and fire; watch a target vehicle | Damage routed through `vdamage.damage(..., channel:'ballistic')`, not applied directly | untested | — |
-| Shooting raises wanted | Fire near police/civilians | `C.stats.wanted` rises; `police:pursuit` follows | untested | — |
-| On-foot police respond | Exit the car (`tap('e')`) with wanted > 0 | Cops pursue on foot; the player can be killed on foot | untested | — |
-| Explosions hurt neighbours | `GAME_DEBUG.blastNearest()` next to another car | Chain damage through `vdamage`, not a direct hp write | untested | — |
-| Death is recoverable | `GAME_DEBUG.killMe()`; `tick(300)`; respawn | Respawn with a working car, no orphan fire, no stuck `dying` flag | untested | — |
+| Cheat gate is off | Ram a solid at speed, read `C.carState.hp` | HP stays reduced | pass | Drove into a collider at 39 mph: hp **100 → 73.95** and stayed there. The `hud()` hp-reset cheat is disengaged |
+| Collision damages | Same | Proportional drop, stages fire | pass | Same run; `vehicle:stage` emitted `critical` and `burning` during the session |
+| Player collision via API is refused | `vd.damage('player',{channel:'collision'})` | Ignored with a warning | pass | Returns current state and logs `[vdamage] collision damage is mirrored from carState.hp — ignoring explicit call`. **By design** (`vehicle-damage.js:249`) so crashes are not charged twice — not a bug |
+| Ballistic channel damages the player | `vd.damage('player',{amount:30,channel:'ballistic'})` ×3 | Integrity steps down | pass | integrity 100 → 70 → 40 → 10 |
+| Ignite is live | `vd.damage(trafficCar,{amount:500,channel:'fire'})` | Actually ignites | pass | `burning:true`, stage went `healthy` → `exploded`. The old neutered `igniteVehicle()` early-return is gone |
+| NPC stage ladder | Damage a traffic car in steps | healthy → damaged → critical → exploded | pass | Thresholds implemented at 0.6 / 0.25 / 0 of the pool; `exploded` observed |
+| Health is a 0–100 bar | Inspect the HUD | Bar, not hearts | pass | `#hp` present at `width:100%`; no `.heart` elements remain. Screenshot shows `♥ [====] 100` |
+| Death is recoverable | `GAME_DEBUG.killMe()`, `tick(600)` | Clean respawn | pass | `player:died` fired; respawned at world spawn (−30, 470), distance 0; hp 100, health 100, not burning, `dead:false`, `dying:false` |
+| Weapons fire | `api('combat').fire()` at a target | Damage routed through vdamage | untested | `combat` api present (`equip/equipped/ammo/giveAmmo/fire/debug`) but firing was not exercised |
+| On-foot firefight + sprint away | Exit with wanted > 0, fight, then flee | Cops pursue on foot; escape works | untested | Not run this cycle |
+| Shooting raises wanted | Fire near police | Wanted rises | untested | Not run this cycle |
 
 ---
 
 ## 9. Performance
 
-All numbers below are draw calls, triangles and counts — **not** frame rate (see
-the harness note).
+Draw calls, triangles and counts — **not** frame rate.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Draw calls per map | `GAME_DEBUG.start(map,'proDrift')`; `tick(120)`; `stats()` | Record `calls` and `triangles` per map. Rough anchor: NEON near spawn measured 256–325 calls / 379–394k triangles across three runs on 2026-08-05, drifting upward as Wave 2 systems came online. The spread is real — call count follows what is in view — so treat a single number as meaningless and compare like for like: same map, same spawn, same frame count. A step change, not a wobble, means new geometry is not instanced or merged | untested | — |
-| Density sweep | `GAME_DEBUG.setDensity(0.5 / 1 / 2)`; `tick(300)` each; `stats()` + `GAME_DEBUG.population` | Cost scales roughly with density; nothing falls over at 2× | untested | — |
-| No geometry leak on map switch | `stats().geometries`; `setMap` through all three maps three times, `tick(30)` after each; `stats().geometries` again | Returns to roughly the starting count. Monotonic growth = a world is not disposing | untested | — |
-| No texture leak | Same, watching `stats().textures` | Same | untested | — |
-| Scene graph stays flat | `GAME_DEBUG.scene` after 3 map switches | `children` count stable; no orphan groups from unloaded worlds | untested | — |
-| Streaming keeps up | Drive a long straight at top speed; `tick(1800)` | No sustained gaps in the world ahead; `worldStats()` chunk count stable | untested | — |
-| Mobile tier is lighter | Load with a coarse pointer / narrow window; `tick(120)`; `stats()` | Lower counts than desktop; `C.quality.tier` is `low` | untested | — |
+| Draw calls at spawn | `start('neon',…)`, `tick(120)`, `stats()` | Record and compare like for like | pass | **331 calls / 442k tris / 3863 geometries** at a clean spawn. Day 404 calls, night 471 calls at the same spot. (Earlier anchors of 256–325 calls / 379–394k tris predate the Wave 2 systems — this is the new baseline) |
+| Draw calls in a race | Mid-race `stats()` | Bounded | pass | **697 calls / 445.8k tris** |
+| Draw calls at night with a pursuit | Night + `wanted(4)` | Bounded | pass | **742 calls / 450.2k tris**, 4 cops — the heaviest sampled state |
+| Density sweep | `setDensity(0.5 / 1 / 2)`, `tick(400)` each | Cost scales, nothing falls over | partial | ×0.5 → 645 calls / alive 66 vs target 36; ×1 → 650 calls / 72 of 72; ×2 → 873 calls / 144 of 144. Scales correctly and survives 2×, but the population sheds slowly — at ×0.5 it had not reached target after 400 frames. Use a longer settle |
+| No texture leak on map switch | 3 NEON↔Prague cycles | Stable | pass | Textures **16** flat across all 3 cycles |
+| Scene graph stays flat | `GAME_DEBUG.scene` after switches | No orphan groups | pass | `children` 200 after every cycle |
+| No geometry leak on map switch | `stats().geometries` across 3 cycles | Returns to roughly the start | **fail** | **5618 → 5731 → 5853 → 5958**, monotonic, ~+113 per NEON↔Prague cycle, no plateau over 3 cycles. Textures and scene children are stable, so something geometry-shaped is not being disposed. Finding F6 |
+| World build cost | Boot console | Reasonable | pass | `[world] built "neon" in 240ms`; `[systems] booted 16/16 in 139ms`; roadgraph 30.6 ms; shore field 34 ms; coast 28 ms; destructibles 80 ms |
+| Streaming keeps up | Long high-speed run | No gaps | untested | Not run this cycle |
+| Mobile tier is lighter | Load narrow / coarse pointer | Lower counts, tier `low` | untested | Not run this cycle; desktop reported `mobile:false, tier:'high'` |
 
 ---
 
@@ -287,64 +270,73 @@ the harness note).
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Drive keys reach the car | `hold('w',true); tick(60)` | Car accelerates. Drive keys (`W A S D`, arrows, `Space`, `Shift`) bypass system routing by design (index.html:3112) — a broken system must never eat them | untested | — |
-| A greedy system cannot steal driving | Register a throwaway system whose `onKey` returns `true` for everything; `hold('w',true); tick(60)` | Car still accelerates | untested | — |
-| Steering both ways | `hold('a',true); tick(60)`, then `hold('d',true)` | Heading changes in opposite directions; no drift in the neutral position | untested | — |
-| Handbrake drifts | At speed, `hold(' ',true); hold('a',true); tick(90)` | `GAME_DEBUG.car.driftAngle` and `rearSlip` rise; drift meter shows; combo banks | untested | — |
-| Nitro | `hold('shift',true)` with `stats.nitro > 0` | Speed rises; `GAME_DEBUG.nitro` drains and refills after release | untested | — |
-| Manual shifting | Test each key **alone**: `GAME_DEBUG.start('neon','proDrift')`, `hold('w',true); tick(240); hold('w',false); tick(90)`, note `GAME_DEBUG.car.gear`, `tap(k)`, `tick(90)`, re-read. Repeat for `x`, `u`, `y`, `z` | `x` and `u` both upshift; `y` and `z` both downshift. The pairs are QWERTZ-proof — `z` upshifting is the old binding and now a regression, and `u` must NOT mute. **Do not tap two shift keys in quick succession**: a shift lockout swallows the second one and it reads as an unbound key. Measured 2026-08-05: 20 frames apart the second tap is eaten, 90 frames apart all four work | untested | — |
-| Reverse | Brake to a full stop, keep holding `s`, `tick(120)` | `GAME_DEBUG.car.reverse` true, speed goes negative | untested | — |
-| Rev limiter is not an alarm | Hold throttle in first to the limiter for `tick(300)` | Limiter engages, `car.limiter` true, and the sound is a limiter, not a repeating alarm tone (regression from 61a8c34) | untested | — |
-| Reset unsticks | `GAME_DEBUG.teleport()` out of bounds; `tap('r')` | Returns to world spawn, hp 100, wanted reduced by 2 | untested | — |
-| Enter / exit car | `tap('e')` twice | Out on foot then back in; `C.player.onFoot` toggles; no camera jump through the ground | untested | — |
-| Mute is N, not M or U | `tap('n')`, then `tap('m')`, then `tap('u')` | `n` mutes with a toast; `m` opens the map; `u` upshifts. Any of the three doing another's job is a regression | untested | — |
-| Help panel toggles | `tap('h')` twice | Panel opens then closes; `api('help').isOpen` follows; `#helpPanel` has `pointer-events:auto` while `#helpRoot` and `#systemsUI` stay `none` | untested | — |
-| Escape closes help, not the game | `tap('h')` then `tap('escape')`; then `tap('escape')` again | First Escape closes the panel and does **not** open the vehicle-select menu; the second Escape (panel closed) does open it. A system that swallows Escape either way is a fail | untested | — |
-| Help lists real bindings | `tap('h')` and read every row | Every key listed actually does what it says. This table and the panel must not drift apart | untested | — |
-| Help grows with systems | `api('help').addControls('QA',[['J','test']])`; reopen | Section appears. Re-adding the same title replaces it in place rather than duplicating | untested | — |
-| Help hides touch buttons | On a touch build, open the panel | `#mobileControls` hidden while open, restored on close | untested | — |
-| Wheel setup opens | `tap('F2')` | Wheel panel opens; `Escape` closes it (the engine handles this before systems) | untested | — |
-| Wheel calibration untouched | Note `localStorage['destroy_kill_wheel_v1']`; run a full session including `GAME_DEBUG_SAVE.reset()` | Byte-identical afterwards | untested | — |
-| Wheel axes bind | With a wheel connected, bind steer/throttle/brake in the F2 panel | Live meters track the hardware; bindings survive reload | untested | — |
-| Paddles shift | Bind paddles; use them | Up/down shifts, same as `x`/`y` | untested | — |
-| Mobile buttons drive | Narrow window / touch device; press GAS, BRAKE, ◀ ▶, HANDBRAKE, NITRO, `+`/`−` | Each maps to the right input; `mobileInput` flags follow; buttons show the pressed state | untested | — |
-| Mobile tilt steers | Enable TILT, then FLIP | Steering follows device tilt; FLIP inverts it; the preference persists in `mobileTiltInvert` | untested | — |
-| Touch UI clears on menu | Open the menu on a touch build | `#mobileControls` hidden (`body.car-select-open`), inputs zeroed — no ghost throttle on resume | untested | — |
+| Drive keys reach the car | `hold('w',true); tick(60)` | Accelerates | pass | Moved 27.1 units to 70 mph |
+| Steering both ways | Steer each way from an identical straight-line start | Opposite signs, no neutral drift | pass | `A` **+0.965 rad**, `D` **−0.965 rad**, neutral drift **0.0000** over 90 frames |
+| Handbrake drifts | At speed, `hold(' ')` + `hold('a')` | Drift angle and slip rise | pass | `driftAngle −1.193`, `rearSlip 0.999`, `gripLost true`, 144 skid marks |
+| Nitro | `hold('shift')` with nitro available | Drains then refills | pass | 100 → 49 under boost → 97 after release |
+| Manual shifting | Each key **alone**, 90 frames apart | `x`/`u` up, `y`/`z` down | pass | `x` 4→5, `u` 4→5, `y` 4→3, `z` 4→3. **Do not tap two shift keys in quick succession** — a shift lockout swallows the second and it reads as unbound (20 frames apart it is eaten; 90 frames apart all four work) |
+| Reverse | Brake to a stop, keep holding `s` | Reverses | pass | `reverse:true`, speed −18.8 |
+| Rev limiter engages | Hold throttle to top gear on a straight | Limiter engages | partial | Engaged for 8 frames, peak 8841 rpm, all 6 gears used. **In `D` the limiter is transient** — the engine upshifts off it (`index.html:3254`), so sample every frame. The "sounds like a limiter, not an alarm" half needs ears and was not verified |
+| Reset unsticks | Teleport out of bounds, `tap('r')` | Returns to spawn, hp 100, −2 stars | pass | Distance from spawn **0**, hp 100, wanted 4 → 2 |
+| Enter / exit car | `tap('e')` twice | Toggles, no ground clipping | pass | onFoot false→true→false; foot `y 0` equals ground `0` |
+| Mute is N | `tap('n')` | Mutes | pass | muted false→true |
+| Map is M / Tab | `tap('m')`, `tap('tab')` | Opens the map | pass | Both open it; neither mutes |
+| U upshifts, does not mute | `tap('u')` | Gear up, mute unchanged | pass | gear 3→4, `muted` false→false |
+| Help panel toggles | `tap('h')` twice | Opens and closes, pointer-events correct | pass | `isOpen` true then false; `#helpPanel` `auto`, `#helpRoot` and `#systemsUI` `none` |
+| Escape closes help, not the game | `tap('h')`, `tap('escape')`, `tap('escape')` | First closes the panel only; second opens the menu | pass | panel true→false with `selectionOpen` still false; second Escape opened the menu |
+| Help grows with systems | `addControls('QA',…)` twice | Appears once, replaced in place | pass | 7 sections both times, exactly 1 `QA` section, entries 1→2 |
+| Help hides touch buttons | Open the panel on a touch build | `#mobileControls` hidden, restored on close | pass | `block` → `none` → `block` |
+| Help lists real bindings | Read every row against the engine | Every key does what it says | **fail** | Lists `Enter — Interact — start a mission, save at a safehouse`; missions and safehouses are removed. No radio controls listed although `J`/`K` change station (verified `K` tuned `neonwave`). Findings F1, F2 |
+| Wheel setup opens | `tap('F2')`, then `Escape` | Opens, Escape closes it | pass | `wheelPanel.open` true, then false |
+| Wheel calibration untouched | Compare `destroy_kill_wheel_v1` across a full session incl. reset | Byte-identical | pass | Unchanged on the 127.0.0.1 origin throughout, including across `GAME_DEBUG_SAVE.reset()` |
+| A greedy system cannot steal driving | Register `{onKey:()=>true}`, then drive | Car still accelerates | pass | Moved 27.1 units — identical to the clean run. It **does** eat every non-drive key, so unregister or reload straight after |
+| Wheel axes bind | Bind steer/throttle/brake with hardware | Meters track, survives reload | untested | Needs physical hardware |
+| Paddles shift | Bind and use paddles | Shifts | untested | Needs physical hardware |
+| Mobile buttons drive | Press each touch control | Maps to the right input | untested | `mobileInput` exposes left/right/gas/brake/handbrake/nitro/shiftUp/shiftDown; not driven this cycle |
+| Mobile tilt steers | TILT then FLIP | Steers, inverts, persists | untested | Needs a device |
 
 ---
 
 ## 11. Save migration
 
-Reference: `docs/SAVE_SCHEMA.md`. These paths were exercised during development
-(evidence in `docs/handoffs/save.md`); they are listed `untested` because QA has
-not run them independently. Treat any disagreement with the handoff as a
-regression.
-
 Snapshot and restore localStorage around this whole section.
 
 | Test | Steps | Expected | Status | Evidence |
 |---|---|---|---|---|
-| Fresh install | Remove all three save keys; reload | `dk_save_v2` written with `{version:2,created,updated,data:{progression:{},prefs:{},meta:{}}}`; `[save] ready — v2, localStorage…` in console | untested | — |
-| v1 migrates | Remove `dk_save_v2`; write `gta6vc_save` = `{"v":1,"cash":8450,"health":80,"nitro":20,"carHp":60,"campaignIndex":1,"carStyle":2,"carColor":2155519,"x":1,"z":2,"heading":0,"ts":"…"}`; reload | Console logs `[save] migrated v1 → v2`; `progression.wallet` 8450; `progression.defaultPaint` 2155519; `meta.legacyV1` holds campaignIndex/carStyle/cashRaw/ts | untested | — |
-| Cheat cash does not migrate | Same, but `cash: 999999999999` | `progression.wallet` is `0`, `meta.legacyV1.cashRaw` is 999999999999 | untested | — |
-| v1 key is not destroyed | After any migration, read `gta6vc_save` | Byte-identical to what you wrote. The engine's safehouse save still uses it | untested | — |
-| Engine save still works | Drive to a safehouse, press `Enter` | `GAME SAVED` banner; `gta6vc_save` updated; `game:saved` event fires; `dk_save_v2` unaffected | untested | — |
-| Migration does not re-run | Reload again after a successful migration | `meta.migratedAt` unchanged; wallet not reset | untested | — |
-| Corrupt save quarantined | `localStorage.setItem('dk_save_v2','not json at all')`; reload | Console error naming the parse failure; `dk_save_v2_corrupt` holds the exact broken string; fresh save started; toast shown; `S.report()` still lists `save` as live | untested | — |
-| Corrupt then re-migrate | Same, with `gta6vc_save` present | v1 migration runs again on the fresh save | untested | — |
-| Newer save not clobbered | Write a valid envelope with `version: 99` and a custom field; reload | Console warns; `data` loaded as-is; the custom field survives a later `set()` + `flush()` | untested | — |
-| Blocked storage degrades | Stub `Storage.prototype.setItem` to throw; `api('save').set('progression.wallet',777)`; `flush()` | Returns false; one `console.error`; exactly one toast no matter how many further failures; `get` still returns 777; `status().persistent` false; game keeps running | untested | — |
-| Bad values rejected | `api('save').recordBest('progression.driftZoneBests.x','banana')`; `api('save').get('progression.__proto__.pwned','REFUSED')` | `false` and `'REFUSED'`, each with a console error; `({}).pwned` still `undefined` | untested | — |
-| Writes are debounced | 50 rapid `set()` calls; compare `dk_save_v2.updated` before and after; then `flush()` | No write during the burst (≤ 1 per 2 s); all 50 present after the flush | untested | — |
-| Flush on tab hide | `set()` something; `window.dispatchEvent(new Event('pagehide'))` | Value on disk immediately; `status().dirty` false | untested | — |
-| Non-serialisable value is loud | `set('progression.x', (()=>{const o={};o.self=o;return o})())`; `flush()` | Returns false, console error, toast — not a silent loss. After removing the value, writes resume | untested | — |
+| Fresh install | Remove all three keys, reload | v2 envelope written | pass | `{version:2, created, updated, data:{progression,prefs,meta}}`; `[save] ready — v2, localStorage, created …`; progression seeds starter cars (`[progression] fresh save — seeded owned cars: commuter, streetDrift`) |
+| v1 migrates | Seed `gta6vc_save` with `cash:8450, carColor:2155519`, remove v2, reload | Migrated | pass | `[save] migrated v1 → v2`; `wallet 8450`; `defaultPaint 2155519`; `legacyV1 {campaignIndex:1, carStyle:2, cashRaw:8450, ts:"8/5/2026, 9:30:00 AM"}` |
+| Cheat cash does not migrate | Same with `cash:999999999999` | Wallet 0 | pass | `wallet 0`, `legacyV1.cashRaw 999999999999` |
+| v1 key is not destroyed | Read `gta6vc_save` after migration | Byte-identical | pass | Exact string match against what was written |
+| Migration does not re-run | Reload again | `migratedAt` and wallet unchanged | pass | `migratedAt` identical, wallet still 8450 |
+| Corrupt save quarantined | Write garbage to `dk_save_v2`, reload | Quarantined, fresh start, system stays live | pass | Console error naming the parse failure; `dk_save_v2_corrupt` holds `"not json at all"` exactly; `save` still live; `failures:[]` |
+| Corrupt then re-migrate | Same with `gta6vc_save` present | Migration re-runs | pass | `wallet 250` from the seeded v1 after quarantine |
+| Newer save not clobbered | Write `version:99` with a custom subtree, reload | Data preserved | partial | `wallet 4242` and `futureSubtree {keepMe:'yes'}` both preserved, and survive a later `set()`+`flush()`. **But the envelope version is rewritten to 2** — a future v3 build would see version 2. Finding F7 |
+| Blocked storage degrades | Stub `setItem` to throw | Memory-only, warns once | pass | `flush()` false; exactly one `⚠ Storage blocked — progress will not be saved` toast across 3 failed flushes; `get` still returns 777; `status().persistent` false; game kept running |
+| Bad values rejected | `recordBest(…, 'banana')`, `get('progression.__proto__.pwned','REFUSED')` | Rejected with errors | pass | `false` and `'REFUSED'`; `({}).pwned` still `undefined` |
+| Writes are debounced | 50 rapid `set()`, compare `updated`, then flush | ≤1 write per 2 s | pass | `updated` unchanged during the burst; after `flush()` all 50 present (`meta.qaSpam 49`) |
+| Flush on tab hide | `set()`, dispatch `pagehide` | On disk immediately | pass | Absent before, `{x:1,z:2}` on disk after, `dirty` false |
+| Non-serialisable value is loud | `set()` a cyclic object, `flush()` | Fails loudly, recovers | pass | `flush()` false + toast `⚠ Save failed — see console`; after removing the value `flush()` returned true |
+| ~~Engine safehouse save~~ | — | — | n/a | **REMOVED BY DESIGN.** Safehouses are gone; `saveGame()`/`loadGame()`/`hasSave()`/`readSave()` remain in `index.html` with **zero callers**. The documented `game:saved` event can therefore never fire. Finding F5 |
+
+---
+
+## 12. Legacy excision regression
+
+| Test | Steps | Expected | Status | Evidence |
+|---|---|---|---|---|
+| Boot shows two cards | Count `#mapSelect .vehicleCard` | Exactly 2 | pass | `neon` (🌃 NEON CITY — DEFAULT · 5 DISTRICTS) and `prague` (🏛️ PRAGUE CENTRE — REAL GEOGRAPHY · OSM 8.4 km²) |
+| NEON auto-boots as home | `GAME_DEBUG.mapId` at load | `neon` | pass | `mapId 'neon'` before any `start()`; `[world] built "neon" in 240ms` |
+| Legacy world unregistered | `GameWorlds.get('legacy')` | null | pass | `null`; `GameWorlds.all()` is `['neon','prague']` |
+| Death → respawn at world spawn | Die away from spawn | Lands at the active world's spawn | pass | Died at (1200, 1200), respawned at (−30, 470) = world spawn exactly, distance 0. `hospitals[]` is an empty registry so the fallback is used |
+| No legacy symbols leak | Console + globals | Nothing legacy-shaped | pass | `window.legacyWorld` undefined; no legacy references in console across the session |
+| v1 save still migrates | Section 11 | Migration intact | pass | Covered above — v1 migration works with the legacy map gone |
+| Removed content not referenced in UI | Read all player-visible strings | No mentions of removed features | **fail** | Help panel: "start a mission, save at a safehouse". Respawn toast: "🏥 Patched up at the hospital (-$500)". Findings F1, F4 |
 
 ---
 
 ## Reporting
 
-For each run record: date, commit SHA (`git rev-parse --short HEAD`), browser
-version, and the filled-in Status/Evidence columns. File failures as concrete
-repro steps against the owning module in `docs/EXPANSION_ARCHITECTURE.md`, not as
-"X feels wrong". A row that could not be run is `blocked`, with the missing
-dependency named — never quietly `pass`.
+Record date, commit SHA, browser version, and the filled Status/Evidence
+columns. File failures as concrete repro steps against the owning module in
+`docs/EXPANSION_ARCHITECTURE.md`. A row that could not be run is `blocked` or
+`untested` with the reason named — never quietly `pass`.

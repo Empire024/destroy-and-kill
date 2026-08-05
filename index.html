@@ -2160,30 +2160,10 @@ function setBanner(title,sub,color='#20e3ff'){ bannerT.textContent=title; banner
 // (roadPoint/spawnBeacon) and was already hard-disabled at start. Races,
 // drift zones, coins and body shops are the activity layer now.
 
-// ---------- Save / Load ----------
-const SAVE_KEY='gta6vc_save';
-function hasSave(){ try{ return !!localStorage.getItem(SAVE_KEY); }catch(e){ return false; } }
-function readSave(){ try{ return JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){ return null; } }
-function saveGame(){
-  const idx=car?CAR_STYLES.indexOf(car.userData.style):1;
-  const data={ v:1, cash:stats.cash, health:stats.health, nitro:stats.nitro, carHp:carState.hp, campaignIndex:0,
-    carStyle:idx<0?1:idx, carColor, x:carState.x, z:carState.z, heading:carState.heading, ts:new Date().toLocaleString() };
-  try{ localStorage.setItem(SAVE_KEY,JSON.stringify(data)); setBanner('GAME SAVED',data.ts,'#3bff8b'); playSuccess(); }
-  catch(e){ addToast('Save failed — storage blocked','#ff3b3b'); }
-}
-function loadGame(){
-  const data=readSave(); if(!data){ addToast('No save found','#ff3b3b'); return false; }
-  stats.cash=data.cash|0; stats.health=100; playerHealth=100; engineBlown=false; resetEngineHeat(); overRevTimer=0; powerShiftTimer=0; pendingPowerShift=false; powerShiftReady=false; postShiftPullTimer=0; postShiftPullDuration=0; postShiftPullFrom=1; driveGear=1; driveMode='D'; manualModeTimer=0; manualModeHardTimer=0; shiftHoldTimer=0; reverseEngaged=false; reverseHoldTimer=0; brakeReverseTimer=0; stats.nitro=data.nitro==null?100:data.nitro; stats.wanted=0; stats._decay=0;
-  cops.forEach(c=>scene.remove(c.mesh)); cops.length=0;
-  carColor=data.carColor||0x1ea7ff;
-  if(carState.fire&&car) car.remove(carState.fire); carState.fire=null; carState.burning=false; carState.hp=data.carHp==null?100:data.carHp;
-  if(car) scene.remove(car); car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]); car.userData.vehicleTuneKey=vehicleTuneKey;
-  carState.x=data.x; carState.z=data.z; carState.heading=data.heading||0; carState.speed=0; carState.vx=0; carState.vz=0; carState.y=0; carState.vy=0; carState.airborne=false; resetDriftPhysics();
-  car.position.set(carState.x,0,carState.z); car.rotation.set(0,carState.heading,0);
-  onFoot=false; footChar.visible=false; playerX=carState.x; playerZ=carState.z;
-  setBanner('GAME LOADED',data.ts||'','#20e3ff'); playPickup();
-  return true;
-}
+// ---------- Save / Load: the v1 safehouse save died with its map ----------
+// The versioned save (src/game/save.js, dk_save_v2) owns all persistence.
+// The old gta6vc_save key is never written or deleted — save.js reads it
+// once for migration and leaves it be.
 
 // ---------- Shops: legacy Pay'n'Spray removed with its map ----------
 // Body shops (src/game/bodyshop.js) own repair/paint now, through the
@@ -2453,12 +2433,17 @@ function startSink(px,pz,dt){
 function leaveWater(){ waterTimer=0; waterEntered=false; GameSea.setSubmersion(0); }
 
 // ---------- Death & hospital respawn ----------
-let dead=false, deadTimer=0;
+let dead=false, deadTimer=0, deathFeeCharged=0;
 const wastedEl=document.getElementById('wasted');
 function die(linger=3.8){
   if(dead) return; dead=true; dying=false; deadTimer=linger;
   const px=onFoot?foot.x:carState.x, pz=onFoot?foot.z:carState.z;
-  stats.cash=Math.max(0,stats.cash-500);
+  // The death fee comes out of the REAL wallet (progression), not stats.cash —
+  // that field is pinned to the cheat sentinel every frame, which made the old
+  // debit a lie (QA finding F3: wallet unchanged across a death).
+  deathFeeCharged=0;
+  { const pg=window.GameSystems&&GameSystems.api('progression');
+    if(pg&&pg.spend&&pg.wallet){ const fee=Math.min(500,pg.wallet()); if(fee>0&&pg.spend(fee,'hospital')) deathFeeCharged=fee; } }
   boom(px,pz,0xff3b3b,44,(onFoot?0:carState.y)+3);
   wastedEl.classList.add('show'); renderer.domElement.classList.add('bw'); playFail();
 }
@@ -2480,7 +2465,9 @@ function respawnAtHospital(){
   playerX=carState.x; playerZ=carState.z;
   const dx=Math.sin(carState.heading), dz=Math.cos(carState.heading);
   camera.position.set(carState.x-dx*24,13,carState.z-dz*24);   // snap cam behind
-  addToast('🏥 Patched up at the hospital (-$500)','#3bff8b');
+  // Honest copy (QA F4): hospitals are gone — you wake at the spawn — and the
+  // fee line only appears when a fee was actually taken.
+  addToast(deathFeeCharged>0?('🏥 Patched up (-$'+deathFeeCharged+')'):'🏥 Patched up','#3bff8b');
 }
 
 // ---------- On foot: enter / exit / jack ----------
@@ -4311,8 +4298,6 @@ if(window.GameSystems){
   // Engine-side event taps: systems hear the world without polling.
   const _origDie=die;   // die() is engine-owned; wrap to announce it
   die=function(){GameSystems.events.emit('player:died',{x:playerX,z:playerZ});return _origDie.apply(this,arguments);};
-  const _origSave=saveGame;
-  saveGame=function(){const r=_origSave.apply(this,arguments);GameSystems.events.emit('game:saved',{});return r;};
   // NEON is the home world now that the legacy state is gone. Build it before
   // the systems boot so their init() sees a real world, then boot, then replay
   // worldChanged so systems that build per-world state in that hook (graph,

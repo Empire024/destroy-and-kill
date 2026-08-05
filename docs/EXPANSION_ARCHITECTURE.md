@@ -84,9 +84,11 @@ breaks: check `GameSystems.api('x')` for null every time.
 - **Damage**: `api('vdamage').damage(target,{amount,channel:'ballistic'|'collision'|'fire',from})`
   is THE way anything hurts a vehicle. It owns stage transitions
   healthy→damaged→critical→burning→exploded and emits `vehicle:stage` events.
-- **Events bus names**: `race:start/finish`, `coin:collected`, `zone:enter/exit`,
-  `shop:enter/closed`, `police:pursuit`, `vehicle:stage`, `player:died`,
-  `game:saved`, `time:phase` (dawn/day/dusk/night).
+- **Events bus names**: `race:start/finish`, `coin:collected`,
+  `coinroute:complete`, `zone:enter/exit/record`, `shop:enter/closed/repair`,
+  `police:pursuit`, `vehicle:stage`, `prop:destroyed`, `signal:destroyed`,
+  `player:died`, `save:reset`, `time:phase` (dawn/day/dusk/night).
+  (`game:saved` was retired with the legacy safehouse save.)
 
 ## Handoffs
 
