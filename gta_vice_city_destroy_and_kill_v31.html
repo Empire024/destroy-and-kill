@@ -117,6 +117,7 @@ Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-
     font-size:20px;font-weight:800;letter-spacing:3px;pointer-events:auto;cursor:pointer;background:rgba(32,227,255,.07);transition:.2s}
   #overlay .go:hover{background:var(--cyan);color:#05060a;box-shadow:0 0 40px rgba(32,227,255,.6)}
   #vehicleSelect{display:grid;grid-template-columns:repeat(4,minmax(185px,235px));gap:16px;margin-top:28px;pointer-events:auto}
+  #mapSelect{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,290px));gap:16px;margin-top:28px;pointer-events:auto;justify-content:center}
   .vehicleCard{position:relative;min-height:210px;padding:24px 18px 20px;border:2px solid #334052;border-radius:18px;background:linear-gradient(155deg,rgba(25,31,43,.96),rgba(5,7,11,.96));color:#fff;cursor:pointer;text-align:left;overflow:hidden;transition:transform .16s,border-color .16s,box-shadow .16s}
   .vehicleCard:hover{transform:translateY(-7px) scale(1.025);border-color:var(--cyan);box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 30px rgba(32,227,255,.22)}
   .vehicleCard:before{content:"";position:absolute;inset:auto -25px -55px auto;width:150px;height:150px;border-radius:50%;background:var(--card);filter:blur(2px);opacity:.22}
@@ -124,7 +125,7 @@ Use the included v31 START_GAME.bat package; Prague renders in a dedicated full-
   .vehicleCard h2{margin-top:18px;font-size:27px;letter-spacing:2px;color:var(--card)}
   .vehicleCard .drive{margin-top:5px;font-size:13px;font-weight:900;letter-spacing:4px;color:#dce5f2}
   .vehicleCard p{margin-top:13px;font-size:13px;line-height:1.45;color:#9eacc0}
-  @media(max-width:980px){#vehicleSelect{grid-template-columns:repeat(2,minmax(210px,280px))}}@media(max-width:620px){#vehicleSelect{grid-template-columns:1fr;width:min(92vw,420px);max-height:65vh;overflow:auto}.vehicleCard{min-height:145px}#overlay h1{font-size:48px}}
+  @media(max-width:980px){#vehicleSelect{grid-template-columns:repeat(2,minmax(210px,280px))}}@media(max-width:620px){#vehicleSelect,#mapSelect{grid-template-columns:1fr;width:min(92vw,420px);max-height:65vh;overflow:auto}.vehicleCard{min-height:145px}#overlay h1{font-size:48px}}
   #loading{color:#9ab;font-size:14px;letter-spacing:2px;margin-top:22px}
   .fade{opacity:0;pointer-events:none!important}
 
@@ -313,8 +314,9 @@ HOT</span>
 <div id="vig"></div>
 <div id="wasted" class=""><div class="w">WASTED</div></div>
 <div id="overlay">
-  <h1>CHOOSE YOUR CAR</h1>
+  <h1 id="overlayTitle">CHOOSE YOUR MAP</h1>
   <div class="sub">DESTROY AND KILL</div>
+  <div id="mapSelect"></div>
   <div id="vehicleSelect">
     <button class="vehicleCard" data-vehicle="streetDrift" style="--card:#ff7abf">
       <div class="carIcon">🏎️</div><h2>STREET DRIFT</h2><div class="drive">RWD · 50% POWER</div>
@@ -404,12 +406,23 @@ window.addEventListener('unhandledrejection', (e) => {
   if(/message channel closed|asynchronous response/i.test(message))e.preventDefault();
 });
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" onerror="var el=document.getElementById('loading');el.style.color='#ff6b6b';el.textContent='⚠ could not load Three.js from CDN — check your internet connection.';"></script>
+<!-- Three.js r128 is vendored locally: the game has no remote runtime dependency. -->
+<script src="vendor/three/three.min.js" onerror="var el=document.getElementById('loading');el.style.color='#ff6b6b';el.textContent='⚠ vendor/three/three.min.js is missing — run START_GAME.bat from the extracted folder.';"></script>
+<script src="vendor/three/GLTFLoader.js"></script>
+<!-- World API + world modules. Order matters: api, then core, then districts. -->
+<script src="src/world/world-api.js"></script>
+<script src="src/world/neon/neon-core.js"></script>
+<script src="src/world/neon/district-downtown.js"></script>
+<script src="src/world/neon/district-docks.js"></script>
+<script src="src/world/neon/district-hills.js"></script>
+<script src="src/world/neon/district-strip.js"></script>
+<script src="src/world/neon/district-quarry.js"></script>
+<script src="src/world/neon/district-links.js"></script>
 <script>
 (() => {
 "use strict";
 const startBtn=document.getElementById('startbtn'), loadingEl=document.getElementById('loading');
-if(typeof THREE==='undefined'){ loadingEl.textContent='⚠ could not load 3D engine (need internet for the Three.js CDN).'; loadingEl.style.color='#ff6b6b'; return; }
+if(typeof THREE==='undefined'){ loadingEl.textContent='⚠ could not load the 3D engine (vendor/three/three.min.js missing).'; loadingEl.style.color='#ff6b6b'; return; }
 loadingEl.textContent='Choose a vehicle.';
 
 const rand=(a,b)=>a+Math.random()*(b-a);
@@ -1201,7 +1214,10 @@ function spawnTrafficCar(){
   mesh.position.set(t.x,0,t.z); mesh.rotation.y=t.heading;
   traffic.push(t);
 }
-for(let i=0;i<90;i++) spawnTrafficCar();
+// Wrapped in a function so switching away from and back to the legacy map can
+// rebuild its grid population instead of leaving orphaned, frozen meshes.
+function populateLegacyGridTraffic(){ for(let i=0;i<90;i++) spawnTrafficCar(); }
+populateLegacyGridTraffic();
 
 // ---------- Pedestrians & crosswalks ----------
 
@@ -1223,26 +1239,29 @@ function addPed(axis,coord,pos,lo,hi){
   scene.add(m);
   peds.push({mesh:m,x,z,axis,coord,pos,lo,hi,dir:Math.random()<0.5?1:-1,spd:3.4,pause:0,dead:false});
 }
-// strollers — bounded to one clear sidewalk segment between two adjacent cross-roads (never step on a road)
-for(let i=0;i<150;i++){
-  const axis=Math.random()<0.5?'x':'z';
-  const coord=roadLines[(Math.random()*GRID)|0]+(ROAD/2+SW*0.5)*(Math.random()<0.5?1:-1);
-  const k=(Math.random()*(GRID-1))|0, lo=roadLines[k]+ROAD/2+2, hi=roadLines[k+1]-ROAD/2-2;
-  if(hi-lo<6){ i--; continue; }
-  addPed(axis,coord,rand(lo,hi),lo,hi);
-}
-// crossers — pace a crosswalk across one road, between the two facing sidewalks
 const _cwSeen=new Set();
-for(let n=0;n<26;n++){
-  const axis=Math.random()<0.5?'x':'z';
-  const ca=1+((Math.random()*(GRID-2))|0), cb=1+((Math.random()*(GRID-2))|0);
-  const center=roadLines[axis==='x'?ca:cb], base=roadLines[axis==='x'?cb:ca];
-  const side=Math.random()<0.5?1:-1, coord=base+(ROAD/2+SW*0.5)*side;
-  const cx=axis==='x'?center:coord, cz=axis==='x'?coord:center;
-  const key=axis+ca+'_'+cb+'_'+side; if(!_cwSeen.has(key)){ _cwSeen.add(key); drawCrosswalk(cx,cz,axis); }
-  const lo=center-(ROAD/2+SW), hi=center+(ROAD/2+SW);
-  addPed(axis,coord,rand(lo,hi),lo,hi);
+function populateLegacyGridPeds(){
+  // strollers — bounded to one clear sidewalk segment between two adjacent cross-roads (never step on a road)
+  for(let i=0;i<150;i++){
+    const axis=Math.random()<0.5?'x':'z';
+    const coord=roadLines[(Math.random()*GRID)|0]+(ROAD/2+SW*0.5)*(Math.random()<0.5?1:-1);
+    const k=(Math.random()*(GRID-1))|0, lo=roadLines[k]+ROAD/2+2, hi=roadLines[k+1]-ROAD/2-2;
+    if(hi-lo<6){ i--; continue; }
+    addPed(axis,coord,rand(lo,hi),lo,hi);
+  }
+  // crossers — pace a crosswalk across one road, between the two facing sidewalks
+  for(let n=0;n<26;n++){
+    const axis=Math.random()<0.5?'x':'z';
+    const ca=1+((Math.random()*(GRID-2))|0), cb=1+((Math.random()*(GRID-2))|0);
+    const center=roadLines[axis==='x'?ca:cb], base=roadLines[axis==='x'?cb:ca];
+    const side=Math.random()<0.5?1:-1, coord=base+(ROAD/2+SW*0.5)*side;
+    const cx=axis==='x'?center:coord, cz=axis==='x'?coord:center;
+    const key=axis+ca+'_'+cb+'_'+side; if(!_cwSeen.has(key)){ _cwSeen.add(key); drawCrosswalk(cx,cz,axis); }
+    const lo=center-(ROAD/2+SW), hi=center+(ROAD/2+SW);
+    addPed(axis,coord,rand(lo,hi),lo,hi);
+  }
 }
+populateLegacyGridPeds();
 
 
 // ---------- Streamed county/desert AI ----------
@@ -1250,7 +1269,43 @@ let regionalPopulationClock=0;
 function routeCandidatesNear(px,pz,minD=950,maxD=3000){
   const out=[],radius=Math.ceil(maxD/STATE_ROAD_CELL)+1;for(const seg of roadCandidatesAt(px,pz,radius)){const q=pointSegInfo(px,pz,seg);if(q.d<=maxD){const midx=(seg.ax+seg.bx)/2,midz=(seg.az+seg.bz)/2,md=dist2(px,pz,midx,midz);if(md>=minD*.35)out.push(seg);}}return out;
 }
+/* Generic road-following traffic for hand-authored worlds (NEON, Prague…).
+   Legacy keeps its own route-graph driver below — this one only needs
+   WORLD_nearestRoad, so any world that exposes roads gets live traffic. */
+function spawnGenericTrafficNear(px,pz){
+  const a=rand(0,Math.PI*2),d=rand(260,900);
+  const near=WORLD_nearestRoad(px+Math.cos(a)*d,pz+Math.sin(a)*d);
+  if(!near||near.d>90)return null;
+  const dirSign=Math.random()<.5?1:-1,heading=near.heading+(dirSign>0?0:Math.PI);
+  const lane=near.width*.24*(dirSign>0?1:-1),nx=Math.cos(near.heading),nz=-Math.sin(near.heading);
+  const x=near.x+nx*lane,z=near.z+nz*lane;
+  const mesh=makeCar(pick(trafficColors),false,pick(CAR_STYLES));
+  // regional:true routes it to updateRegionalTraffic, which dispatches on .generic
+  const t={regional:true,generic:true,mesh,x,z,y:near.y,heading,pitch:0,spd:rand(16,30),cruise:rand(24,46),dead:false,hp:100,burning:false,persistUntil:0};
+  mesh.position.set(x,near.y,z);mesh.rotation.set(0,heading,0);traffic.push(t);return t;
+}
+function updateGenericTraffic(t,dt){
+  // look ahead, snap toward the road centre-line, brake for corners
+  const ax=t.x+Math.sin(t.heading)*26,az=t.z+Math.cos(t.heading)*26;
+  const ahead=WORLD_nearestRoad(ax,az);
+  if(ahead){
+    const lane=ahead.width*.24,nx=Math.cos(ahead.heading),nz=-Math.sin(ahead.heading);
+    // keep to the side of the centre-line we started on
+    if(t.laneSign===undefined)t.laneSign=Math.sign((t.x-ahead.x)*nx+(t.z-ahead.z)*nz)||1;
+    const tx=ahead.x+nx*lane*t.laneSign,tz=ahead.z+nz*lane*t.laneSign;
+    let err=Math.atan2(tx-t.x,tz-t.z)-t.heading;err=Math.atan2(Math.sin(err),Math.cos(err));
+    t.heading+=clamp(err,-1.5*dt,1.5*dt);
+    const turn=Math.abs(err)>.2,want=turn?Math.min(18,t.cruise):t.cruise;
+    t.spd+=clamp(want-t.spd,-40*dt,16*dt);
+  } else t.spd=Math.max(0,t.spd-24*dt);
+  t.x+=Math.sin(t.heading)*t.spd*dt;t.z+=Math.cos(t.heading)*t.spd*dt;
+  const here=WORLD_nearestRoad(t.x,t.z);
+  t.y=here?here.y:WORLD_groundHeightAt(t.x,t.z,t.y);
+  t.pitch=here?here.pitch*(Math.cos(t.heading-here.heading)>=0?1:-1):0;
+  t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.set(-t.pitch,t.heading,0);
+}
 function spawnRegionalTrafficNear(px=playerX,pz=playerZ){
+  if(activeWorld.id!=='legacy')return spawnGenericTrafficNear(px,pz);
   const candidates=routeCandidatesNear(px,pz),seg=candidates.length?pick(candidates):nearestStateRoad(px,pz)?.seg;if(!seg)return null;
   const route=STATE_ROUTES[seg.routeIndex],dirSign=Math.random()<.5?1:-1,t=rand(.08,.92),dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,lane=(route.width*.22)*(dirSign>0?1:-1),x=seg.ax+dx*t-dz/len*lane,z=seg.az+dz*t+dx/len*lane,y=lerp(seg.ay,seg.by,t);
   const mesh=makeCar(pick(trafficColors),false,pick(CAR_STYLES)),heading=Math.atan2(dx*dirSign,dz*dirSign),pitch=Math.atan2(seg.by-seg.ay,len)*(dirSign>0?1:-1);
@@ -1258,6 +1313,7 @@ function spawnRegionalTrafficNear(px=playerX,pz=playerZ){
   mesh.position.set(x,y,z);mesh.rotation.set(-pitch,heading,0);traffic.push(carAI);return carAI;
 }
 function updateRegionalTraffic(t,dt){
+  if(t.generic)return updateGenericTraffic(t,dt);
   const route=STATE_ROUTES[t.routeIndex],pts=route.points;let targetIndex=t.dirSign>0?t.segIndex+1:t.segIndex;
   if(targetIndex<0||targetIndex>=pts.length){t.dirSign*=-1;targetIndex=t.dirSign>0?t.segIndex+1:t.segIndex;}
   const target=pts[clamp(targetIndex,0,pts.length-1)],dx=target[0]-t.x,dz=target[1]-t.z,dist=Math.hypot(dx,dz);let err=Math.atan2(dx,dz)-t.heading;err=Math.atan2(Math.sin(err),Math.cos(err));t.heading+=clamp(err,-1.35*dt,1.35*dt);
@@ -1267,19 +1323,24 @@ function updateRegionalTraffic(t,dt){
   t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.set(-t.pitch,t.heading,0);
 }
 function spawnRegionalPedNear(px=playerX,pz=playerZ){
-  const a=rand(0,Math.PI*2),d=rand(950,2300),near=nearestStateRoad(px+Math.cos(a)*d,pz+Math.sin(a)*d);if(!near)return null;
-  const side=Math.random()<.5?-1:1,off=near.seg.width*.5+rand(7,20),nx=Math.cos(near.heading),nz=-Math.sin(near.heading),x=near.x+nx*off*side,z=near.z+nz*off*side,y=stateGroundHeightAt(x,z);
-  if(!insideState(x,z)||isCityCore(x,z))return null;
+  const legacyMap=activeWorld.id==='legacy';
+  const a=rand(0,Math.PI*2),d=legacyMap?rand(950,2300):rand(160,700);
+  const near=WORLD_nearestRoad(px+Math.cos(a)*d,pz+Math.sin(a)*d);if(!near)return null;
+  const side=Math.random()<.5?-1:1,off=near.width*.5+rand(7,20),nx=Math.cos(near.heading),nz=-Math.sin(near.heading),x=near.x+nx*off*side,z=near.z+nz*off*side,y=WORLD_groundHeightAt(x,z,near.y);
+  if(!WORLD_inBounds(x,z))return null;
+  if(legacyMap&&isCityCore(x,z))return null;
   const m=new THREE.Mesh(pedGeo,new THREE.MeshStandardMaterial({color:new THREE.Color(`hsl(${rand(0,360)|0},60%,55%)`),roughness:.65}));m.position.set(x,y+2,z);
   const giantHead=new THREE.Sprite(new THREE.SpriteMaterial({map:FACE_TEX[peds.length%FACE_TEX.length],transparent:false,depthTest:true}));giantHead.scale.set(9.5,9.5,1);giantHead.position.set(0,4.1,0);m.add(giantHead);scene.add(m);
   const p={regional:true,mesh:m,x,z,y,heading:near.heading+(Math.random()<.5?0:Math.PI),spd:rand(2.2,4.4),turnTimer:rand(2,8),dead:false,persistUntil:0};peds.push(p);return p;
 }
 function updateRegionalPed(p,dt){
   p.turnTimer-=dt;if(p.turnTimer<0){p.heading+=rand(-1.1,1.1);p.turnTimer=rand(2,7);}p.x+=Math.sin(p.heading)*p.spd*dt;p.z+=Math.cos(p.heading)*p.spd*dt;
-  const road=nearestStateRoad(p.x,p.z);if(road&&road.d>road.seg.width*.85+35)p.heading=Math.atan2(road.x-p.x,road.z-p.z);p.y=stateGroundHeightAt(p.x,p.z);p.mesh.position.set(p.x,p.y+2,p.z);p.mesh.rotation.y=p.heading;
+  const road=WORLD_nearestRoad(p.x,p.z);if(road&&road.d>road.width*.85+35)p.heading=Math.atan2(road.x-p.x,road.z-p.z);p.y=WORLD_groundHeightAt(p.x,p.z,p.y);p.mesh.position.set(p.x,p.y+2,p.z);p.mesh.rotation.y=p.heading;
 }
-function removeTrafficObject(t){ const i=traffic.indexOf(t); if(i>=0)traffic.splice(i,1); if(t.mesh)scene.remove(t.mesh); }
-function removePedObject(p){ const i=peds.indexOf(p); if(i>=0)peds.splice(i,1); if(p.mesh)scene.remove(p.mesh); }
+// Detach from the actual parent: legacy grid actors get adopted into
+// legacyGroup at boot, so scene.remove() alone would leave them orphaned.
+function removeTrafficObject(t){ const i=traffic.indexOf(t); if(i>=0)traffic.splice(i,1); if(t.mesh&&t.mesh.parent)t.mesh.parent.remove(t.mesh); }
+function removePedObject(p){ const i=peds.indexOf(p); if(i>=0)peds.splice(i,1); if(p.mesh&&p.mesh.parent)p.mesh.parent.remove(p.mesh); }
 function manageRegionalPopulation(px,pz,dt){
   regionalPopulationClock-=dt;if(regionalPopulationClock>0)return;regionalPopulationClock=.24;
   const now=performance.now(),outside=!isCityCore(px,pz),carTarget=outside?34:6,pedTarget=outside?42:6;
@@ -1293,7 +1354,7 @@ function manageRegionalPopulation(px,pz,dt){
 // ---------- Cops ----------
 const cops=[];
 function spawnCop(){ const ang=rand(0,6.28),d=rand(180,320); const mesh=makeCar(0x1a2340,true);
-  const safe=clampToState(carState.x+Math.cos(ang)*d,carState.z+Math.sin(ang)*d),x=safe.x,z=safe.z;
+  const safe=WORLD_clampToBounds(carState.x+Math.cos(ang)*d,carState.z+Math.sin(ang)*d),x=safe.x,z=safe.z;
   mesh.position.set(x,0,z); cops.push({mesh,x,z,heading:0,vx:0,vz:0,ramCd:0}); }
 
 // ---------- Ambient pickups ----------
@@ -2052,10 +2113,13 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();
 addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 function resetCar(){
   if(onFoot){ carState.x=foot.x; carState.z=foot.z; }
-  carState.speed=0; carState.vx=0; carState.vz=0; carState.y=0; carState.vy=0; carState.airborne=false; carState.ramp=null; resetDriftPhysics();
+  // if we're out of bounds or wedged under the map, go back to the world spawn
+  if(!WORLD_inBounds(carState.x,carState.z)){ const sp=activeWorld.spawn||{x:0,z:0,heading:0}; carState.x=sp.x; carState.z=sp.z; carState.heading=sp.heading||0; }
+  carState.speed=0; carState.vx=0; carState.vz=0; carState.vy=0; carState.airborne=false; carState.ramp=null; resetDriftPhysics();
+  carState.y=WORLD_groundHeightAt(carState.x,carState.z,0);
   carState.hp=100; carState.burning=false; if(carState.fire&&car){ car.remove(carState.fire); } carState.fire=null;
   if(!car){ car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]); car.userData.vehicleTuneKey=vehicleTuneKey; }         // rebuild if the old one exploded
-  car.position.set(carState.x,0,carState.z); car.rotation.set(0,carState.heading,0);
+  car.position.set(carState.x,carState.y,carState.z); car.rotation.set(0,carState.heading,0);
   stats.health=100; playerHearts=3; engineBlown=false; overRevTimer=0; powerShiftTimer=0; pendingPowerShift=false; powerShiftReady=false; driveGear=1; driveMode='D'; manualModeTimer=0; manualModeHardTimer=0; shiftHoldTimer=0; reverseEngaged=false; reverseHoldTimer=0; brakeReverseTimer=0; pendingGear=0; shiftKick=0; gearElapsed=0; autoDownshiftTimer=0; autoShiftLock=0; limiterAbuseTimer=0; rpmSettleTimer=0; rpmSettleDuration=0; rpmSettleFrom=900; shiftTorqueCarryTimer=0; shiftTorqueCarry=0; postShiftPullTimer=0; postShiftPullDuration=0; postShiftPullFrom=1; resetEngineHeat(); turboSpool=0; turboPsi=0; stats.wanted=Math.max(0,stats.wanted-2); cops.forEach(c=>scene.remove(c.mesh)); cops.length=0;
   if(onFoot){ onFoot=false; footChar.visible=false; } doFlash(.3); }
 let camMode=0;
@@ -2063,8 +2127,15 @@ let camMode=0;
 // ---------- Drowning ----------
 let sinking=false, sinkTimer=0;
 function startSink(px,pz){
-  if(sinking||dead||px<=COAST_X+10)return;
-  const safe=clampToState(COAST_X-35,pz);stats.health=100;carState.hp=100;carState.x=safe.x;carState.z=safe.z;carState.vx=-Math.abs(carState.vx)*.25;carState.vz*=.45;
+  if(sinking||dead)return;
+  if(activeWorld.id==='legacy'){
+    if(px<=COAST_X+10)return;
+    const safe=clampToState(COAST_X-35,pz);stats.health=100;carState.hp=100;carState.x=safe.x;carState.z=safe.z;carState.vx=-Math.abs(carState.vx)*.25;carState.vz*=.45;
+  }else{
+    // no ocean in the authored maps — this only fires far outside the bounds
+    const safe=WORLD_clampToBounds(px,pz);stats.health=100;carState.hp=100;carState.x=safe.x;carState.z=safe.z;
+    carState.y=WORLD_groundHeightAt(safe.x,safe.z,0);carState.vx*=.25;carState.vz*=.25;carState.speed*=.25;
+  }
   boom(px,pz,0x2f6b9c,28,.4);beep(70,.35,'sine',.14);
 }
 
@@ -2138,15 +2209,14 @@ function updateFoot(dt){
   const sprint=(keys['shift']||mobileInput.nitro)?1.7:1;
   const spd=15*sprint*fwd;
   const dx=Math.sin(foot.heading)*spd*dt, dz=Math.cos(foot.heading)*spd*dt;
-  foot.x=clamp(foot.x+dx,REGION_MIN_X+8,COAST_X-8); foot.z=clamp(foot.z+dz,REGION_MIN_Z+8,REGION_MAX_Z-8);
+  { const c=WORLD_clampToBounds(foot.x+dx,foot.z+dz); foot.x=c.x; foot.z=c.z; }
   // push out of buildings with the same resolver (no vel to reflect on foot)
-  const pt={x:foot.x,z:foot.z}, nb=nearbyBuildings(foot.x,foot.z);
-  for(let i=0;i<nb.length;i++){ const b=nb[i]; aabbPush(pt,1.8,b.x,b.z,b.w*0.5,b.d*0.5,null,0); }
-  for(const b of nearbyStateObstacles(foot.x,foot.z)) aabbPush(pt,1.8,b.x,b.z,b.w*.5,b.d*.5,null,0);
+  const pt={x:foot.x,z:foot.z};
+  for(const b of WORLD_obstaclesNear(foot.x,foot.z)) aabbPush(pt,1.8,b.x,b.z,b.w*.5,b.d*.5,null,0);
   foot.x=pt.x; foot.z=pt.z;
   foot.walk+= fwd?dt*9*sprint:0;
   const bob=Math.abs(Math.sin(foot.walk))*0.25;
-  const footGround=isCityCore(foot.x,foot.z)?0:stateGroundHeightAt(foot.x,foot.z);
+  const footGround=WORLD_groundHeightAt(foot.x,foot.z,footChar.position.y);
   footChar.position.set(foot.x,footGround+bob,foot.z); footChar.rotation.y=foot.heading;
   const swing=Math.sin(foot.walk)*0.5;
   footChar.userData.legL.rotation.x=swing; footChar.userData.legR.rotation.x=-swing;
@@ -2186,8 +2256,8 @@ function update(dt){
   const PX=onFoot?foot.x:carState.x, PZ=onFoot?foot.z:carState.z;
   const drivingSpeed=onFoot?0:carState.speed;
   // Eastern ocean and the outer state boundary.
-  if(isOceanAt(PX,PZ)){ startSink(PX,PZ); return; }
-  updateStateStreaming(PX,PZ,dt); manageRegionalPopulation(PX,PZ,dt); updateStateAtmosphere(PX,PZ);
+  if(WORLD_isDrowningAt(PX,PZ)){ startSink(PX,PZ); return; }
+  WORLD_updateStreaming(PX,PZ,dt); manageRegionalPopulation(PX,PZ,dt); WORLD_updateAtmosphere(PX,PZ);
 
   // traffic — city graph nearby; streamed route AI everywhere else
   for(const t of traffic){ if(t.dead||t.burning) continue;
@@ -2556,7 +2626,7 @@ function updateDrive(dt){
   // ---- ramps: classify each nearby ramp as drivable-slope (front) or solid-wall (back/side) ----
   const rampSolids=[]; let ridingRamp=null; carState.rampCd-=dt;
   if(!carState.airborne){
-    for(const r of ramps){
+    for(const r of WORLD_rampsNear(carState.x,carState.z)){
       if(carState.x<r.x-r.ex-3||carState.x>r.x+r.ex+3||carState.z<r.z-r.ez-3||carState.z>r.z+r.ez+3) continue;
       const align= sp>1 ? (vx*r.fx+vz*r.fz)/sp : 0;   // motion aligned with the up-ramp direction?
       if(align>0.15 || carState.ramp===r) ridingRamp=r;   // driving up (or already on it) → ride the slope
@@ -2574,10 +2644,11 @@ function updateDrive(dt){
       // buildings + solid ramps, sampled along the car's length
       for(const o of bodyOffs){
         const sx=carState.x+dirx*o, sz=carState.z+dirz*o, pt={x:sx,z:sz};
-        const nb=nearbyBuildings(sx,sz);
-        for(let i=0;i<nb.length;i++){ const b=nb[i]; const im=aabbPush(pt,bodyR,b.x,b.z,b.w*0.5,b.d*0.5,vel,0.18); if(im>impact)impact=im; }
-        for(const b of nearbyStateObstacles(sx,sz)){ const im=aabbPush(pt,bodyR,b.x,b.z,b.w*.5,b.d*.5,vel,.16); if(im>impact)impact=im; }
-        for(const b of stateBoundaryWalls){ const im=aabbPush(pt,bodyR,b.x,b.z,b.w*.5,b.d*.5,vel,.12); if(im>impact)impact=im; }
+        const nb=WORLD_obstaclesNear(sx,sz);
+        for(let i=0;i<nb.length;i++){ const b=nb[i];
+          // multi-level worlds: ignore colliders the car is driving over or under
+          if(b.baseY!==undefined&&(carState.y>b.baseY+b.h-0.6||carState.y<b.baseY-2.2)) continue;
+          const im=aabbPush(pt,bodyR,b.x,b.z,b.w*0.5,b.d*0.5,vel,0.18); if(im>impact)impact=im; }
         for(const r of rampSolids){ const im=aabbPush(pt,bodyR,r.x,r.z,r.ex,r.ez,vel,0.18); if(im>impact)impact=im; }
         carState.x+=pt.x-sx; carState.z+=pt.z-sz;
       }
@@ -2611,13 +2682,22 @@ function updateDrive(dt){
     if(impact>26){ breakDriftCombo(); carState.hp-=impact*0.16; boom(carState.x,carState.z,0xffaa30,10); doFlash(.16); playCrash(); }
   }
   // Last-resort containment at extreme speed: bounce from visible walls, never teleport as water.
-  if(carState.x<REGION_MIN_X+18){carState.x=REGION_MIN_X+18;vel.x=Math.abs(vel.x)*.22;}
-  if(carState.z<REGION_MIN_Z+18){carState.z=REGION_MIN_Z+18;vel.z=Math.abs(vel.z)*.22;}
-  if(carState.z>REGION_MAX_Z-18){carState.z=REGION_MAX_Z-18;vel.z=-Math.abs(vel.z)*.22;}
+  { const B=activeWorld.bounds;
+    if(B){
+      if(carState.x<B.minX+18){carState.x=B.minX+18;vel.x=Math.abs(vel.x)*.22;}
+      if(carState.x>B.maxX-18){carState.x=B.maxX-18;vel.x=-Math.abs(vel.x)*.22;}
+      if(carState.z<B.minZ+18){carState.z=B.minZ+18;vel.z=Math.abs(vel.z)*.22;}
+      if(carState.z>B.maxZ-18){carState.z=B.maxZ-18;vel.z=-Math.abs(vel.z)*.22;}
+    }else{
+      if(carState.x<REGION_MIN_X+18){carState.x=REGION_MIN_X+18;vel.x=Math.abs(vel.x)*.22;}
+      if(carState.z<REGION_MIN_Z+18){carState.z=REGION_MIN_Z+18;vel.z=Math.abs(vel.z)*.22;}
+      if(carState.z>REGION_MAX_Z-18){carState.z=REGION_MAX_Z-18;vel.z=-Math.abs(vel.z)*.22;}
+    }
+  }
   vx=vel.x; vz=vel.z;
 
   // ---- flat ground and stunt ramps ----
-  const terrainY=isCityCore(carState.x,carState.z)?0:stateGroundHeightAt(carState.x,carState.z);
+  const terrainY=WORLD_groundHeightAt(carState.x,carState.z,carState.y);
   if(!carState.airborne){
     if(ridingRamp){
       const r=ridingRamp,sp2=Math.hypot(vx,vz),rampLen=r.len||RAMP_L,rampHeight=r.height||RAMP_H,baseY=r.baseY==null?terrainY:r.baseY;
@@ -2625,11 +2705,13 @@ function updateDrive(dt){
       carSurfacePitch=-Math.atan2(rampHeight,rampLen);
       if(proj>=rampLen/2-.8&&align>.2&&sp2>28){carState.airborne=true;carState.vy=clamp(sp2*.19+rampHeight*.32,8,46);carState.airtime=0;carState.maxAir=groundY;carState.rampCd=.6;carState.ramp=null;beep(660,.12,'square',.12);}else{carState.y=groundY;carState.ramp=r;}
     }else if(carState.ramp&&carState.y>terrainY+.55){carState.airborne=true;carState.vy=0;carState.airtime=0;carState.maxAir=carState.y;carState.ramp=null;}
-    else{carState.y=lerp(carState.y,terrainY,clamp(dt*9,0,1));carState.ramp=null;carSurfacePitch=lerp(carSurfacePitch,-stateSurfacePitchAt(carState.x,carState.z,carState.heading),clamp(dt*7,0,1));}
+    // drove off the edge of an elevated deck → real drop, not a slow sink
+    else if(carState.y>terrainY+2.6){carState.airborne=true;carState.vy=0;carState.airtime=0;carState.maxAir=carState.y;carState.ramp=null;}
+    else{carState.y=lerp(carState.y,terrainY,clamp(dt*9,0,1));carState.ramp=null;carSurfacePitch=lerp(carSurfacePitch,-WORLD_surfacePitchAt(carState.x,carState.z,carState.heading),clamp(dt*7,0,1));}
   }
   if(carState.airborne){
     carState.airtime+=dt;carState.y+=carState.vy*dt;carState.vy-=55*dt;carState.maxAir=Math.max(carState.maxAir,carState.y);
-    const landingY=isCityCore(carState.x,carState.z)?0:stateGroundHeightAt(carState.x,carState.z);
+    const landingY=WORLD_groundHeightAt(carState.x,carState.z,carState.y);
     if(carState.y<=landingY){const airHeight=Math.max(0,carState.maxAir-landingY);carState.y=landingY;carState.airborne=false;doFlash(.08);if(carState.airtime>.7||airHeight>7){const bonus=Math.round(60+airHeight*30+carState.airtime*120);stats.cash+=bonus;addToast('🛹 STUNT JUMP +$'+bonus,'#ffd23f');playSuccess();}vx*=.85;vz*=.85;}
   }
 
@@ -2662,7 +2744,7 @@ function applySmoothCamera(desired,target,dt,posRate,lookRate,rotRate){
 }
 function updateCamera(dt){
   if(onFoot){
-    const fx=Math.sin(foot.heading),fz=Math.cos(foot.heading),fy=isCityCore(foot.x,foot.z)?0:stateGroundHeightAt(foot.x,foot.z);
+    const fx=Math.sin(foot.heading),fz=Math.cos(foot.heading),fy=WORLD_groundHeightAt(foot.x,foot.z,footChar.position.y);
     camDesired.set(foot.x-fx*13,fy+9,foot.z-fz*13);camTarget.set(foot.x+fx*6,fy+3.5,foot.z+fz*6);applySmoothCamera(camDesired,camTarget,dt,8,10,12);return;
   }
   const dirx=Math.sin(carState.heading),dirz=Math.cos(carState.heading),mph=Math.abs(carState.speed)*1.6;
@@ -2752,6 +2834,127 @@ function hud(){stats.cash=999999999999;stats.nitro=100;stats.health=playerHearts
   heartEls.forEach((el,i)=>el.classList.toggle('empty',i>=playerHearts)); heartHealthEl.classList.toggle('hit',heartFlashTimer>0);
 }
 
+// ============================================================================
+// WORLD MANAGER
+// ----------------------------------------------------------------------------
+// The engine talks to the active map through WORLD_* dispatchers only. The
+// legacy map is wrapped as a world implementation over the original functions,
+// so its behaviour is byte-for-byte what it always was.
+// ============================================================================
+const legacyGroup=new THREE.Group(); legacyGroup.name='legacy-world'; scene.add(legacyGroup);
+{ // adopt everything the legacy map built into one toggleable group
+  const keep=new Set([legacyGroup,car,footChar,spotL.target,spotR.target]);
+  for(const child of scene.children.slice()){
+    if(keep.has(child)||child.isLight||child.isCamera) continue;
+    legacyGroup.add(child);
+  }
+}
+
+const legacyWorld={
+  id:'legacy', name:'LEGACY STATE', group:legacyGroup,
+  spawn:{x:roadLines[1],z:roadLines[1],heading:0},
+  groundHeightAt:(x,z)=>isCityCore(x,z)?0:stateGroundHeightAt(x,z),
+  surfacePitchAt:(x,z,h)=>stateSurfacePitchAt(x,z,h),
+  obstaclesNear:(x,z)=>{ const out=nearbyBuildings(x,z).slice();
+    for(const b of nearbyStateObstacles(x,z)) out.push(b);
+    for(const b of stateBoundaryWalls) out.push(b);
+    return out; },
+  rampsNear:()=>ramps,
+  // normalise to the world contract: callers read .width, not .seg.width
+  nearestRoad:(x,z)=>{ const q=nearestStateRoad(x,z); if(q&&q.width===undefined)q.width=q.seg.width; return q; },
+  isDrowningAt:(x,z)=>isOceanAt(x,z),
+  inBounds:(x,z)=>insideState(x,z),
+  clampToBounds:(x,z)=>clampToState(x,z),
+  updateStreaming:(px,pz,dt)=>updateStateStreaming(px,pz,dt),
+  updateAtmosphere:(x,z)=>updateStateAtmosphere(x,z),
+  stats:()=>({chunks:stateChunks.size}),
+  dispose(){}
+};
+
+let activeWorld=legacyWorld;
+const worldInstances=new Map([['legacy',legacyWorld]]);
+
+// --- dispatchers the engine calls -------------------------------------------
+function WORLD_groundHeightAt(x,z,curY){ return activeWorld.groundHeightAt(x,z,curY); }
+function WORLD_surfacePitchAt(x,z,h){ return activeWorld.surfacePitchAt(x,z,h); }
+function WORLD_obstaclesNear(x,z){ return activeWorld.obstaclesNear(x,z); }
+function WORLD_rampsNear(x,z){ return activeWorld.rampsNear(x,z); }
+function WORLD_nearestRoad(x,z){ return activeWorld.nearestRoad?activeWorld.nearestRoad(x,z):null; }
+function WORLD_isDrowningAt(x,z){ return activeWorld.isDrowningAt(x,z); }
+function WORLD_inBounds(x,z){ return activeWorld.inBounds(x,z); }
+function WORLD_clampToBounds(x,z){ return activeWorld.clampToBounds(x,z); }
+function WORLD_updateStreaming(px,pz,dt){ activeWorld.updateStreaming(px,pz,dt); }
+function WORLD_updateAtmosphere(x,z){ activeWorld.updateAtmosphere(x,z); }
+
+/** Build (once) and activate a map by id. Returns true on success. */
+function activateWorld(id){
+  const def=window.GameWorlds?window.GameWorlds.get(id):null;
+  if(id!=='legacy'&&!def){ console.error('[world] unknown map:',id); return false; }
+  let inst=worldInstances.get(id);
+  if(!inst){
+    const t0=performance.now();
+    inst=def.create({
+      THREE, scene, renderer, camera,
+      utils:{rand,clamp,lerp,pick,smooth01},
+      quality:{mobile:MOBILE_UI,tier:MOBILE_UI?'low':'high'}
+    });
+    inst.id=id;
+    worldInstances.set(id,inst);
+    console.log('[world] built "'+id+'" in '+Math.round(performance.now()-t0)+'ms',inst.stats?inst.stats():'');
+  }
+  // detach the previous map
+  if(activeWorld&&activeWorld!==inst&&activeWorld.group) activeWorld.group.visible=false;
+  // clear the outgoing map's dynamic population so nothing is left floating
+  traffic.slice().forEach(removeTrafficObject); peds.slice().forEach(removePedObject);
+  cops.slice().forEach(c=>{ if(c.mesh&&c.mesh.parent)c.mesh.parent.remove(c.mesh); }); cops.length=0;
+  activeWorld=inst;
+  if(inst.group){ if(!inst.group.parent) scene.add(inst.group); inst.group.visible=true; }
+  // the legacy map's grid traffic/peds are built once at boot — rebuild them
+  if(inst===legacyWorld){ populateLegacyGridTraffic(); populateLegacyGridPeds(); }
+  const sp=inst.spawn||{x:0,z:0,heading:0};
+  carState.x=sp.x; carState.z=sp.z; carState.heading=sp.heading||0;
+  carState.y=WORLD_groundHeightAt(sp.x,sp.z,0);
+  carState.speed=0; carState.vx=0; carState.vz=0; carState.vy=0; carState.airborne=false; carState.ramp=null;
+  playerX=carState.x; playerZ=carState.z;
+  resetDriftPhysics(); resetEngineHeat(); cameraSmoothingReady=false;
+  if(car){ car.position.set(carState.x,carState.y,carState.z); car.rotation.set(0,carState.heading,0); }
+  WORLD_updateStreaming(carState.x,carState.z,1);
+  currentMapId=id;
+  return true;
+}
+let currentMapId='legacy';
+
+// ---------- Debug / perf hook ----------
+// Exposed deliberately: the game runs inside an IIFE, and both the perf overlay
+// and the automated playtests need a way to inspect and drive world state.
+window.GAME_DEBUG={
+  get mapId(){return currentMapId;},
+  get world(){return activeWorld;},
+  get car(){return {x:carState.x,y:carState.y,z:carState.z,heading:carState.heading,speed:carState.speed,
+                    mph:Math.abs(carState.speed)*1.6,airborne:carState.airborne,gear:driveGear,onRamp:!!carState.ramp};},
+  get camera(){return {x:camera.position.x,y:camera.position.y,z:camera.position.z};},
+  get render(){const i=renderer.info;return {calls:i.render.calls,triangles:i.render.triangles,
+                    geometries:i.memory.geometries,textures:i.memory.textures,programs:i.programs?i.programs.length:0};},
+  get atmosphere(){return {background:'#'+scene.background.getHexString(),
+                    fog:scene.fog?{color:'#'+scene.fog.color.getHexString(),density:scene.fog.density}:null};},
+  get scene(){return {children:scene.children.length,
+                    groups:scene.children.filter(c=>c.type==='Group').map(g=>({name:g.name||g.type,visible:g.visible,kids:g.children.length}))};},
+  worldStats(){return activeWorld.stats?activeWorld.stats():null;},
+  groundAt(x,z,y){return WORLD_groundHeightAt(x,z,y===undefined?0:y);},
+  nearestRoad(x,z){return WORLD_nearestRoad(x,z);},
+  teleport(x,z,heading){carState.x=x;carState.z=z;if(heading!==undefined)carState.heading=heading;
+    carState.y=WORLD_groundHeightAt(x,z,0);carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;
+    carState.airborne=false;carState.ramp=null;playerX=x;playerZ=z;cameraSmoothingReady=false;return this.car;},
+  setMap(id){return activateWorld(id);},
+  pickVehicle(k){selectPlayerVehicle(k);resetCar();return vehicleTuneKey;},
+  /** Full "map + car + go" in one call, for automated playtests. */
+  start(mapId,vehicleKey){ if(mapId)activateWorld(mapId); selectPlayerVehicle(vehicleKey||'proDrift'); resetCar(); begin(); return this.car; },
+  press(k,down){keys[String(k).toLowerCase()]=!!down;},
+  /** Run the fixed-step simulation without rAF — lets headless tests drive. */
+  step(n,dt){n=n||1;dt=dt||1/60;for(let i=0;i<n;i++){updateWheelSystem(dt);update(dt);}return this.car;},
+  frame(){renderer.render(scene,camera);return this.render;}
+};
+
 // ---------- Loop ----------
 let last=performance.now();
 function loop(now){ const dt=Math.min(.045,(now-last)/1000); last=now;
@@ -2767,13 +2970,66 @@ updateWheelControlsUI();refreshWheelDevices();
 function openVehicleSelection(){
   if(wheelSetupOpen)closeWheelSetup();if(pragueMode)exitPragueMode();if(showFullMap)toggleFullMap();
   carSelectionOpen=true;document.body.classList.add('car-select-open');Object.keys(keys).forEach(k=>keys[k]=false);Object.keys(mobileInput).forEach(k=>mobileInput[k]=false);carState.speed=0;carState.vx=0;carState.vz=0;pendingGear=0;shiftKick=0;limiterActive=false;breakDriftCombo?.();
-  overlay.classList.remove('fade');loadingEl.textContent='Choose a vehicle.';loadingEl.style.color='#9ab';pragueToggleEl.style.display='none';
+  overlay.classList.remove('fade');pragueToggleEl.style.display='none';
+  showMapStage();
 }
 function begin(){
-  const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();updateStateStreaming(carState.x,carState.z,1);givers.forEach(g=>g.g.visible=false);missionLock=1e12;}
+  const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();WORLD_updateStreaming(carState.x,carState.z,1);givers.forEach(g=>g.g.visible=false);missionLock=1e12;}
   carSelectionOpen=false;document.body.classList.remove('car-select-open');overlay.classList.add('fade');pragueToggleEl.style.display='block';cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
 }
-document.querySelectorAll('.vehicleCard').forEach(card=>card.addEventListener('click',()=>{selectPlayerVehicle(card.dataset.vehicle);resetCar();begin();}));
+// ---------- Map selection ----------
+const mapSelectEl=document.getElementById('mapSelect'),overlayTitleEl=document.getElementById('overlayTitle');
+const vehicleSelectEl=document.getElementById('vehicleSelect');
+let pendingMapId=null,mapStage='map';
+const MAP_CARDS=[
+  {id:'neon',  name:'NEON CITY',    accent:'#ff2d9b', icon:'🌃', sub:'DEFAULT · 5 DISTRICTS',
+   desc:'Dense neon downtown, dockside drift yards, hill switchbacks, a retail strip and a quarry stunt zone. Built for flow.'},
+  {id:'legacy',name:'LEGACY STATE', accent:'#ffd23f', icon:'🛣️', sub:'THE ORIGINAL MAP',
+   desc:'The original coast-to-desert procedural state, preserved exactly as it was. Huge, open and empty by design.'}
+];
+function buildMapCards(){
+  mapSelectEl.innerHTML='';
+  for(const m of MAP_CARDS){
+    if(m.id!=='legacy'&&!window.GameWorlds.get(m.id))continue;   // never show a map that isn't there
+    const b=document.createElement('button');
+    b.className='vehicleCard';b.dataset.map=m.id;b.style.setProperty('--card',m.accent);
+    b.innerHTML='<div class="carIcon">'+m.icon+'</div><h2>'+m.name+'</h2><div class="drive">'+m.sub+'</div><p>'+m.desc+'</p>';
+    b.addEventListener('click',()=>chooseMap(m.id));
+    mapSelectEl.appendChild(b);
+  }
+}
+function showMapStage(){
+  mapStage='map';pendingMapId=null;
+  overlayTitleEl.textContent='CHOOSE YOUR MAP';
+  mapSelectEl.style.display='';vehicleSelectEl.style.display='none';
+  loadingEl.textContent='Choose a map.';loadingEl.style.color='#9ab';
+}
+function showVehicleStage(){
+  mapStage='vehicle';
+  overlayTitleEl.textContent='CHOOSE YOUR CAR';
+  mapSelectEl.style.display='none';vehicleSelectEl.style.display='';
+  loadingEl.textContent='Choose a vehicle.';loadingEl.style.color='#9ab';
+}
+function chooseMap(id){
+  pendingMapId=id;
+  if(id===currentMapId){ showVehicleStage(); return; }
+  // Building a world can take a second — show progress, then yield so the
+  // message paints before we block on construction. setTimeout rather than
+  // rAF: rAF is throttled to a stop in a background tab, which would leave the
+  // picker stuck on "Building…" forever.
+  loadingEl.textContent='Building '+(MAP_CARDS.find(m=>m.id===id)||{}).name+'…';
+  loadingEl.style.color='#20e3ff';
+  setTimeout(()=>{
+    const ok=activateWorld(id);
+    if(!ok){ loadingEl.textContent='⚠ that map failed to load — see the console.'; loadingEl.style.color='#ff6b6b'; return; }
+    showVehicleStage();
+  },30);
+}
+buildMapCards();
+showMapStage();
+document.querySelectorAll('.vehicleCard').forEach(card=>card.addEventListener('click',()=>{
+  if(!card.dataset.vehicle)return;
+  selectPlayerVehicle(card.dataset.vehicle);resetCar();begin();}));
 pragueToggleEl.addEventListener('click',togglePragueMode);
 const unlockAudio=()=>{if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();};
 addEventListener('pointerdown',unlockAudio,{passive:true});addEventListener('keydown',unlockAudio);
