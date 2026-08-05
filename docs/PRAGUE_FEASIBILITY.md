@@ -1,5 +1,23 @@
 # Prague feasibility spike
 
+> **Status: superseded — kept as the historical record of the spike.**
+>
+> Every measurement below is what was actually observed when the feasibility
+> question was being answered, against a 1.43 km² box. It is deliberately NOT
+> rewritten, because a feasibility report that quietly acquires today's numbers
+> stops being evidence of anything.
+>
+> Prague shipped, and has since been expanded to **8.42 km²** of the centre:
+> 5,953 buildings, 3,164 ways, `prague1.json` 2.33 MB (704 KiB gzipped), fetched
+> as 6 cached Overpass tiles. The world is scaled 3x on load so the car is not
+> oversized against real 7 m streets. Current figures live in `meta.counts`
+> inside the data and in the build log — the only places they cannot go stale.
+>
+> One prediction here is worth checking against the outcome: the closing section
+> extrapolated a 6 km² box at roughly 3 MB raw. The real 8.42 km² box came in at
+> 2.33 MB — but only because footways were dropped, and they are 58% of all road
+> vertices. With them it measured 3.3 MB, so the extrapolation was about right.
+
 **Question:** can a small, genuine, static, local Prague area be driven in the *same* Three.js
 scene, camera, car mesh, physics and collision system as the rest of the game — with no iframe,
 no fake screen-space car, no separate physics, no postMessage, no runtime map service, no proxy?

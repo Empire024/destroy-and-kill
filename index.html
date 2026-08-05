@@ -93,13 +93,21 @@ The in-game versions are heavily simplified, procedural adaptations optimized fo
   #banner .bt{font-size:56px;font-weight:900;letter-spacing:3px;filter:drop-shadow(0 4px 20px rgba(0,0,0,.7))}
   #banner .bs{font-size:20px;color:#dbe;margin-top:4px;letter-spacing:2px}
   #flash{position:absolute;inset:0;background:var(--danger);opacity:0;pointer-events:none;transition:opacity .1s;z-index:4}
+  /* WASTED creeps in over the wreck rather than snapping on: the vignette leads,
+     then the word swells out of it. Both are slower than the 3.2s death sequence
+     is long, so the last thing you watch is the fireball, not the caption. */
   #wasted{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(ellipse at center,rgba(0,0,0,.15),rgba(0,0,0,.78));opacity:0;pointer-events:none;transition:opacity 1.1s}
+    background:radial-gradient(ellipse at center,rgba(0,0,0,.15),rgba(0,0,0,.78));opacity:0;pointer-events:none;transition:opacity 2.1s ease-in}
   #wasted.show{opacity:1}
   #wasted .w{font-family:Impact,Haettenschweiler,"Arial Narrow Bold","Franklin Gothic Bold",sans-serif;
     font-size:150px;font-weight:900;letter-spacing:4px;color:#d81f1f;text-transform:uppercase;
-    text-shadow:0 5px 24px rgba(0,0,0,.8),0 0 8px rgba(0,0,0,.6);transform:scaleY(1.12)}
-  /* black & white game behind the WASTED overlay */
+    text-shadow:0 5px 24px rgba(0,0,0,.8),0 0 8px rgba(0,0,0,.6);
+    opacity:0;transform:scaleY(1.12) scale(.74);filter:blur(9px);
+    transition:opacity 1.9s ease-in,transform 2.4s cubic-bezier(.13,.85,.28,1),filter 1.7s ease-in}
+  #wasted.show .w{opacity:1;transform:scaleY(1.12) scale(1);filter:blur(0)}
+  /* black & white game behind the WASTED overlay — desaturates gradually, so the
+     fireball still burns orange for the first second of the death sequence */
+  canvas{transition:filter 1.8s ease-in}
   canvas.bw{filter:grayscale(1) contrast(1.08) brightness(.95)}
   #vig{position:absolute;inset:0;pointer-events:none;z-index:3;box-shadow:inset 0 0 240px rgba(0,0,0,.75)}
   #overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -1818,6 +1826,42 @@ function updateDriftCombo(dt,throttle,handbrake){
 function playCrash(){ queueWheelHaptic(.82); if(!audioCtx||muted)return; const b=audioCtx.createBuffer(1,4410,44100),d=b.getChannelData(0);
   for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2);
   const s=audioCtx.createBufferSource(); s.buffer=b; const g=audioCtx.createGain(); g.gain.value=0.22; s.connect(g); g.connect(audioCtx.destination); s.start(); }
+
+// A real detonation, not playCrash turned up. Three layers, because that is what
+// separates a bang from a boom: a bright shrapnel crack on top, a long filtered
+// noise body that opens then closes (the pressure wave), and a sub-bass sine
+// swept 108Hz -> 24Hz underneath for the chest thump. `scale` 0..1 sizes all three.
+function playExplosion(scale=1){
+  queueWheelHaptic(1);
+  if(!audioCtx||muted)return;
+  const t=audioCtx.currentTime,S=clamp(scale,.25,1),dur=1.5+S*1.5;
+  // body: filtered noise with a fast attack and a long, uneven tail
+  const len=Math.floor(audioCtx.sampleRate*dur),buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<len;i++){ const p=i/len;
+    // crackle: the tail is noise modulated by more noise, so it rumbles instead of hissing
+    d[i]=(Math.random()*2-1)*Math.pow(1-p,1.7)*(.55+.45*Math.random());
+  }
+  const src=audioCtx.createBufferSource(); src.buffer=buf;
+  const lp=audioCtx.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=.7;
+  lp.frequency.setValueAtTime(4200*S+600,t); lp.frequency.exponentialRampToValueAtTime(150,t+dur*.85);
+  const bodyGain=audioCtx.createGain();
+  bodyGain.gain.setValueAtTime(0,t); bodyGain.gain.linearRampToValueAtTime(.42*S,t+.012);
+  bodyGain.gain.exponentialRampToValueAtTime(.0008,t+dur);
+  src.connect(lp); lp.connect(bodyGain); bodyGain.connect(audioCtx.destination); src.start(t); src.stop(t+dur);
+  // sub: the thump you feel
+  const sub=audioCtx.createOscillator(),subGain=audioCtx.createGain(); sub.type='sine';
+  sub.frequency.setValueAtTime(108,t); sub.frequency.exponentialRampToValueAtTime(24,t+.75);
+  subGain.gain.setValueAtTime(.0001,t); subGain.gain.exponentialRampToValueAtTime(.40*S,t+.03);
+  subGain.gain.exponentialRampToValueAtTime(.0001,t+1.05);
+  sub.connect(subGain); subGain.connect(audioCtx.destination); sub.start(t); sub.stop(t+1.1);
+  // shrapnel crack on top
+  const crackLen=Math.floor(audioCtx.sampleRate*.16),cb=audioCtx.createBuffer(1,crackLen,audioCtx.sampleRate),cd=cb.getChannelData(0);
+  for(let i=0;i<crackLen;i++) cd[i]=(Math.random()*2-1)*Math.pow(1-i/crackLen,4);
+  const cs=audioCtx.createBufferSource(); cs.buffer=cb;
+  const hp=audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=1800;
+  const cg=audioCtx.createGain(); cg.gain.value=.16*S;
+  cs.connect(hp); hp.connect(cg); cg.connect(audioCtx.destination); cs.start(t);
+}
 
 // ---------- Toasts / Banner ----------
 const toastsEl=document.getElementById('toasts');
