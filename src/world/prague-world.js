@@ -470,12 +470,15 @@
     //    groundHeightAt() returns 0 everywhere: the data carries no terrain.
     // =====================================================================
     {
-      const step = 40;
+      // Patchwork rather than one slab: the west of the extract is the Vltava,
+      // which OSM gives us no polygon for, so it renders as a large open flat.
+      // Per-tile shading keeps that from reading as a void.
+      const step = 24;
       for (let x = BOUNDS.minX; x < BOUNDS.maxX; x += step) {
         const x1 = Math.min(x + step, BOUNDS.maxX);
         for (let z = BOUNDS.minZ; z < BOUNDS.maxZ; z += step) {
           const z1 = Math.min(z + step, BOUNDS.maxZ);
-          const f = 0.86 + r() * 0.28;
+          const f = 0.90 + r() * 0.16;
           flat.quad([x, 0, z], [x1, 0, z], [x1, 0, z1], [x, 0, z1], shade(C_GROUND, f));
         }
       }

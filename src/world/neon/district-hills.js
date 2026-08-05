@@ -164,11 +164,17 @@
     [-3190, -720, 180],
     [-3210, -560, 64], [-3350, -545, 64],            // hairpin 6  (south)
     [-3372, -850, 280],
-    [-3395, -1180, 240],
-    [-3400, -1430, 64], [-3540, -1446, 64],          // hairpin 7  (north)
-    [-3545, -1290, 150],
-    [-3490, -1180, 120],
-    [-3470, -1120, 0]
+    [-3400, -1180, 260],
+    [-3418, -1450, 170],
+    // Summit turnaround loop. It has to sit within ~80 of the crest ridge: the
+    // back face falls at 60%+, so a terrace any further west needs 50 units of
+    // fill and reads as a shelf bolted to a cliff.
+    [-3455, -1600, 130],
+    [-3570, -1700, 110],
+    [-3520, -1830, 110],
+    [-3380, -1810, 110],
+    [-3345, -1690, 110],
+    [-3420, -1605, 0]
   ];
 
   /* Second mandatory stub: a foothill road through the stilt houses that rejoins
@@ -202,8 +208,8 @@
     [-2830, -524, 0]
   ];
 
-  const SUMMIT = { x: -3470, z: -1120 };
-  const APRON = { x: -2690, z: -505, w: 180, d: 150 };
+  const SUMMIT = { x: -3457, z: -1715 };
+  const APRON = { x: -2665, z: -505, w: 236, d: 156 };
 
   // ================================================================== builder
   function build(b) {
@@ -253,7 +259,7 @@
       splatPath(main); splatPath(link); splatPath(bypass); splatPath(cut);
       // Flat aprons: the summit terrace, and a landing box wide enough that an
       // over- or under-cooked jump still finds ground rather than a hillside.
-      splatPad(SUMMIT.x, SUMMIT.z, 250, 220, baseAt(SUMMIT.x, SUMMIT.z));
+      splatPad(SUMMIT.x, SUMMIT.z, 270, 250, baseAt(SUMMIT.x, SUMMIT.z));
       splatPad(APRON.x, APRON.z, APRON.w, APRON.d, baseAt(APRON.x, APRON.z));
 
       for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {

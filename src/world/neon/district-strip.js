@@ -481,37 +481,40 @@
     for (const x of CONN_B) connector(b, x, 62, AL_B0);
     for (const x of CONN_S) connector(b, x, AL_B1, 384);
 
-    // dumpsters against the walls + a wallpack every so often so the alleys are
-    // navigable at night. Bins sit hard against a face, never mid-corridor.
+    // Delivery trucks parked badly, alternating walls. Each sits far enough off
+    // its wall to cover the alley centreline, so the alley is a weave you have
+    // to commit to rather than a straight you can hold flat. They go down
+    // FIRST and everything else keeps away from them — a dumpster stacked
+    // opposite a truck turns a weave into a needle.
+    let t = 0;
+    const trucks = [];
+    const truckRuns = [
+      [1980, AL_X1 - 60, 296, AL_A0, AL_A1],
+      [2110, AL_BX1 - 60, 296, AL_B0, AL_B1],
+      [2260, 3700, 340, LN_N0, LN_N1]
+    ];
+    for (const [from, to, pitch, w0, w1] of truckRuns) {
+      for (let x = from; x < to; x += pitch, t++) {
+        if (blocksLane(x, 60)) continue;
+        const side = (t % 2) ? 1 : -1;
+        boxTruck(b, x, side > 0 ? w1 - 11 : w0 + 11, side, r);
+        trucks.push(x);
+      }
+    }
+    const clearOf = (x, m) => !blocksLane(x, m) && !nearAny(x, trucks, 46);
+
+    // dumpsters hard against a face + a wallpack every so often, so the alleys
+    // are navigable at night
     for (let x = AL_X0 + 60; x < AL_X1 - 40; x += 74) {
-      if (blocksLane(x, 46)) continue;
+      if (!clearOf(x, 46)) continue;
       bin(b, x, r() < 0.5 ? AL_A0 + 3.4 : AL_A1 - 3.4, r() * 0.3);
       b.box({ x: x + 24, z: AL_A1 + 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
       if (r() < 0.5) cone(b, x + 34, (AL_A0 + AL_A1) / 2 + (r() - 0.5) * 14);
     }
     for (let x = AL_X0 + 90; x < AL_BX1 - 40; x += 82) {
-      if (blocksLane(x, 46)) continue;
+      if (!clearOf(x, 46)) continue;
       bin(b, x, r() < 0.5 ? AL_B0 + 3.4 : AL_B1 - 3.4, r() * 0.3);
       b.box({ x: x + 30, z: AL_B0 - 0.4, y: 8.5, w: 3.2, h: 0.8, d: 0.7, color: WARM, emissive: true, noCollide: true });
-    }
-
-    // Delivery trucks backed up to the loading doors, alternating walls. The
-    // resulting weave is the difference between a shortcut and a straight.
-    let t = 0;
-    for (let x = 1980; x < AL_X1 - 60; x += 296, t++) {
-      if (blocksLane(x, 60)) continue;
-      const side = (t % 2) ? 1 : -1;
-      boxTruck(b, x, side > 0 ? AL_A1 - 6.6 : AL_A0 + 6.6, side, r);
-    }
-    for (let x = 2110; x < AL_BX1 - 60; x += 296, t++) {
-      if (blocksLane(x, 60)) continue;
-      const side = (t % 2) ? 1 : -1;
-      boxTruck(b, x, side > 0 ? AL_B1 - 6.6 : AL_B0 + 6.6, side, r);
-    }
-    for (let x = 2260; x < 3700; x += 340, t++) {
-      if (blocksLane(x, 60)) continue;
-      const side = (t % 2) ? 1 : -1;
-      boxTruck(b, x, side > 0 ? LN_N1 - 6.6 : LN_N0 + 6.6, side, r);
     }
   }
 

@@ -149,8 +149,11 @@
    */
   function pool(b, cx, cz, R, cyan) {
     const SEG = 10, y = Y_POOL;
-    const bands = cyan ? [[0.36, 0x16333c], [0.68, 0x0d2028], [1, 0x071216]]
-                       : [[0.36, 0x3d2b11], [0.68, 0x231809], [1, 0x120c05]];
+    // The yard concrete renders as a mid blue-grey, so a pool only reads as
+    // *light* if its inner band is brighter than that — dimmer values just
+    // look like oil staining.
+    const bands = cyan ? [[0.36, 0x275a69], [0.68, 0x1a3e49], [1, 0x0f272e]]
+                       : [[0.36, 0x5f4420], [0.68, 0x3e2b13], [1, 0x261b0c]];
     let prev = 0.02;
     for (const [t, col] of bands) {
       const r0 = R * prev, r1 = R * t;
@@ -826,7 +829,7 @@
     for (let i = -1; i <= 1; i++) {
       prop(b, cyan ? 'lampC' : 'lampO', { x: x + i * 5.5 * c, y: GY + H - 0.4, z: z - i * 5.5 * s, ry: aim });
     }
-    pool(b, x + s * 28, z + c * 28, 34, cyan);
+    pool(b, x + s * 16, z + c * 16, 24, cyan);
   }
 
   window.NeonDistricts.push({ id: 'docks', name: 'FREIGHT DOCKS', build });

@@ -247,10 +247,17 @@
     const gaps = o.gaps || [];
     const minY = o.minY === undefined ? -1e9 : o.minY;
     const maxY = o.maxY === undefined ? 1e9 : o.maxY;
+    // Distance along the path to leave open at each end. Used where a spur
+    // overlaps the ring: its rail would otherwise stand in the ring's lane.
+    const skipStart = o.skipStart || 0, skipEnd = o.skipEnd || 0;
+    const total = pathLen(pts);
+    let along = 0;
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i], c = pts[i + 1];
       let dx = c[0] - a[0], dz = c[1] - a[1];
       const len = Math.hypot(dx, dz);
+      const segStart = along;
+      along += len;
       if (len < 0.5) continue;
       dx /= len; dz /= len;
       const rot = Math.atan2(dx, dz);
@@ -266,6 +273,8 @@
         const pz = a[1] + dz * len * t + nz * off;
         const py = ay + (cy - ay) * t;
         if (py < minY || py > maxY) continue;
+        const s = segStart + len * t;
+        if (s < skipStart || s > total - skipEnd) continue;
         let skip = false;
         for (let g = 0; g < gaps.length; g++) {
           const gg = gaps[g];
@@ -642,9 +651,11 @@
     deckPatches(b, c, SPUR_W);
     pierDetail(b, THREE, c);
 
-    const bo = { off: 21.5, w: 3.4 };
-    barrierRail(b, a, 1, bo); barrierRail(b, a, -1, bo);
-    barrierRail(b, c, 1, bo); barrierRail(b, c, -1, bo);
+    // Open the rails where the spur is still overlapping the ring carriageway.
+    const boIn = { off: 21.5, w: 3.4, skipStart: 165 };
+    const boOut = { off: 21.5, w: 3.4, skipEnd: 165 };
+    barrierRail(b, a, 1, boIn); barrierRail(b, a, -1, boIn);
+    barrierRail(b, c, 1, boOut); barrierRail(b, c, -1, boOut);
 
     // hazard furniture, set back from the break on the deck side of each edge
     const away = Math.sign(land[0] - lip[0]) || 1;

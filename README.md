@@ -107,9 +107,14 @@ reports it backwards. Touch steering always works and never goes away.
 
 ## Credits and licensing
 
-3D asset kits are **CC0** from [Kenney](https://kenney.nl) and
-[Quaternius](https://quaternius.com). Full per-asset details are in
-`assets/ASSET_MANIFEST.json` and `assets/ATTRIBUTION.md`.
+15 **CC0** 3D asset kits from [Kenney](https://kenney.nl) and
+[Quaternius](https://quaternius.com) are downloaded, licence-verified and
+catalogued in `assets/ASSET_MANIFEST.json` and `assets/ATTRIBUTION.md`.
+
+**Note:** those kits are *not yet used in the world* — every district is
+currently built from procedural geometry, which is what keeps the whole map at
+around 100 draw calls. The kits are packaged and ready for the prop pass; see
+"Known gaps" below.
 
 Prague map data is © **OpenStreetMap contributors**, licensed under the
 [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/).
@@ -119,11 +124,28 @@ See <https://www.openstreetmap.org/copyright>.
 
 ---
 
+## Known gaps
+
+Stated plainly so nobody is surprised:
+
+- **The licensed GLB kits are not in the world yet.** Districts are procedural.
+  Wiring the kits in is a prop pass on top of the existing prefab registry.
+- **Frame rate has not been measured.** Draw calls and triangle counts are real
+  and well inside budget (see `docs/PLAYTEST_LOG.md`), but a genuine FPS reading
+  needs a focused foreground tab and was not taken.
+- **No physical racing wheel was tested.** The wheel code is unchanged from v31.
+- **Mobile was tested by resizing a desktop browser**, not on a real handset.
+
 ## For developers
 
 ```bash
 node scripts/quality-gate.mjs      # syntax, wiring, licensing, offline, smoke
+node scripts/package.mjs           # build dist/ (excludes assets/intake)
 ```
+
+`dist/` is the distributable: ~28 MB, 1,046 files. It deliberately excludes
+`assets/intake/` — 172 MB of quarantined raw downloads kept for provenance and
+reprocessing, which players never need.
 
 - `docs/CURRENT_ARCHITECTURE.md` — how the game is put together
 - `docs/WORLD_OVERHAUL_PLAN.md` — design decisions and why
