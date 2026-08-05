@@ -33,7 +33,7 @@ graph()   -> {nodes, edges} | null  // read-only; node {x,z,y,e:[edgeIdx]},
                                     // edge {a,b,len,width,y0,y1,seg,stitch?}
 ready()   -> bool
 stats()   -> {nodes, edges, worldId, segments, crossings, stitched, rescued,
-              islands, connected, buildMs, lastRouteMs, lastRoutePops}
+              merged, islands, connected, buildMs, lastRouteMs, lastRoutePops}
 ```
 
 `connected` is the fraction of nodes in the largest connected piece — the first
@@ -43,7 +43,7 @@ number to look at when a route "randomly" returns null on a new map.
 
 `roadsRef.segs` is **geometry, not topology**. Merging shared endpoints alone
 left NEON in 60 disconnected pieces, the largest holding 43% of the city, so
-half of every route returned null. Three passes fix that:
+half of every route returned null. Four passes fix that:
 
 1. **Crossings.** Every pair of segments sharing a hash cell is intersected and
    both are cut at the crossing — *only if their heights agree within 4 units*.
@@ -60,6 +60,26 @@ half of every route returned null. Three passes fix that:
    it continues into, both at y=30 — that single gap orphaned 295 nodes (17% of
    the city). Any node left with exactly one edge joins the nearest node within
    a carriageway width **on its own level**.
+4. **Slip-road merge.** A freeway ramp does not end at the carriageway it joins:
+   it runs alongside it and you merge with a lane change. The ring lays its slip
+   roads exactly `RING_W/2 + RAMP_W/2` apart so the ribbons touch edge to edge,
+   so there is no end-to-end joint at all, and the nearest ring node can be half
+   a 130-unit sampling interval away besides. A dead end whose carriageway
+   overlaps another therefore links to the **point on that road it touches**,
+   not to the nearest node.
+
+Segments are bucketed for the crossing pass with their **reach included** in the
+cell walk. A walk that stops at the endpoints cannot see a junction living in
+the gap past one: the quarry's span starts 30 units off the rim road it leaves —
+one cell row further on — so the pair was never compared at all. Extending the
+walk found **1290 further junctions on NEON**, i.e. whether a junction was
+detected had been partly a matter of where the 64-unit cell boundaries fell.
+
+A stitch is only laid while the two carriageways still **overlap** (`≤ (w₁+w₂)/2
++ 2`). Both ends can be clamped at once, which would otherwise let two roads
+pointing at a shared intersection sit up to twice the reach apart and run a
+connector through the corner of a building; the cap removed 685 such phantoms on
+NEON (longest stitch 96 → 50 units) and changed connectivity by nothing.
 
 Nodes merge within **3.5 units XZ AND 4 units Y**. `nearest()` scores
 `XZdistance + max(0, |Δy| - 4) * 3`, so a road 200 units overhead never wins
@@ -177,20 +197,24 @@ just do not do both in one loop or every system ticks twice.
 
 **Graph build**
 
-| map | segments | nodes | edges | junctions / stitched / rescued | build | connected | islands |
+| map | segments | nodes | edges | junctions / stitched / rescued / merged | build | connected | islands |
 |---|---|---|---|---|---|---|---|
-| NEON | 1 585 | 1 768 | 2 413 | 1 779 / 541 / 10 | 17–35 ms | **98.4%** | 3 |
-| Prague | 10 512 | 10 240 | 13 568 | 20 742 / 2 633 / 14 | 140–205 ms | **95.2%** | 33 |
+| NEON | 1 585 | 1 783 | 2 762 | 3 069 / 866 / 7 / 6 | 45 ms | **100%** | 1 |
+| Prague | 10 512 | 10 288 | 13 159 | 23 210 / 2 165 / 14 / 5 | 203 ms | **95.2%** | 33 |
 
-Before the crossing/stitch/rescue passes: NEON 43% connected in 60 islands.
+NEON connectivity by pass: endpoint merge only **43%** (60 islands) → crossings
+**79%** → width-aware reach + stitches **78.5%** → dead-end rescue **98.4%** (3)
+→ reach-inclusive cell walk **98.6%** (2) → slip-road merge **100% (1 island)**.
 Prague stays under the 250 ms budget; the build is logged like the map bake.
 
-**Routing** — NEON 200 random pairs: avg 0.27 ms, worst 2.5 ms. Prague 140 pairs:
-avg 1.0 ms, worst 8.4 ms (target was <15 ms). 300 NEON pairs with a road at both
-ends: **0 unroutable**; the 105 nulls were points with no road within 640 units
-(sea, wilderness) — correct. Route/straight-line ratio: Prague median 1.35,
-p90 1.70 (a real city with few bridges); NEON median 1.93, because of the bay and
-the small number of district links.
+**Routing** — NEON 120 on-road pairs: **120 routed, 0 failures**, worst 1.4 ms.
+Prague 130 pairs: avg 0.98 ms, worst 7.2 ms (target was <15 ms); its 10 failures
+are the 4.8% of nodes on genuine OSM islands. Earlier, 300 NEON pairs with a road
+at both ends were already 0-unroutable; the 105 nulls in that run were points
+with no road within 640 units (sea, wilderness) — correct. Route/straight-line
+ratio: Prague median 1.33, p90 1.54. NEON's median sits near 2.1 and is
+geography, not graph — the bay, the few district links, and the fact that more
+distant pairs now route at all rather than being excluded as unroutable.
 
 `nearest()` 4.8 µs on road, 97 µs in an empty corner (full 10-ring search).
 Level awareness spot-check at (-1355,-1111): `nearest(...,0)` → y 0.0 (d 5.0),
@@ -219,11 +243,9 @@ of it: 12 systems live, 0 disabled, 0 failures.
 
 ## 6. Limits and things the lead should know
 
-- **NEON has 2 residual islands** (1.6% of nodes): a ramp at x 3400 climbs from
-  y 0 to y 30 and stops **660 units short** of the nearest deck road, and two
-  small pockets near z 4000. That is world data, not graph data — the deck is
-  reached by driving up surfaces that are not published as road segments. A
-  waypoint there degrades to the dashed line.
+- **NEON is fully connected as of the ramp-gap investigation below.** The earlier
+  claim in this document — that a ramp at x 3400 dead-ends 660 units short of the
+  ring and that this was world data — was **wrong on both counts**. See §7.
 - **Prague is flat** (`groundHeightAt` returns 0, every seg y = 0), so its
   bridges and the roads beneath them become junctions. Harmless today because
   the extract has no vertical separation; it will need real `ay/by` before any
@@ -237,3 +259,64 @@ of it: 12 systems live, 0 disabled, 0 failures.
   the compass goes with it. The engine's own `m` fallback still opens the map.
 - POIs are drawn unclustered. A few dozen is fine; a few hundred on the minimap
   would need a radius cull beyond the existing canvas-bounds check.
+
+---
+
+## 7. The NEON ramp gap — investigation and outcome
+
+Assigned as a world repair in `district-links.js`: extend the x≈3400 ramp so it
+reaches the elevated ring. **No world geometry was changed, because none was
+missing.** Both symptoms I originally reported were mine.
+
+### The x≈3400 climb is a designed stunt, not a broken link
+
+It is built by `district-quarry.js:178` and labelled there:
+
+> UNFINISHED ELEVATED ROADWAY: leaves the north rim road, climbs to y=30 and
+> simply STOPS over bench A. Driving off the end is a genuine 50-unit drop onto
+> open dirt — deliberate, and signed as such.
+
+`unfinishedRoadEnd()` dresses it with torn-off rebar, a warning stripe at the
+lip, hazard paint at the base, parapets that stop short "so the drop is obvious",
+and a deliberately cantilevered end (no pillar at z=2250, because the bench A
+haul road runs under it). Joining it to the ring would delete an authored jump.
+It also lives in a file I was not given — the assignment named `district-links.js`
+on the assumption the ramp was a links ramp.
+
+**It was never 660 units from the ring, either.** That measurement predated the
+dead-end rescue pass; by the time it went into this document the ring was already
+reachable from downtown. What remained was the climb's own base, 30 units off the
+rim road it leaves, which brings us to the actual bug.
+
+### Both islands were graph bugs, and both are fixed
+
+| island | why the graph missed it | fix |
+|---|---|---|
+| quarry span, 5 nodes | its base sits 30 units past the rim road — one 64-unit cell row further on — so the pair was never tested | reach-inclusive cell walk (§1) |
+| ring south off-ramp, 24 nodes | a slip road merges by lane change, 50 units abeam the ring; there is no end-to-end joint, and the rescue radius was capped at 30 | slip-road merge pass (§1) |
+
+### Drive verification (`GAME_DEBUG`, fixed-step, NEON)
+
+The graph now claims both seams are drivable, so both were driven:
+
+| approach | result |
+|---|---|
+| surface probe z 4075→3990 at x=500, y=30 | **30.1 at every sample** — ring deck and slip road are one continuous surface |
+| ring south leg, westbound past the merge | y 30.1 held, **0 airborne frames**, 424 mph |
+| ring south leg, eastbound past the merge | y 30.1 held, **0 airborne frames**, min y 30.1 — no drop |
+| slip road driven ground → deck (1240,3950 → 871,3950) | climbed y 0.1 → 21.7, **0 airborne frames** |
+| rim road → unfinished span (3400,1800 → 3400,2084) | climbed y 0 → 14.1, **0 airborne frames**, min y −0.1 |
+| lane change from ring onto slip road at 135 mph | crossed z 4060 → 4008 at y 30.1, never left the ground |
+
+Deck latch holds throughout; no invisible wall and no silent drop at either seam.
+
+### Acceptance
+
+`route(downtown → slip-road deck end)` returns **28 points**, 6 470 units of road
+— the dashed-line degradation is gone. `route(downtown → span top)` 27 points,
+`route(downtown → ring east leg)` 53 points. NEON: **1 island, 100% connected**
+(was 3 / 98.4%). Prague unchanged at 95.2% with 5 merges, 203 ms. Console clean,
+12 systems live, 0 failures.
+
+`roadsRef` and the graph now agree without adding a single segment: the world was
+already right, and the map draws what the graph routes over.

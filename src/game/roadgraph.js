@@ -104,14 +104,26 @@
                  ay: s.ay == null ? 0 : s.ay, by: s.by == null ? 0 : s.by,
                  dx: s.bx - s.ax, dz: s.bz - s.az, cuts: null };
     }
+    // Only segments that share a cell are ever tested against each other, so a
+    // cell walk that stops at the endpoints cannot see a junction that lives in
+    // the GAP past one. The quarry's unfinished span starts 30 units off the rim
+    // road it leaves — one cell row further on — so the pair was never compared
+    // and a genuine, drivable climb sat in the graph as its own island. Each
+    // walk is therefore extended by the furthest a junction can reach, which is
+    // bounded by the widest carriageway on the map.
+    let maxWidth = 0;
+    for (let i = 0; i < segs.length; i++) { const w = segs[i].width || 8; if (w > maxWidth) maxWidth = w; }
+    const EXT = maxWidth + TOUCH;
     const cells = new Map();
     for (let i = 0; i < raw.length; i++) {
-      const r = raw[i], len = Math.hypot(r.dx, r.dz);
-      const steps = Math.max(1, Math.ceil(len / (CELL * 0.5)));
+      const r = raw[i], len = Math.hypot(r.dx, r.dz) || 1;
+      const ex = (r.dx / len) * EXT, ez = (r.dz / len) * EXT;
+      const x0 = r.ax - ex, z0 = r.az - ez, x1 = r.bx + ex, z1 = r.bz + ez;
+      const steps = Math.max(1, Math.ceil((len + EXT * 2) / (CELL * 0.5)));
       let lastK = '';
       for (let s2 = 0; s2 <= steps; s2++) {
         const t = s2 / steps;
-        const k = Math.floor((r.ax + r.dx * t) / CELL) + ',' + Math.floor((r.az + r.dz * t) / CELL);
+        const k = Math.floor((x0 + (x1 - x0) * t) / CELL) + ',' + Math.floor((z0 + (z1 - z0) * t) / CELL);
         if (k === lastK) continue;
         lastK = k;
         let l = cells.get(k); if (!l) cells.set(k, l = []);
@@ -158,7 +170,13 @@
           const px = p.ax + p.dx * t, pz = p.az + p.dz * t;
           const qx = q.ax + q.dx * u, qz = q.az + q.dz * u;
           const gap = (px - qx) * (px - qx) + (pz - qz) * (pz - qz);
-          if (gap > MERGE_XZ * MERGE_XZ) {
+          // Both ends may be clamped at once, which lets two roads pointing at a
+          // shared intersection sit up to twice the reach apart — far enough to
+          // run a connector through the corner of a building. A stitch is only
+          // honest while the two carriageways still overlap, so it is held to
+          // the same half-width rule that earned the reach.
+          const maxStitch = reach;
+          if (gap > MERGE_XZ * MERGE_XZ && gap <= maxStitch * maxStitch) {
             stitches.push({ px: px, pz: pz, py: py, qx: qx, qz: qz, qy: qy,
                             width: Math.min(p.s.width || 8, q.s.width || 8), seg: p.s });
           }
@@ -218,8 +236,8 @@
      * that one gap orphaned 295 nodes (17% of the city) behind a route that
      * always returned null. So any node left with a single edge looks for a
      * neighbour within a carriageway's width on its own level and joins it. */
-    const RESCUE_MAX = 30;
-    let rescued = 0;
+    const RESCUE_MAX = 60;
+    let rescued = 0, merged = 0;
     {
       const nh = new Map();
       for (let i = 0; i < nodes.length; i++) {
@@ -250,6 +268,60 @@
           }
         }
         if (bestJ >= 0 && link(i, bestJ, bestW, edges[n.e[0]].seg)) rescued++;
+      }
+
+      /* Slip-road merge. A freeway ramp does not END at the carriageway it
+       * joins — it runs ALONGSIDE it and you merge with a lane change. The ring
+       * lays its slip roads exactly RING_W/2 + RAMP_W/2 apart so the two ribbons
+       * touch edge to edge (verified in-engine: the surface reads 30.1 all the
+       * way across, and the car crosses it without leaving the ground), so there
+       * is no end-to-end joint for the pass above to find, and the nearest ring
+       * node can be half a 130-unit sampling interval away besides. The link is
+       * therefore made to the POINT on the carriageway the ramp actually touches
+       * rather than to whichever node happens to be closest. Without this the
+       * ring's south off-ramp was an island of 24 nodes you could plainly drive
+       * onto. */
+      const N0 = nodes.length;
+      for (let i = 0; i < N0; i++) {
+        const n = nodes[i];
+        if (n.e.length !== 1) continue;                       // pass 1 fixed the rest
+        const w0 = edges[n.e[0]].width;
+        const cx = Math.floor(n.x / RESCUE_MAX), cz = Math.floor(n.z / RESCUE_MAX);
+        let bestE = -1, bestD = Infinity, bpx = 0, bpz = 0, bpy = 0;
+        for (let ix = cx - 1; ix <= cx + 1; ix++) {
+          for (let iz = cz - 1; iz <= cz + 1; iz++) {
+            const l = nh.get(ix + ',' + iz);
+            if (!l) continue;
+            for (let a = 0; a < l.length; a++) {
+              const m = nodes[l[a]];
+              for (let k = 0; k < m.e.length; k++) {
+                const ei = m.e[k], e = edges[ei];
+                if (e.a === i || e.b === i) continue;         // its own edge
+                const na = nodes[e.a], nb = nodes[e.b];
+                const dx = nb.x - na.x, dz = nb.z - na.z, l2 = dx * dx + dz * dz || 1;
+                let t = ((n.x - na.x) * dx + (n.z - na.z) * dz) / l2;
+                t = t < 0 ? 0 : t > 1 ? 1 : t;
+                const px = na.x + dx * t, pz = na.z + dz * t;
+                const py = e.y0 + (e.y1 - e.y0) * t;
+                if (Math.abs(py - n.y) > MERGE_Y) continue;   // a road overhead is not a merge
+                const d = Math.hypot(n.x - px, n.z - pz);
+                if (d >= bestD || d > (w0 + e.width) * 0.5 + TOUCH) continue;
+                bestD = d; bestE = ei; bpx = px; bpz = pz; bpy = py;
+              }
+            }
+          }
+        }
+        if (bestE < 0) continue;
+        const e = edges[bestE];
+        const p = nodeAt(bpx, bpz, bpy);
+        if (p === i) continue;
+        // Join the merge point into the carriageway it sits on, then bring the
+        // ramp in. Leaving the original edge in place is deliberate: the two
+        // halves cost exactly what it did, so routing is unaffected and no
+        // adjacency list has to be rewritten mid-build.
+        link(p, e.a, e.width, e.seg);
+        link(p, e.b, e.width, e.seg);
+        if (link(i, p, Math.min(w0, e.width), edges[n.e[0]].seg)) merged++;
       }
     }
 
@@ -296,7 +368,8 @@
 
     const g = {
       worldId: world.id, nodes: nodes, edges: edges, hash: hash,
-      crossings: crossings, stitched: stitched, rescued: rescued, islands: islands, biggest: biggest,
+      crossings: crossings, stitched: stitched, rescued: rescued, merged: merged,
+      islands: islands, biggest: biggest,
       // Persistent A* scratch. Refilling three arrays of 30k entries per call is
       // the expensive part of a short route, so they are stamped instead.
       stamp: new Int32Array(nodes.length),
@@ -309,7 +382,7 @@
     g.buildMs = Math.round((performance.now() - t0) * 10) / 10;
     console.log('[roadgraph] built "' + world.id + '": ' + nodes.length + ' nodes, ' +
       edges.length + ' edges from ' + segs.length + ' segments (' + crossings + ' junctions, ' +
-      stitched + ' stitched, ' + rescued + ' dead ends joined) in ' +
+      stitched + ' stitched, ' + rescued + ' dead ends joined, ' + merged + ' merges) in ' +
       g.buildMs + 'ms — largest connected piece ' + Math.round(biggest / nodes.length * 100) +
       '% of the network, ' + islands + ' island(s)');
     return g;
@@ -580,7 +653,7 @@
         if (!g) return { nodes: 0, edges: 0, worldId: id, buildMs: 0, segments: 0 };
         return { nodes: g.nodes.length, edges: g.edges.length, worldId: g.worldId,
                  buildMs: g.buildMs, segments: g.segCount, crossings: g.crossings,
-                 stitched: g.stitched, rescued: g.rescued,
+                 stitched: g.stitched, rescued: g.rescued, merged: g.merged,
                  islands: g.islands, connected: +(g.biggest / g.nodes.length).toFixed(3),
                  lastRouteMs: lastRouteMs, lastRoutePops: lastRoutePops };
       }
