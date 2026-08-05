@@ -646,13 +646,65 @@
       { name: 'SOUTH GATE', rot: -P / 2, side: -1,
         raw: bez([200, 3995], [-20, 3995], [-280, Z1], [-500, Z1], 16) }
     ];
+    // ---- EXITS -----------------------------------------------------------
+    // The ring had five ways on and no way off: every gate above runs ground ->
+    // ring, and taking one backwards means driving the wrong way down a merge.
+    // Each exit peels off the ring further along the direction of travel than
+    // its matching entrance, so from the deck you meet the exit first and it
+    // reads as a slip road rather than a wrong-way ramp.
+    //
+    // `down: true` reverses the grade in the loop below. Everything else — the
+    // viaduct, piers, barriers, junction pad, merge chevrons — is shared with
+    // the entrances, so an exit is the same structure driven the other way.
+    const exits = [
+      // west leg -> back down onto the inner loop, north of WEST GATE
+      { name: 'WEST EXIT', rot: P, side: -1, down: true, hold: 0.62,
+        raw: bez([X0N, -700], [X0N, -1000], [-1400, -1120], [-1350, -1180], 18) },
+      // west leg -> down onto the west service road, south of DOCK GATE
+      { name: 'DOCK EXIT', rot: P, side: -1, down: true, hold: 0.62,
+        raw: bez([X0W, 3000], [X0W, 3300], [-1700, 3420], [SVC_X, 3480], 18) },
+      // north leg -> down onto the inner loop's north side, east of NORTH GATE
+      { name: 'NORTH EXIT', rot: P / 2, side: -1, down: true,
+        raw: bez([1150, Z0], [1500, Z0], [1560, -1700], [1560, -LOOP], 16) },
+      // east leg -> down onto the east cross road, south of EAST GATE
+      { name: 'EAST EXIT', rot: 0, side: -1, down: true,
+        raw: bez([X1, 300], [X1, -40], [3900, -180], [3700, -220], 16) },
+      // south leg -> down onto the south frontage road, west of SOUTH GATE
+      { name: 'SOUTH EXIT', rot: -P / 2, side: -1, down: true,
+        raw: bez([-950, Z1], [-1180, Z1], [-1300, 3960], [-1350, 3820], 16) }
+    ];
+    for (const e of exits) specs.push(e);
+
     for (let i = 0; i < specs.length; i++) {
       // Start the deck flush with whatever the neighbouring district left on the
       // ground: a deck more than 0.5 below the terrain is discarded outright by
       // groundHeightAt, which would kill the bottom of the ramp.
       const raw = specs[i].raw;
       specs[i].owner = 'ramp' + i;
-      specs[i].pts = withY(raw, b.terrain.heightAt(raw[0][0], raw[0][1]), RING_Y);
+      if (specs[i].down) {
+        // An exit starts on the deck and lands on the ground, so its grade runs
+        // the other way — but it must NOT start dropping immediately. Its first
+        // stretch still lies under the ring's own deck, and the resolver picks
+        // whichever surface is nearest the car's height: a ramp already 20 below
+        // the ring when the ring's width runs out is a 20-unit fall, not a slip
+        // road. Measured before this hold was added: the exit read 10.1 exactly
+        // where the ring deck ended. So hold at RING_Y until clear of the ring,
+        // then descend over what's left.
+        const gy = b.terrain.heightAt(raw[raw.length - 1][0], raw[raw.length - 1][1]);
+        // WEST and DOCK run parallel to the west leg for about half their
+        // length before curving away, so they need to stay up longer than an
+        // exit that peels off immediately. Measured: at HOLD 0.30 both had
+        // already dropped ~9 units while still under the ring, and the car fell
+        // through the moment the ring's width ran out.
+        const HOLD = specs[i].hold || 0.30, n = raw.length - 1;
+        specs[i].pts = raw.map(function (p, k) {
+          const t = k / n;
+          const d = t <= HOLD ? 0 : (t - HOLD) / (1 - HOLD);
+          return [p[0], p[1], RING_Y + (gy - RING_Y) * d];
+        });
+      } else {
+        specs[i].pts = withY(raw, b.terrain.heightAt(raw[0][0], raw[0][1]), RING_Y);
+      }
       // keep other structures' piers out of the part of the climb where they
       // would still be solid (a pier is ignored once the car is above it)
       for (const p of specs[i].pts) {
@@ -668,7 +720,10 @@
       const pts = rp.pts;
       viaduct(b, THREE, pts, RAMP_W, { color: C_RAMP, pierEvery: 4, owner: rp.owner });
 
-      const top = pts[pts.length - 1];
+      // An exit runs deck -> ground, so its ring end is the FIRST point and its
+      // ground end the last; an entrance is the other way round.
+      const top = rp.down ? pts[0] : pts[pts.length - 1];
+      const foot = rp.down ? pts[pts.length - 1] : pts[0];
       junctionPad(b, top[0], top[1], RING_Y, rp.rot);
 
       // barriers only over the middle of the climb: open at the foot so you can
@@ -677,8 +732,7 @@
       barrierRail(b, pts, 1, bo);
       barrierRail(b, pts, -1, bo);
 
-      // painted merge chevrons on the last stretch of the ramp
-      const foot = pts[0];
+      // painted merge chevrons where the ramp meets the ground road
       b.quad([foot[0] - 26, 0.22, foot[1] - 26], [foot[0] + 26, 0.22, foot[1] - 26],
              [foot[0] + 26, 0.22, foot[1] + 26], [foot[0] - 26, 0.22, foot[1] + 26], 0x1b2334, true);
 

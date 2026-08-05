@@ -68,6 +68,11 @@
 
   // ------------------------------------------------------------------ config
   const RASTER = 1.5;          // collision raster cell, metres
+  // Building colliders are pulled back this many raster cells so the historic
+  // street grid is actually driveable. 2 cells = 3 m off each face = every
+  // street 6 m wider. Raise it if Prague still feels tight; lower it if the car
+  // visibly overlaps facades too often. See FootprintRaster._erode.
+  const COLLIDER_EROSION = 2;
   const CELL_COLLIDE = 12;     // spatial-hash cell for colliders (see note in stats())
   const CELL_ROAD = 48;        // spatial-hash cell for road segments
   const TILE_N = 3;            // building geometry is split TILE_N x TILE_N for culling
@@ -326,7 +331,50 @@
     this.solid = new Uint8Array(this.nx * this.nz);
     this.hgt = new Uint8Array(this.nx * this.nz);      // metres, clamped to 255
     this._fill(buildings);
+    this._erode(COLLIDER_EROSION);
   }
+
+  /**
+   * Pull every collider inward by `cells`, widening every street by twice that.
+   *
+   * Prague 1's streets are genuinely 4.5-7 m wide, and the player car is ~4.5
+   * units long with a 5.2-unit-wide collision body — in a 7 m lane that leaves
+   * under a metre either side, which playtesting confirmed is not driveable.
+   * Widening the road ribbons would not help: the constraint is the gap between
+   * building faces, not the paint.
+   *
+   * Eroding the COLLISION raster (and leaving the visual geometry untouched)
+   * buys that space where it is needed without falsifying the geography. The
+   * car can clip a little way into a facade if you hug a wall, which reads as
+   * scraping; the alternative was a map you could not drive.
+   *
+   * Trade-off, stated: a building thinner than 2*cells*RASTER metres loses its
+   * collider entirely. In Prague 1's core these are rare, and a missing
+   * collider on a narrow infill is a far smaller problem than an impassable
+   * street.
+   */
+  FootprintRaster.prototype._erode = function (cells) {
+    if (!cells || cells <= 0) return;
+    const nx = this.nx, nz = this.nz, src = this.solid;
+    const out = new Uint8Array(src);
+    for (let z = 0; z < nz; z++) {
+      for (let x = 0; x < nx; x++) {
+        const i = z * nx + x;
+        if (!src[i]) continue;
+        let free = false;
+        for (let dz = -cells; dz <= cells && !free; dz++) {
+          const zz = z + dz;
+          if (zz < 0 || zz >= nz) { free = true; break; }
+          for (let dx = -cells; dx <= cells; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= nx || !src[zz * nx + xx]) { free = true; break; }
+          }
+        }
+        if (free) out[i] = 0;
+      }
+    }
+    this.solid = out;
+  };
 
   /** Even-odd scanline fill of every outer ring, cell-centre-inside. */
   FootprintRaster.prototype._fill = function (buildings) {
