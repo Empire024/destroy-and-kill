@@ -50,7 +50,7 @@ migration 12/14 · Legacy excision 6/7.
 ---
 
 > **F1, F2, F3, F4 and F5 were FIXED after this report's gate run** — commits
-> `35a5b7e` (F3/F4/F5, lead) and `3d29d11` + `517b933` (F1/F2, help owner). The
+> `35a5b7e` (F3/F4/F5, lead) and `3d29d11` + `120f2f8` (F1/F2, help owner). The
 > report body below describes the build as gated; this section describes the
 > build as shipped, and the two now agree.
 
