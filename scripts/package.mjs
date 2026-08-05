@@ -17,6 +17,7 @@ const DIST = path.join(ROOT, 'dist');
 
 const INCLUDE = [
   'index.html',
+  'gta_vice_city_destroy_and_kill_v31.html',   // 265-byte redirect for old bookmarks
   'START_GAME.bat',
   'serve_game.js',
   'serve_game.py',

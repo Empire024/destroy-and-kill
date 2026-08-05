@@ -15,9 +15,14 @@
  * then drawn at exactly that carved height. Runtime cost is one bilinear grid
  * read plus three sines.
  *
- * Contains: an eight-traverse / seven-hairpin climb, a stunt bypass carrying a
- * crest launch, a gravel cut that skips hairpin 4, guardrails on every drop-off,
- * the summit lookout (mast + observatory), and a pine hillside.
+ * Contains: a ~8100-unit climb over seven traverses and six hairpins to a summit
+ * turnaround loop at y≈208, a stunt bypass carrying a crest launch, a gravel cut
+ * that skips hairpin 4, guardrails on every drop-off, the summit lookout (mast +
+ * observatory), and a pine hillside.
+ *
+ * Hairpin count is six rather than more because each one costs 140 units of x
+ * and the climbing face is only ~1800 wide; squeezing in a seventh left no room
+ * for a summit terrace anywhere near the crest ridge.
  * ==========================================================================*/
 (function () {
   'use strict';
@@ -200,12 +205,17 @@
     [-1906, -378, 0]
   ];
 
-  /* Gravel cut that skips hairpin 4 on the way down. */
+  /* Gravel cut that skips hairpin 4 on the way down. There are only ~150 units
+     between two switchback legs, so the spur peels off traverse 5 early and
+     swings east over 300 units: a late tight corner leaves the car still
+     rotating as it crosses the ramp, and it slides off the side instead of
+     launching off the lip. */
   const CUT_WP = [
-    [-2882, -760, 0],
-    [-2868, -640, 90],
-    [-2843, -560, 70],
-    [-2830, -524, 0]
+    [-2884, -860, 0],
+    [-2874, -740, 110],
+    [-2860, -620, 95],
+    [-2840, -556, 62],
+    [-2745, -524, 0]
   ];
 
   const SUMMIT = { x: -3430, z: -1700 };
@@ -336,7 +346,7 @@
     // ---- 4. guardrails, retaining walls, signs, lights --------------------
     const noRail = [
       { x: -1948, z: -1215, r: 70 }, { x: -1906, z: -378, r: 70 },   // bypass mouths
-      { x: -2882, z: -760, r: 70 },                                   // cut mouth
+      { x: -2884, z: -860, r: 90 },                                   // cut mouth
       { x: APRON.x, z: APRON.z, r: 130 },                             // landing box
       { x: -1893, z: -700, r: 150 }                                   // bypass landing run
     ];
@@ -444,9 +454,11 @@
     b.ramp({ x: -1893, z: -828, dir: 0, w: 26, len: 74, height: 15, color: 0xd8632c });
     b.landmark('CREST LAUNCH', -1893, -828);
     // Hairpin-4 cut: fired east off the gravel spur, over the inside of the
-    // corner and onto traverse 4 / the gravel apron behind it.
-    b.ramp({ x: -2822, z: -522, dir: Math.PI / 2, w: 26, len: 66, height: 13, color: 0xd8632c });
-    b.landmark('HAIRPIN CUT', -2822, -522);
+    // corner and onto traverse 4 / the gravel apron behind it. Deliberately
+    // wide and short — the car is still straightening as it arrives, and a
+    // narrow deck lets it drop off the side with no vertical launch at all.
+    b.ramp({ x: -2778, z: -524, dir: Math.PI / 2, w: 44, len: 52, height: 13, color: 0xd8632c });
+    b.landmark('HAIRPIN CUT', -2778, -524);
 
     // ---- 6. summit lookout -------------------------------------------------
     (function () {

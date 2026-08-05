@@ -168,6 +168,32 @@ strip boulevard and quarry haul all completed with **zero** stuck steps and
 **zero** off-road steps. The quarry haul road now descends to y=−60; before the
 fix that route stuck at −28.
 
+### Hillside grade audit (independently re-measured)
+
+The district author reported "zero samples steeper than −12%", −12% being the
+grade at which the car's ground-lerp (`dt*9`) lags far enough behind a falling
+terrain to trip the `y > terrainY + 2.6` airborne test. Re-measured per road
+segment across all 825 hillside segments, grouped by carriageway width:
+
+| Road | Segments | Worst climb | Worst descent | Over −12% |
+|---|---|---|---|---|
+| main climb (44 wide) | 673 | +16.6% | **−6.5%** | **0** |
+| link spur (38) | 47 | +7.1% | 0% | 0 |
+| lower stub (34) | 71 | +2.4% | −6.1% | 0 |
+| gravel cut (30) | 34 | +3.7% | **−24.4%** | **5** |
+
+So the claim is exactly right for the main road — −6.5% / +16.6% / zero
+violations, matching to the decimal. The five violations are all on the **30-wide
+gravel shortcut that skips hairpin 4**, clustered in one ~72-unit run around
+(−2820, −550), in 12-unit segments dropping 1.4–2.9 each.
+
+Practical impact, low: from the lag model `grade × speed > 23.4`, the −24.4%
+pitch needs roughly **153 mph** to produce a brief airborne pop, and it is a
+short drop on an optional shortcut where a hop arguably reads as intended. Left
+as-is and recorded rather than smoothed, because it is the author's feature and
+not on the main route. Seam flatness (0.000 across x = −1700…−1300 on both stub
+lines) and stub continuity (d = 0.00 at both) were independently confirmed.
+
 ### Known limitations (not defects)
 
 - The autopilot follows "nearest road ahead", so at a switchback it can grab the
