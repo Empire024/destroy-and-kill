@@ -68,10 +68,22 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
+// If the port is held by something we could not close, step to the next one
+// rather than exiting — the launcher window vanishing with no explanation is a
+// worse failure than running on 8766.
+let activePort = port;
+let portTries = 0;
 server.on('error', err => {
+  if (err.code === 'EADDRINUSE' && portTries < 10) {
+    portTries++;
+    activePort = port + portTries;
+    console.log(`Port ${activePort - 1} is busy — trying ${activePort}…`);
+    setTimeout(() => server.listen(activePort, host), 120);
+    return;
+  }
   if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${port} is already in use — the game may already be running.`);
-    console.error(`Open http://${browserHost}:${port}/ or close the other window.`);
+    console.error(`Ports ${port}-${activePort} are all in use.`);
+    console.error('Close the other game window and run this again.');
   } else {
     console.error(err.message);
   }
@@ -79,9 +91,9 @@ server.on('error', err => {
 });
 
 server.listen(port, host, () => {
-  const url = `http://${browserHost}:${port}/`;
+  const url = `http://${browserHost}:${activePort}/`;
   console.log(`DESTROY AND KILL running at ${url}`);
-  console.log(`Phone on the same Wi-Fi: http://YOUR-PC-IP:${port}/`);
+  console.log(`Phone on the same Wi-Fi: http://YOUR-PC-IP:${activePort}/`);
   console.log('Keep this window open. Press Ctrl+C to stop.');
   const command = process.platform === 'win32' ? `start "" "${url}"`
     : process.platform === 'darwin' ? `open "${url}"`
