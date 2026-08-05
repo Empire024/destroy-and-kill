@@ -140,7 +140,11 @@
    * rather than a light source. Two triangles for a lot of atmosphere.
    */
   function sheen(b, x, z, w, d, color, f) {
-    slab(b, x - w / 2, z - d / 2, x + w / 2, z + d / 2, 0.16, dim(color, f || 0.24), true);
+    f = f || 0.24;
+    // two steps rather than one flat rectangle: a hard-edged single quad reads
+    // as a painted patch, a falloff reads as light on wet asphalt
+    slab(b, x - w / 2, z - d / 2, x + w / 2, z + d / 2, 0.15, dim(color, f * 0.38), true);
+    slab(b, x - w * 0.3, z - d * 0.3, x + w * 0.3, z + d * 0.3, 0.17, dim(color, f), true);
   }
 
   // ------------------------------------------------------------------- props

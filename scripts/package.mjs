@@ -48,7 +48,16 @@ function copy(src, dest) {
   }
 }
 
-fs.rmSync(DIST, { recursive: true, force: true });
+// A dev server still serving dist/ holds a handle on Windows and rmSync throws
+// EPERM. Say so plainly rather than dying with a stack trace.
+try {
+  fs.rmSync(DIST, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+} catch (e) {
+  console.error(`Could not clear ${DIST}: ${e.code || e.message}`);
+  console.error('Something is holding it open — usually a `node serve_game.js` still running in dist/.');
+  console.error('Stop that server and re-run.');
+  process.exit(1);
+}
 for (const rel of INCLUDE) {
   const src = path.join(ROOT, rel);
   if (!fs.existsSync(src)) { console.warn('  ! skipping missing ' + rel); continue; }

@@ -69,6 +69,14 @@
   const C_EDGE = 0xbfd4e0;
   const C_WARN = 0xffa020;
 
+  /**
+   * Support piers are solid until the car is above them, so a pier that lands
+   * inside a RAMP's carriageway stops the player dead halfway up. Ramps are
+   * plotted first and register keep-out zones here; `viaduct` then refuses to
+   * drop a pier inside somebody else's zone.
+   */
+  let NO_PIER = [];
+
   /** Deterministic RNG — never Math.random() at build time. */
   function rng(seed) {
     let s = seed >>> 0;
@@ -271,11 +279,18 @@
     }
 
     const every = o.pierEvery || 3;
+    const owner = o.owner || 'ring';
     for (let i = 0; i < pts.length; i += every) {
       const p = pts[i];
       const gy = b.terrain.heightAt(p[0], p[1]);
       const h = p[2] - gy - SOFF;
       if (h < 9) continue;
+      let blocked = false;
+      for (let k = 0; k < NO_PIER.length; k++) {
+        const n = NO_PIER[k];
+        if (n.owner !== owner && Math.hypot(p[0] - n.x, p[1] - n.z) < n.r) { blocked = true; break; }
+      }
+      if (blocked) continue;
       // The visual pier reaches the soffit, but its COLLIDER stops 5 units
       // short: a collider is only ignored above `baseY + h - 0.6`, and the car's
       // height lags the deck slightly on a climb — a full-height pier would go
@@ -448,10 +463,12 @@
     const THREE = b.THREE;
     const r = rng(0x5EED17);
 
+    NO_PIER = [];
     connectors(b);
     const loopPath = innerLoop(b, THREE);
+    const ramps = rampSpecs(b);          // plotted first: seeds the pier keep-outs
     const ringPath = rimFreeway(b, THREE);
-    const merges = interchanges(b, THREE);
+    const merges = interchanges(b, THREE, ramps);
     const spurGaps = spurs(b, THREE);
     ringFurniture(b, THREE, ringPath, merges.concat(spurGaps), r);
     loopFurniture(b, THREE, loopPath);
@@ -495,8 +512,9 @@
     b.road([[SVC_X, 1300], [-1350, 1130]], o);
 
     // East cross road: threads the strip/quarry gap (z 1000..1700) and hands the
-    // whole east side of the map a route out to the freeway's east gate.
-    b.road([[1150, 1350], [3980, 1350]], o);
+    // whole east side of the map a route out to the freeway's east gate — which
+    // it runs straight into, so it stops at the ramp foot.
+    b.road([[1150, 1350], [3700, 1350]], o);
   }
 
   // -------------------------------------------------------------- inner loop
@@ -591,29 +609,57 @@
    *
    * Grades run 4.2%-6.7%. Returns the barrier-gap list for the ring.
    */
-  function interchanges(b, THREE) {
+  /**
+   * The five ramp alignments, resolved to full [x,z,y] paths.
+   *
+   * Every one leaves its feeder road at (or close to) a right angle. A ramp that
+   * runs COLLINEAR with the street it starts on is a trap: its deck sits on top
+   * of that street, so anyone simply driving along gets picked up and carried
+   * into the air, and the ramp's barrier then funnels them all the way up. The
+   * inner loop and the west service road both used to do exactly that.
+   */
+  function rampSpecs(b) {
     const P = Math.PI;
-    const ramps = [
-      // WEST GATE — off the inner loop's west side, merges north onto the west leg
-      { name: 'WEST GATE', rot: P, side: -1, pts: linePts(-1350, 340, X0N, -100, 50) },
-      // DOCK GATE — off the west service road, merges onto the docks-side west leg
-      { name: 'DOCK GATE', rot: P, side: -1, pts: linePts(SVC_X, 2100, X0W, 2540, 50) },
-      // NORTH GATE — off the inner loop's north side, sweeps east onto the north leg
-      { name: 'NORTH GATE', rot: P / 2, side: -1, pts: bez([250, -LOOP], [250, -1745], [305, Z0], [700, Z0], 16) },
-      // EAST GATE — off the east cross road, sweeps north onto the east leg
-      { name: 'EAST GATE', rot: 0, side: -1, pts: bez([3700, 1350], [4000, 1350], [X1, 1150], [X1, 800], 16) },
-      // SOUTH GATE — off the south frontage road, sweeps west onto the south leg
-      { name: 'SOUTH GATE', rot: -P / 2, side: -1, pts: bez([200, 3995], [-20, 3995], [-280, Z1], [-500, Z1], 16) }
+    const specs = [
+      // WEST GATE — leaves the inner loop's west side heading due west, then
+      // swings north onto the west leg
+      { name: 'WEST GATE', rot: P, side: -1,
+        raw: bez([-1350, 220], [-1442, 220], [X0N, 60], [X0N, -260], 18) },
+      // DOCK GATE — leaves the west service road heading west, swings south
+      { name: 'DOCK GATE', rot: P, side: -1,
+        raw: bez([SVC_X, 2100], [-1722, 2100], [X0W, 2280], [X0W, 2600], 18) },
+      // NORTH GATE — leaves the inner loop's north side heading north, swings east
+      { name: 'NORTH GATE', rot: P / 2, side: -1,
+        raw: bez([250, -LOOP], [250, -1745], [305, Z0], [700, Z0], 16) },
+      // EAST GATE — the east cross road simply becomes the ramp and turns north
+      { name: 'EAST GATE', rot: 0, side: -1,
+        raw: bez([3700, 1350], [4000, 1350], [X1, 1150], [X1, 800], 16) },
+      // SOUTH GATE — peels off the south frontage road and runs west onto the
+      // south leg on a very shallow merge
+      { name: 'SOUTH GATE', rot: -P / 2, side: -1,
+        raw: bez([200, 3995], [-20, 3995], [-280, Z1], [-500, Z1], 16) }
     ];
-
-    const gaps = [];
-    for (const rp of ramps) {
-      // start the deck flush with whatever the neighbouring district left on the
+    for (let i = 0; i < specs.length; i++) {
+      // Start the deck flush with whatever the neighbouring district left on the
       // ground: a deck more than 0.5 below the terrain is discarded outright by
       // groundHeightAt, which would kill the bottom of the ramp.
-      const gy = b.terrain.heightAt(rp.pts[0][0], rp.pts[0][1]);
-      const pts = withY(rp.pts, gy, RING_Y);
-      viaduct(b, THREE, pts, RAMP_W, { color: C_RAMP, pierEvery: 4 });
+      const raw = specs[i].raw;
+      specs[i].owner = 'ramp' + i;
+      specs[i].pts = withY(raw, b.terrain.heightAt(raw[0][0], raw[0][1]), RING_Y);
+      // keep other structures' piers out of the part of the climb where they
+      // would still be solid (a pier is ignored once the car is above it)
+      for (const p of specs[i].pts) {
+        if (p[2] < 26) NO_PIER.push({ x: p[0], z: p[1], r: 46, owner: specs[i].owner });
+      }
+    }
+    return specs;
+  }
+
+  function interchanges(b, THREE, ramps) {
+    const gaps = [];
+    for (const rp of ramps) {
+      const pts = rp.pts;
+      viaduct(b, THREE, pts, RAMP_W, { color: C_RAMP, pierEvery: 4, owner: rp.owner });
 
       const top = pts[pts.length - 1];
       junctionPad(b, top[0], top[1], RING_Y, rp.rot);
@@ -739,7 +785,7 @@
       streetLamp(b, THREE, x + Math.cos(rot) * 30 * side, z - Math.sin(rot) * 30 * side, rot);
     });
     for (const seg of [[[SVC_X, 1300], [SVC_X, FRONT_Z]], [[SVC_X, FRONT_Z], [ELINK_X, FRONT_Z]],
-                       [[ELINK_X, FRONT_Z], [ELINK_X, 1350]], [[1150, 1350], [3980, 1350]]]) {
+                       [[ELINK_X, FRONT_Z], [ELINK_X, 1350]], [[1150, 1350], [3700, 1350]]]) {
       let m = 0;
       placeAlong([seg[0], seg[1]], 210, 90, (x, z, rot) => {
         const side = (m++ % 2) ? 1 : -1;
