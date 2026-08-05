@@ -47,7 +47,11 @@ window.RACES = [
   {
     id: 'nr-docks-circuit', worldId: 'neon', name: 'DOCKYARD CIRCUIT', laps: 2,
     reward: 2000, entryFee: 0,
-    anchors: [{ x: -30, z: 2860 }, { x: 530, z: 2860 }, { x: 530, z: 3580 }, { x: -30, z: 3580 }, { x: -30, z: 2860 }],
+    // A genuine closed loop: every leg's routed length equals its straight-line
+    // distance, so the field never has to double back on itself. The x=-30
+    // service road looks like it closes the same rectangle further east, but it
+    // is broken between z=2860 and z=3580 and the route detours 1120 units.
+    anchors: [{ x: -1180, z: 2860 }, { x: 530, z: 2860 }, { x: 530, z: 3580 }, { x: -1180, z: 3580 }, { x: -1180, z: 2860 }],
     opponents: [
       { name: 'CRANE', skill: 0.42, aggression: 0.30, mistakes: 0.45, tuneKey: 'commuter', color: 0xffd23f },
       { name: 'BOLLARD', skill: 0.55, aggression: 0.55, mistakes: 0.30, tuneKey: 'streetDrift', color: 0x4dff88 },

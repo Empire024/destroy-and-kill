@@ -99,16 +99,27 @@
     return Math.atan2(poly[lo + 1].x - poly[lo].x, poly[lo + 1].z - poly[lo].z);
   }
   /**
-   * Arc length of the closest point on the line, searched in a window around
-   * `hintS`. A full scan per agent per frame is the one thing here that would
-   * cost real time on a 400-point route; pass a huge window when there is no
-   * useful hint (a zone the player is not in yet).
+   * Arc length of the closest point on the SLICE of the line between
+   * `hintS - back` and `hintS + ahead`. A full scan per agent per frame is the
+   * one thing here that would cost real time on a 400-point route; pass a huge
+   * window when there is no useful hint (a zone the player is not in yet).
+   *
+   * `back = 0` makes progress strictly forward-only, and that is not an
+   * optimisation — it is what stops an agent oscillating where a resolved route
+   * doubles back along itself. On an out-and-back leg the outbound and inbound
+   * points are the same tarmac at two different arc lengths, so a symmetric
+   * search keeps snapping the agent to the outbound one, the lookahead keeps
+   * pointing it the way it came, and the whole field parks at the turnaround.
+   * (Measured: the first DOCKYARD CIRCUIT route did exactly this — all five
+   * cars pinned at s=1810 of 3680 for 296 seconds.)
+   *
    * Returns a SHARED object — read what you need before calling again.
    */
   const _proj = { s: 0, d: 0, x: 0, z: 0 };
-  function projectNear(poly, cum, x, z, hintS, window) {
+  function projectNear(poly, cum, x, z, hintS, ahead, back) {
     const total = cum[cum.length - 1];
-    const s0 = clamp(hintS - window, 0, total), s1 = clamp(hintS + window, 0, total);
+    const s0 = clamp(hintS - (back == null ? ahead : back), 0, total);
+    const s1 = clamp(hintS + ahead, 0, total);
     let lo = 0, hi = cum.length - 1;
     while (lo + 1 < hi) { const m = (lo + hi) >> 1; if (cum[m] <= s0) lo = m; else hi = m; }
     let best = -1, bestD = Infinity, bestX = 0, bestZ = 0;
@@ -116,12 +127,13 @@
       if (cum[i] > s1) break;
       const ax = poly[i].x, az = poly[i].z;
       const dx = poly[i + 1].x - ax, dz = poly[i + 1].z - az;
-      const l2 = dx * dx + dz * dz || 1;
+      const l2 = dx * dx + dz * dz || 1, len = Math.sqrt(l2);
       let t = ((x - ax) * dx + (z - az) * dz) / l2;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const tmin = clamp((s0 - cum[i]) / len, 0, 1), tmax = clamp((s1 - cum[i]) / len, 0, 1);
+      t = t < tmin ? tmin : t > tmax ? tmax : t;
       const px = ax + dx * t, pz = az + dz * t;
       const d = (x - px) * (x - px) + (z - pz) * (z - pz);
-      if (d < bestD) { bestD = d; best = cum[i] + Math.sqrt(l2) * t; bestX = px; bestZ = pz; }
+      if (d < bestD) { bestD = d; best = cum[i] + len * t; bestX = px; bestZ = pz; }
     }
     if (best < 0) { _proj.s = clamp(hintS, 0, total); _proj.d = 1e9; _proj.x = x; _proj.z = z; return _proj; }
     _proj.s = best; _proj.d = Math.sqrt(bestD); _proj.x = bestX; _proj.z = bestZ;
@@ -943,7 +955,7 @@
     const agg = o.def.aggression || 0;
     const mis = o.def.mistakes || 0;
 
-    const p = projectNear(poly, cum, o.x, o.z, o.s, 240);
+    const p = projectNear(poly, cum, o.x, o.z, o.s, 240, 0);   // forward-only — see projectNear
     o.s = p.s; o.off = p.d;
     const backX = p.x, backZ = p.z;
 

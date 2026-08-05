@@ -358,7 +358,7 @@
 .progCard .carIcon{font-size:38px}
 .progCard h2{margin-top:9px!important;font-size:20px!important}
 .progCard p{margin-top:7px!important;font-size:11.5px!important;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .progCard .progStatus{margin-top:auto}
 .progCard.locked{opacity:.62;cursor:not-allowed;border-color:#2b3444}
 .progCard.locked:hover{transform:none;border-color:#2b3444;box-shadow:none}

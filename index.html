@@ -569,6 +569,7 @@ window.addEventListener('unhandledrejection', (e) => {
 <script src="src/world/neon/district-quarry.js"></script>
 <script src="src/world/neon/district-links.js"></script>
 <script src="src/world/neon/district-signals.js"></script>
+<script src="src/world/neon/district-services.js"></script>
 <script src="src/world/prague-world.js"></script>
 <!-- Expansion: data first (plain declarations), then the systems that read them.
      Each file registers itself with GameSystems; the engine boots the registry
@@ -1817,7 +1818,10 @@ function updateGenericTraffic(t,dt){
     const tx=ahead.x+nx*lane*t.laneSign,tz=ahead.z+nz*lane*t.laneSign;
     let err=Math.atan2(tx-t.x,tz-t.z)-t.heading;err=Math.atan2(Math.sin(err),Math.cos(err));
     t.heading+=clamp(err,-1.5*dt,1.5*dt);
-    const turn=Math.abs(err)>.2,want=turn?Math.min(18,t.cruise):t.cruise;
+    // Signal stop: the signals district publishes a stateless speed cap for
+    // red lights ahead; the traffic-ai module only ever REDUCES t.spd, so the
+    // cap always wins after its modifiers too.
+    const turn=Math.abs(err)>.2,want=Math.min(turn?Math.min(18,t.cruise):t.cruise,window.TrafficSignals?window.TrafficSignals.speedCap(t.x,t.z,t.heading,t.spd):Infinity);
     t.spd+=clamp(want-t.spd,-40*dt,16*dt);
   } else t.spd=Math.max(0,t.spd-24*dt);
   t.x+=Math.sin(t.heading)*t.spd*dt;t.z+=Math.cos(t.heading)*t.spd*dt;
