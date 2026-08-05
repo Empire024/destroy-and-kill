@@ -64,6 +64,31 @@
   const RING_HW = RING_W / 2 + 2.6, RAMP_HW = RAMP_W / 2 + 2.6;
   const CLEAR_L = RING_HW + RAMP_HW + 7;   // 62.2
 
+  // Where a slip road's centreline sits while it runs alongside its leg.
+  //
+  // RING_W/2 + RAMP_W/2 = 50 puts the two RIBBONS exactly edge to edge, so the
+  // slip lane reads as the carriageway widening — which is what a deceleration
+  // lane is — instead of a second road painted on top of the first. Every ramp
+  // here used to meet the ring ON ITS CENTRELINE and stay coincident with it for
+  // 200-400 units: same height, same paint, so the ring's surface z-fought the
+  // ramp's, the ramp's kerbs and centre dashes ran down the middle of the
+  // freeway, and a slip road appeared to erupt out of the traffic and cross the
+  // opposing carriageway to get anywhere. Reported by a player as "the exits
+  // merge into the highway, going through it". They now leave and rejoin from
+  // the shoulder, with a parallel taper before they diverge.
+  //
+  // Deck rectangles are 2.6 wider than their ribbon on each side, so at this
+  // offset the ring's deck and the slip road's still OVERLAP by 5.2 units: the
+  // car can cross between them anywhere along the taper and no float-exact seam
+  // can open a hole. Tangent decks would be 55.2 — one ulp from a 30-unit fall.
+  const SLIP_OFF = RING_W / 2 + RAMP_W / 2;   // 50
+  // Where an entrance's taper finally puts you: the middle of the interior-side
+  // lane, not astride the centre paint.
+  const MERGE_OFF = RING_W / 4;               // 13
+  // The ring's own crash barrier, offset from its centreline. Named because the
+  // ramps have to reason about where it is, not just draw it.
+  const RAIL_OFF = 27.5;
+
   // Inner ground loop
   const LOOP = 1350, LOOP_R = 220, LOOP_S = LOOP - LOOP_R;   // straight half-length
 
@@ -144,6 +169,45 @@
     for (let i = 1; i < pts.length; i++) {
       s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
       out.push([pts[i][0], pts[i][1], y0 + (y1 - y0) * (s / total)]);
+    }
+    return out;
+  }
+
+  /** Concatenate path pieces end to end, dropping the duplicated joints. */
+  function chain() {
+    const out = [];
+    for (let i = 0; i < arguments.length; i++) pushPts(out, arguments[i]);
+    return out;
+  }
+
+  /**
+   * Re-sample the segments of `pts` that pass near any of `zones` (circles
+   * {x,z,r}) down to `step`, leaving the rest of the path alone.
+   *
+   * Needed because `barrierRail` never emits a box shorter than the polyline
+   * segment it is walking: on the ring's own 130-unit sampling the rail can only
+   * open in 130-unit steps, so where a gore nose falls inside a chunk the whole
+   * chunk either stays (fencing the mouth — the bug in a02b207) or goes (leaving
+   * up to 65 units of unguarded deck edge upstream of it). Fine chunks near the
+   * ramps put the hand-off within half a chunk of where the geometry says it is.
+   */
+  function densifyNear(pts, zones, step) {
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const dx = c[0] - a[0], dz = c[1] - a[1];
+      const len2 = dx * dx + dz * dz, len = Math.sqrt(len2) || 1;
+      let near = false;
+      for (let k = 0; k < zones.length && !near; k++) {
+        const g = zones[k];
+        let t = ((g.x - a[0]) * dx + (g.z - a[1]) * dz) / (len2 || 1);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        near = Math.hypot(g.x - (a[0] + dx * t), g.z - (a[1] + dz * t)) < g.r + 40;
+      }
+      const n = near ? Math.max(1, Math.round(len / step)) : 1;
+      const ay = a[2] === undefined ? 0 : a[2], cy = c[2] === undefined ? 0 : c[2];
+      for (let j = 1; j <= n; j++)
+        out.push([a[0] + dx * j / n, a[1] + dz * j / n, ay + (cy - ay) * j / n]);
     }
     return out;
   }
@@ -371,9 +435,13 @@
               Math.hypot(px - gg.x, pz - gg.z) < gg.r) { skip = true; break; }
         }
         if (skip) continue;
-        b.box({ x: px, z: pz, y: py, w: w, h: h, d: cl * 1.04, rot: rot, color: C_BAR });
+        // Sacrificial: hit this section square-on hard enough and it is smashed
+        // out of the world. One token per chunk so the rail and its lit cap go
+        // together, leaving a real hole rather than a floating strip of neon.
+        const brk = b.breakGroup();
+        b.box({ x: px, z: pz, y: py, w: w, h: h, d: cl * 1.04, rot: rot, color: C_BAR, breakable: brk });
         b.box({ x: px, z: pz, y: py + h - 0.5, w: w + 0.6, h: 0.5, d: cl * 1.04, rot: rot,
-                color: C_BARLIT, emissive: true, noCollide: true });
+                color: C_BARLIT, emissive: true, noCollide: true, breakable: brk });
       }
     }
   }
@@ -535,6 +603,22 @@
     // whole east side of the map a route out to the freeway's east gate — which
     // it runs straight into, so it stops at the ramp foot.
     b.road([[1150, 1350], [3700, 1350]], o);
+
+    // ---- landings for two exits that had none ------------------------------
+    // Both of these are short, sit in the gaps between districts, and were
+    // checked for colliders along their whole length before being drawn.
+    //
+    // The inner loop's north straight, extended east to meet NORTH EXIT's foot.
+    // Without it that exit put you down 264 units from the nearest road.
+    b.road([[LOOP_S, -LOOP], [1560, -LOOP]], o);
+    // EAST EXIT's foot -> the east end of the strip's back road at (3800, -60),
+    // which from there runs 2130 units west into the district. The exit lands in
+    // the 130-unit corridor between the strip's east edge and the ring, the only
+    // clear ground on that side, and until this link the nearest road was 157
+    // units away across bare dirt. Aimed at (3800,-60) rather than the apron at
+    // (3800,0) so the exit meets it square: measured on the apron line, the foot
+    // was a 112-degree hairpin and the car came off the ramp at 7 mph.
+    b.road([[EEXIT_X, -60], [3800, -60]], o);
   }
 
   // -------------------------------------------------------------- inner loop
@@ -622,12 +706,26 @@
 
   // ------------------------------------------------------------ interchanges
   /**
-   * Five driveable interchanges. Every one is a continuous chain of deck from
-   * y=0 up to y=30 — a straight climb for the two short ones, a bezier for the
-   * three that have to turn onto the ring — plus a flat junction pad at the top
-   * so the merge can never leave a wedge of deck missing.
+   * Five driveable interchanges and five exits. Every one is a continuous chain
+   * of deck from y=0 up to y=30, plus a flat junction pad where it meets the
+   * ring so the merge can never leave a wedge of deck missing.
    *
-   * Grades run 4.2%-6.7%. Returns the barrier-gap list for the ring.
+   * Measured grades: entrances 3.1%-4.6% (they are longer than they were, since
+   * they now run alongside the ring before merging), exits 5.5%-6.0%. Returns
+   * the barrier-gap list for the ring.
+   *
+   * Handedness, since it is the obvious next question and the answer is "no":
+   * every feeder road in this city is INSIDE the ring, so every ramp has to
+   * leave and rejoin on the interior side, and whether that is the driver's
+   * right or left depends purely on which way round the ring they are going.
+   * Clockwise (north leg eastbound) it is the right — WEST, NORTH and EAST EXIT
+   * and WEST, NORTH and SOUTH GATE are all right-handed. DOCK EXIT/GATE and
+   * SOUTH EXIT and EAST GATE run the other way round the ring and so peel off
+   * the left. Making those right-handed would mean putting their feeders on the
+   * outside of the ring, where there is nothing but the map edge, or reversing
+   * them and breaking the gate/exit pairing on their leg. The ring is a single
+   * bidirectional carriageway with a dashed centre line, so that costs a lane
+   * change across the paint, not a crossing of anything solid.
    */
   /**
    * The five ramp alignments, resolved to full [x,z,y] paths.
@@ -647,6 +745,25 @@
     return (spec.axis === 'x' ? p[0] - spec.at : p[1] - spec.at) * spec.inDir;
   }
 
+  /** Inverse of `legLateral`: the world point `s` along a leg, `lat` out from
+   *  its centreline towards the ring's interior. */
+  function legPt(spec, s, lat) {
+    return spec.axis === 'x' ? [spec.at + lat * spec.inDir, s] : [s, spec.at + lat * spec.inDir];
+  }
+
+  /** The parallel part of a slip road — the deceleration or acceleration lane
+   *  proper, from `s0` to `s1` along the leg at a fixed lateral offset. */
+  function legRun(spec, s0, s1, lat) {
+    const a = legPt(spec, s0, lat), c = legPt(spec, s1, lat);
+    return linePts(a[0], a[1], c[0], c[1], 55);
+  }
+
+  /** Copy a leg's identity onto a ramp spec. */
+  function onLeg(leg, o) {
+    o.axis = leg.axis; o.at = leg.at; o.inDir = leg.inDir;
+    return o;
+  }
+
   /**
    * Ground roads that an exit ramp descends over. `viaduct` refuses to drop a
    * pier inside a keep-out it does not own, so registering these carriageways
@@ -658,7 +775,8 @@
     const runs = [
       [[SVC_X, 3150], [SVC_X, 3820]],        // west service road, under DOCK EXIT
       [[820, FRONT_Z], [1300, FRONT_Z]],     // south frontage road, under SOUTH EXIT
-      [[-1200, -LOOP], [-900, -LOOP]]        // inner loop, north side, under WEST EXIT
+      [[-1200, -LOOP], [-900, -LOOP]],       // inner loop, north side, under WEST EXIT
+      [[1400, -LOOP], [1560, -LOOP]]         // loop east extension, under NORTH EXIT
     ];
     for (const r of runs)
       for (const p of linePts(r[0][0], r[0][1], r[1][0], r[1][1], 40))
@@ -668,24 +786,65 @@
   function rampSpecs(b) {
     const P = Math.PI;
     groundKeepOut();
+    // The five legs the ramps share. `at` is the leg's centreline and `inDir`
+    // says which way the ring's interior lies from it; `legPt`/`legLateral` plot
+    // everything below from those two numbers, so a leg only has to be right
+    // once. Every ramp leaves towards the interior — the ring hugs the map edge
+    // and there is nothing to reach on the outside of it.
+    const WLEG = { axis: 'x', at: X0N, inDir: 1 };    // west leg, downtown side
+    const DLEG = { axis: 'x', at: X0W, inDir: 1 };    // west leg, docks side
+    const NLEG = { axis: 'z', at: Z0, inDir: 1 };     // north leg
+    const ELEG = { axis: 'x', at: X1, inDir: -1 };    // east leg
+    const SLEG = { axis: 'z', at: Z1, inDir: -1 };    // south leg
+
+    // ---- ENTRANCES ---------------------------------------------------------
+    // Each is: a climb off the feeder road, an acceleration lane alongside the
+    // ring at SLIP_OFF, then a taper in to MERGE_OFF. The old alignments ran
+    // their last ~300 units along the ring's centreline, which surfaced the
+    // on-ramp in the middle of the freeway — half the time on the far side of
+    // it — and painted a second set of lane markings over the ring's own.
+    //
+    // The climb is still spread over the whole path by `withY`, so the accel
+    // lane is the tail of the climb rather than level. That is safe for an
+    // ENTRANCE and only for an entrance: it is below the ring the whole way, so
+    // its deck may overlap the ring's (the resolver picks by nearest Y, and
+    // where the two are near enough to argue about the ramp is level with the
+    // ring anyway) and its rails pass under the ring's. An exit gets none of
+    // that and is plotted quite differently below.
     const specs = [
       // WEST GATE — leaves the inner loop's west side heading due west, then
       // swings north onto the west leg
-      { name: 'WEST GATE', rot: P, side: -1,
-        raw: bez([-1350, 220], [-1442, 220], [X0N, 60], [X0N, -260], 18) },
+      onLeg(WLEG, { name: 'WEST GATE', rot: P, side: -1,
+        raw: chain(bez([-1350, 220], [-1452, 215], [-1408, 120], legPt(WLEG, 20, SLIP_OFF), 14),
+                   legRun(WLEG, 20, -160, SLIP_OFF),
+                   bez(legPt(WLEG, -160, SLIP_OFF), legPt(WLEG, -250, SLIP_OFF),
+                       legPt(WLEG, -300, MERGE_OFF), legPt(WLEG, -390, MERGE_OFF), 10)) }),
       // DOCK GATE — leaves the west service road heading west, swings south
-      { name: 'DOCK GATE', rot: P, side: -1,
-        raw: bez([SVC_X, 2100], [-1722, 2100], [X0W, 2280], [X0W, 2600], 18) },
+      onLeg(DLEG, { name: 'DOCK GATE', rot: 0, side: -1,
+        raw: chain(bez([SVC_X, 2100], [-1740, 2105], [-1722, 2200], legPt(DLEG, 2320, SLIP_OFF), 14),
+                   legRun(DLEG, 2320, 2540, SLIP_OFF),
+                   bez(legPt(DLEG, 2540, SLIP_OFF), legPt(DLEG, 2630, SLIP_OFF),
+                       legPt(DLEG, 2680, MERGE_OFF), legPt(DLEG, 2770, MERGE_OFF), 10)) }),
       // NORTH GATE — leaves the inner loop's north side heading north, swings east
-      { name: 'NORTH GATE', rot: P / 2, side: -1,
-        raw: bez([250, -LOOP], [250, -1745], [305, Z0], [700, Z0], 16) },
+      onLeg(NLEG, { name: 'NORTH GATE', rot: P / 2, side: -1,
+        raw: chain(bez([250, -LOOP], [250, -1660], [330, -1850], legPt(NLEG, 500, SLIP_OFF), 14),
+                   legRun(NLEG, 500, 660, SLIP_OFF),
+                   bez(legPt(NLEG, 660, SLIP_OFF), legPt(NLEG, 735, SLIP_OFF),
+                       legPt(NLEG, 780, MERGE_OFF), legPt(NLEG, 855, MERGE_OFF), 10)) }),
       // EAST GATE — the east cross road simply becomes the ramp and turns north
-      { name: 'EAST GATE', rot: 0, side: -1,
-        raw: bez([3700, 1350], [4000, 1350], [X1, 1150], [X1, 800], 16) },
+      onLeg(ELEG, { name: 'EAST GATE', rot: P, side: -1,
+        raw: chain(bez([3700, 1350], [3950, 1350], [4010, 1250], legPt(ELEG, 1050, SLIP_OFF), 14),
+                   legRun(ELEG, 1050, 930, SLIP_OFF),
+                   bez(legPt(ELEG, 930, SLIP_OFF), legPt(ELEG, 860, SLIP_OFF),
+                       legPt(ELEG, 820, MERGE_OFF), legPt(ELEG, 750, MERGE_OFF), 10)) }),
       // SOUTH GATE — peels off the south frontage road and runs west onto the
-      // south leg on a very shallow merge
-      { name: 'SOUTH GATE', rot: -P / 2, side: -1,
-        raw: bez([200, 3995], [-20, 3995], [-280, Z1], [-500, Z1], 16) }
+      // south leg on a very shallow merge. The corridor here is only 110 wide,
+      // so this one is a lateral shift of 15 rather than a turn.
+      onLeg(SLEG, { name: 'SOUTH GATE', rot: -P / 2, side: -1,
+        raw: chain(bez([200, 3995], [60, 3995], [10, 4010], legPt(SLEG, -130, SLIP_OFF), 10),
+                   legRun(SLEG, -130, -330, SLIP_OFF),
+                   bez(legPt(SLEG, -330, SLIP_OFF), legPt(SLEG, -420, SLIP_OFF),
+                       legPt(SLEG, -470, MERGE_OFF), legPt(SLEG, -560, MERGE_OFF), 10)) })
     ];
     // ---- EXITS -----------------------------------------------------------
     // The ring had five ways on and no way off: every gate above runs ground ->
@@ -696,39 +855,60 @@
     // entrances; only the barriers differ (see `interchanges`).
     //
     // An exit is NOT an entrance played backwards, and the first cut of these
-    // was drawn as if it were. An entrance can leave the ring's centreline as
-    // lazily as it likes because it is still below the deck while it does it.
-    // An exit is ON the deck: until it is CLEAR_L clear of the leg it is just a
-    // second surface laid over the ring, the resolver keeps choosing the ring,
-    // and there is no point at which the car can transfer. So every exit below
-    // leaves along the leg (you have to be able to peel off at speed), swings
-    // out to CLEAR_L inside ~300 units, and only then spends what is left of
-    // its length on the descent. `axis`/`at`/`inDir` name the leg it leaves and
-    // which way the ring's interior lies, which is what drives all of that.
+    // was drawn as if it were. An entrance can be lazy about where it meets the
+    // ring because it is still below the deck while it gets there. An exit is ON
+    // the deck: anywhere its deck overlaps the ring's at the same height it is
+    // just a second surface laid over the first, and anywhere it overlaps at a
+    // DIFFERENT height the resolver hands the car back to whichever is nearer
+    // and then drops it when that one runs out.
+    //
+    // So each exit is three pieces:
+    //   1. a gore nose on the shoulder at SLIP_OFF — the ribbons meet edge to
+    //      edge, the decks overlap by 5.2, and you change lane onto it exactly
+    //      as you would on a real motorway. No crossing of the opposing side.
+    //   2. ~220 units of deceleration lane parallel to the leg, still at deck
+    //      height, which is the part you actually make the decision in.
+    //   3. the divergence, and only from CLEAR_L outwards, the descent. The hold
+    //      is derived from the geometry below, not hand-tuned.
+    // `axis`/`at`/`inDir` (via onLeg) name the leg it leaves and which way the
+    // ring's interior lies, which is what drives all of that.
     const exits = [
       // west leg -> down onto the inner loop's north side, north of WEST GATE
-      { name: 'WEST EXIT', side: -1, down: true, axis: 'x', at: X0N, inDir: 1,
-        raw: bez([X0N, -560], [X0N, -820], [-1310, -LOOP], [-1000, -LOOP], 20) },
+      onLeg(WLEG, { name: 'WEST EXIT', side: -1, down: true,
+        raw: chain(legRun(WLEG, -620, -840, SLIP_OFF),
+                   bez(legPt(WLEG, -840, SLIP_OFF), legPt(WLEG, -1090, SLIP_OFF),
+                       [-1310, -LOOP], [-1000, -LOOP], 20)) }),
       // west leg, docks side -> down onto the west service road, south of DOCK GATE
-      { name: 'DOCK EXIT', side: -1, down: true, axis: 'x', at: X0W, inDir: 1,
-        raw: bez([X0W, 2960], [X0W, 3200], [SVC_X, 3380], [SVC_X, 3700], 20) },
-      // north leg -> down into the open quarter inside the ring's NE corner,
-      // which runs on south to the retail strip's back road
-      { name: 'NORTH EXIT', side: -1, down: true, axis: 'z', at: Z0, inDir: 1,
-        raw: bez([1080, Z0], [1460, Z0], [1560, -1700], [1560, -LOOP], 16) },
+      onLeg(DLEG, { name: 'DOCK EXIT', side: -1, down: true,
+        raw: chain(legRun(DLEG, 2900, 3120, SLIP_OFF),
+                   bez(legPt(DLEG, 3120, SLIP_OFF), legPt(DLEG, 3420, SLIP_OFF),
+                       [SVC_X, 3460], [SVC_X, 3780], 20)) }),
+      // north leg -> down into the quarter inside the ring's NE corner, onto the
+      // inner loop's north straight where `connectors` extends it east to meet
+      // this foot. Before that extension the exit put you down 264 units from
+      // the nearest road, on bare ground.
+      onLeg(NLEG, { name: 'NORTH EXIT', side: -1, down: true,
+        raw: chain(legRun(NLEG, 1120, 1340, SLIP_OFF),
+                   bez(legPt(NLEG, 1340, SLIP_OFF), legPt(NLEG, 1520, SLIP_OFF),
+                       [1560, -1750], [1560, -1450], 16),
+                   linePts(1560, -1450, 1560, -LOOP, 50)) }),
       // east leg -> down the corridor between the strip's east edge and the
-      // ring, landing alongside the strip's turnaround apron. The old line
-      // landed at (3700,-220), which is 170 inside the strip's rectangle and
-      // squarely inside one of its sheds.
-      { name: 'EAST EXIT', side: -1, down: true, axis: 'x', at: X1, inDir: -1,
-        raw: pushPts(bez([X1, -880], [X1, -640], [EEXIT_X, -560], [EEXIT_X, -320], 14),
-                     linePts(EEXIT_X, -320, EEXIT_X, 60, 60)) },
+      // ring, landing on the apron link `connectors` runs west to the strip's
+      // turnaround. The line before last landed at (3700,-220), which is 170
+      // inside the strip's rectangle and squarely inside one of its sheds.
+      onLeg(ELEG, { name: 'EAST EXIT', side: -1, down: true,
+        raw: chain(legRun(ELEG, -880, -660, SLIP_OFF),
+                   bez(legPt(ELEG, -660, SLIP_OFF), legPt(ELEG, -520, SLIP_OFF),
+                       [EEXIT_X, -480], [EEXIT_X, -340], 14),
+                   linePts(EEXIT_X, -340, EEXIT_X, -60, 60)) }),
       // south leg -> down onto the south frontage road, east of SOUTH GATE.
-      // FRONT_Z is only 110 inside the leg, so the descent runs parallel to the
-      // ring rather than across the corridor, which there is no room for.
-      { name: 'SOUTH EXIT', side: -1, down: true, axis: 'z', at: Z1, inDir: -1,
-        raw: pushPts(bez([400, Z1], [620, Z1], [700, FRONT_Z], [900, FRONT_Z], 14),
-                     linePts(900, FRONT_Z, 1240, FRONT_Z, 60)) }
+      // FRONT_Z is only 110 inside the leg — 60 inside the slip lane — so this
+      // one barely diverges at all before it starts down.
+      onLeg(SLEG, { name: 'SOUTH EXIT', side: -1, down: true,
+        raw: chain(legRun(SLEG, 400, 620, SLIP_OFF),
+                   bez(legPt(SLEG, 620, SLIP_OFF), legPt(SLEG, 760, SLIP_OFF),
+                       [820, FRONT_Z], [960, FRONT_Z], 14),
+                   linePts(960, FRONT_Z, 1240, FRONT_Z, 60)) })
     ];
     for (const e of exits) specs.push(e);
 
@@ -797,17 +977,7 @@
                   rp.down ? Math.atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]) : rp.rot);
 
       if (rp.down) exitBarriers(b, rp, pts, gaps);
-      else {
-        // An entrance is below the ring's rail the whole way up — it crosses
-        // that line at y=25 or so and a collider is ignored from underneath —
-        // so it only needs its own rails over the middle of the climb: open at
-        // the foot so you can turn in, open at the crest so the merge isn't
-        // fenced off.
-        const bo = { off: 25.5, minY: 3.5, maxY: RING_Y - 4.5 };
-        barrierRail(b, pts, 1, bo);
-        barrierRail(b, pts, -1, bo);
-        gaps.push({ x: top[0], z: top[1], r: 125, side: rp.side });
-      }
+      else entranceBarriers(b, rp, pts, gaps);
 
       // painted merge chevrons where the ramp meets the ground road
       b.quad([foot[0] - 26, 0.22, foot[1] - 26], [foot[0] + 26, 0.22, foot[1] - 26],
@@ -819,8 +989,77 @@
   }
 
   /**
-   * Barriers for an exit, and the hole in the ring's own rail that lets you
-   * reach it.
+   * Open the ring's own rail exactly where a ramp's carriageway crosses its
+   * line, and nowhere else.
+   *
+   * That rail stands RAIL_OFF (27.5) in from the leg on the interior side —
+   * which, now that the slip roads run alongside at SLIP_OFF, is between the
+   * through lanes and the slip lane, i.e. exactly the line you have to cross to
+   * take an exit or to leave an entrance. Leave it and the ramp is fenced off
+   * (the bug in a02b207); open too much of it and the ring has a hole with a
+   * 30-unit drop behind it.
+   *
+   * The window is therefore a property of the ramp's lateral offset, never a
+   * radius around its mouth: the mouth is 200-300 units upstream of where the
+   * two roads actually part, and the old r=125 circle opened the wrong 250 units
+   * on every one of them.
+   *
+   * The height test is the same rule the engine uses to ignore a collider from
+   * underneath (`carY < baseY - 2.2`), plus a little for the car's own height
+   * lag on a grade. Below it the rail is above the car's head and harmless, so
+   * the rail stays and keeps guarding the ring's edge; and everywhere it IS
+   * opened the ramp's deck is within a latch of the ring's, so straying off the
+   * ring at the gap puts you on the slip road rather than in the air.
+   */
+  function railGap(rp, pts, gaps) {
+    const lo = RAIL_OFF - RAMP_W / 2 - 3, hi = RAIL_OFF + RAMP_W / 2 + 3;   // 0.5 .. 54.5
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      const n = Math.max(1, Math.ceil(len / 12));
+      for (let k = 0; k < n; k++) {
+        const t = k / n;
+        const p = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+        const lat = legLateral(rp, p);
+        if (lat <= lo || lat >= hi || p[2] <= RING_Y - 3.5) continue;
+        // Each gap is projected ONTO the rail line before it is recorded, which
+        // turns its radius into a pure along-the-leg window. Left on the ramp's
+        // own centreline it was a circle 22.5 out from the rail, so an r=30
+        // circle reached 20 units past the last point that qualified — and 20
+        // units past the top of an on-ramp is where the ramp deck has already
+        // dropped away and the hole in the rail has nothing behind it. Measured
+        // before this: 42 units of unguarded 30-unit drop upstream of DOCK GATE,
+        // 18 upstream of WEST GATE, similar at the other three.
+        const q = legPt(rp, rp.axis === 'x' ? p[1] : p[0], RAIL_OFF);
+        gaps.push({ x: q[0], z: q[1], r: 9, side: rp.side });
+      }
+    }
+  }
+
+  /**
+   * Barriers for an entrance.
+   *
+   * An entrance is below the ring's rail for all but the last stretch of its
+   * climb, and a collider is ignored from underneath, so it passes beneath that
+   * rail rather than meeting it; `railGap` only opens the last few units, where
+   * the two are at the same height.
+   *
+   * Its own rails stop at RING_Y-2.5 rather than the old RING_Y-4.5. The window
+   * has to end before the top or it fences off the merge itself, but every unit
+   * it ends early is a unit where the car can leave the ramp sideways: at -4.5
+   * the ring's deck was 4.5 above, past DECK_SNAP (3.2), so `groundHeightAt`
+   * would hand back bare terrain and the car would drop off the side of its own
+   * on-ramp. At -2.5 the freeway is always inside the latch tolerance.
+   */
+  function entranceBarriers(b, rp, pts, gaps) {
+    const bo = { off: 25.5, minY: 3.5, maxY: RING_Y - 2.5 };
+    barrierRail(b, pts, 1, bo);
+    barrierRail(b, pts, -1, bo);
+    railGap(rp, pts, gaps);
+  }
+
+  /**
+   * Barriers for an exit, and the hand-off from the ring's rail to the ramp's.
    *
    * The bug this replaces: the ring carries a continuous crash barrier 27.5 in
    * from its centreline, and an exit has to cross that line to get anywhere.
@@ -831,60 +1070,44 @@
    * x=-1430 against the rail line at -1422.5, NORTH at z=-1879.8 against
    * -1872.5, and so on) and no exit descended a single unit.
    *
-   * Simply widening the old r=125 gap at the mouth is not the fix: the crossing
-   * happens 200-400 units downstream of the mouth, so that circle opened the
-   * wrong 244 units, and opening enough of the ring's rail to cover the
-   * crossing would leave a hole with a 30-unit drop behind it.
-   *
-   * What actually holds the line is the exit's own inner rail, which starts at
-   * the same 27.5 offset the ring's rail uses — at the mouth the two are the
-   * same line — and then walks outwards with the exit. The ring hands its rail
-   * over to the ramp instead of just stopping.
+   * Now that the slip lane runs alongside instead of on top, the geometry says
+   * it plainly: for the length of the deceleration lane the ring's interior rail
+   * is standing in the middle of a 100-unit-wide carriageway, so it comes out
+   * (see `railGap`) and the guarded line steps outboard to the slip road's own
+   * outer rail — 27.5 off the slip road is 77.5 off the leg. Nothing is left
+   * unguarded by the swap: behind the hole in the ring's rail is the slip
+   * road's deck, not air.
    */
   function exitBarriers(b, rp, pts, gaps) {
-    // Which side of the ramp faces the ring's interior. barrierRail's +1 is the
-    // left normal of travel, so it is whichever of +/-1 points the same way as
-    // the leg's inward direction.
+    // Which side of the ramp faces the ring's interior — the side AWAY from the
+    // ring, since the exit peels off towards that interior. barrierRail's +1 is
+    // the left normal of travel, so it is whichever of +/-1 points the same way
+    // as the leg's inward direction.
     const dx = pts[1][0] - pts[0][0], dz = pts[1][1] - pts[0][1];
     const ix = rp.axis === 'x' ? rp.inDir : 0, iz = rp.axis === 'z' ? rp.inDir : 0;
     const sIn = (dz * ix - dx * iz) >= 0 ? 1 : -1;
 
-    // The gore rail: continues the ring's barrier line down the slip road. No
-    // maxY — on an exit the deck-height stretch is a road you drive along, not
-    // a merge nose, and leaving it unrailed is a 30-unit drop off the side.
+    // The gore rail: the drop off the far side of the slip road, from the nose
+    // all the way to the foot. No maxY — on an exit the deck-height stretch is a
+    // road you drive along, not a merge nose, and leaving it unrailed is a
+    // 30-unit fall.
     barrierRail(b, pts, sIn, { off: 27.5, minY: 3.5 });
 
-    // The ring-facing rail cannot exist while the exit is still over the ring:
-    // sitting 25.5 off that side of the ramp it would stand in the ring's own
-    // carriageway. Cut it by POSITION, not by height. Clipping it with a maxY
-    // instead (which is what the entrances do, and what this used to do) leaves
-    // the stretch between clearance and y=25.5 bare — and by then the two decks
-    // have already parted, so that is a gore with an open side. From the
-    // clearance point on, the ramp is outboard of the ring's rail line, so the
-    // rail is safe at every height.
+    // The ring-facing rail cannot exist while the slip lane is alongside the
+    // ring — that is the side you enter from, and it is not a drop either: the
+    // ramp's inner shoulder is at SLIP_OFF-26.6 = 23.4 off the leg, still over
+    // the ring's own deck. Cut it by POSITION, not by height. Clipping it with a
+    // maxY instead (which is what the entrances do, and what this used to do)
+    // leaves the stretch between clearance and y=25.5 bare — and by then the two
+    // decks have parted, so that is a gore with an open side. From the clearance
+    // point on, the ramp is outboard of the ring's deck edge, so the rail is
+    // both needed and safe at every height.
     let iClear = pts.length - 1;
     for (let i = 0; i < pts.length; i++)
       if (legLateral(rp, pts[i]) >= CLEAR_L) { iClear = i; break; }
     barrierRail(b, pts.slice(iClear), -sIn, { off: 25.5, minY: 3.5 });
 
-    // Open the ring's inside rail across the slip lane, and only there. That
-    // rail sits 27.5 in from the leg; as the exit diverges, the line sweeps
-    // across the exit's carriageway from its inner shoulder to its outer one,
-    // so the car crosses it exactly once — where the exit's own offset is 27.5.
-    // Opening a band either side of that leaves the rail closing the gore at
-    // both ends: still a barrier upstream, still a barrier once the two roads
-    // have properly parted.
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], c = pts[i + 1];
-      const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
-      const n = Math.max(1, Math.ceil(len / 12));
-      for (let k = 0; k < n; k++) {
-        const t = k / n;
-        const p = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t];
-        const lat = legLateral(rp, p);
-        if (lat > 6 && lat < 48) gaps.push({ x: p[0], z: p[1], r: 30, side: rp.side });
-      }
-    }
+    railGap(rp, pts, gaps);
   }
 
   // ------------------------------------------------------------------ spurs
@@ -957,9 +1180,18 @@
 
   // -------------------------------------------------------------- furniture
   function ringFurniture(b, THREE, path, gaps) {
-    // crash barriers, both sides, the whole way round
-    barrierRail(b, path, 1, { off: 27.5, gaps: gaps });
-    barrierRail(b, path, -1, { off: 27.5, gaps: gaps });
+    // Crash barriers, both sides, the whole way round.
+    //
+    // The interior rail is the one every ramp has to cross, and it is re-sampled
+    // finely where they do. `barrierRail` never emits a box shorter than the
+    // polyline segment it is walking, and the ring is sampled every 130 units,
+    // so on the coarse path the rail could only open in 130-unit steps: a gore
+    // nose landing mid-chunk either kept the whole chunk (fencing the mouth) or
+    // dropped it (65 units of unguarded deck edge upstream). Measured on the
+    // north leg before this change: chunks centred at x=910, 1042, 1173, 1305,
+    // each 137 long. The outer rail never meets a ramp, so it stays coarse.
+    barrierRail(b, path, 1, { off: RAIL_OFF, gaps: gaps });
+    barrierRail(b, densifyNear(path, gaps, 26), -1, { off: RAIL_OFF, gaps: gaps });
 
     // lighting masts, alternating sides — outboard of the barrier line
     let n = 0;

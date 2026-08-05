@@ -80,6 +80,22 @@
       a.push(item);
     }
   };
+  /**
+   * Remove an item, given the SAME bounds it was inserted with. Recomputing the
+   * cell range costs nothing and keeps the per-item memory at zero, which
+   * matters when the map holds several thousand colliders. `_key` is a hashed
+   * key, so two distinct cells can share a bucket — that is fine, because
+   * insert and remove hash identically.
+   */
+  SpatialHash.prototype.remove = function (item, minX, minZ, maxX, maxZ) {
+    const c = this.cell;
+    const x0 = Math.floor(minX / c), x1 = Math.floor(maxX / c);
+    const z0 = Math.floor(minZ / c), z1 = Math.floor(maxZ / c);
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      const a = this.map.get(this._key(x, z)); if (!a) continue;
+      const i = a.indexOf(item); if (i >= 0) a.splice(i, 1);
+    }
+  };
   SpatialHash.prototype.query = function (x, z, out) {
     out.length = 0;
     const c = this.cell, cx = Math.floor(x / c), cz = Math.floor(z / c);
@@ -276,9 +292,12 @@
 
     this._surf = new MeshAccum();   // opaque lit surfaces (roads, terrain, buildings)
     this._glow = new MeshAccum();   // unlit emissive surfaces (neon, signs, markings)
-    this._instances = new Map();    // key -> {geo, mat, items:[]}
+    this._instances = new Map();    // key -> {geo, mat, items:[], im}
     this._lights = [];
     this._landmarks = [];
+    this._breakables = [];          // break tokens (see breakGroup)
+    this._surfMesh = null;          // set by finish() — needed to erase broken geometry
+    this._glowMesh = null;
     this.spawn = { x: 0, z: 0, heading: 0 };
     this.stats = { colliders: 0, ramps: 0, roadSegs: 0, decks: 0, instances: 0 };
   }
@@ -299,9 +318,14 @@
    */
   Builder.prototype.box = function (o) {
     const { x, y = 0, z, w, h, d, color = 0x555b6e, rot = 0, emissive = false, noCollide = false } = o;
+    // Breakable barriers: `breakable` is either `true` (this box alone) or a
+    // token from breakGroup() shared by every box that makes up one barrier
+    // section — the solid rail and its emissive cap have to vanish together.
+    const brk = o.breakable ? (o.breakable === true ? this.breakGroup() : o.breakable) : null;
     const hw = w / 2, hd = d / 2, c = Math.cos(rot), s = Math.sin(rot);
     const P = (lx, ly, lz) => [x + lx * c + lz * s, y + ly, z - lx * s + lz * c];
     const acc = emissive ? this._glow : this._surf;
+    const v0 = brk ? acc.pos.length / 3 : 0;
     const t = [P(-hw, h, -hd), P(hw, h, -hd), P(hw, h, hd), P(-hw, h, hd)];
     const b = [P(-hw, 0, -hd), P(hw, 0, -hd), P(hw, 0, hd), P(-hw, 0, hd)];
     acc.quad(t[0], t[1], t[2], t[3], color);                       // top
@@ -310,12 +334,97 @@
     acc.quad(b[1], b[2], t[2], t[1], color);                       // +x
     acc.quad(b[2], b[3], t[3], t[2], color);                       // +z
     acc.quad(b[3], b[0], t[0], t[3], color);                       // -x
+    if (brk) brk.vis.push({ acc: emissive ? 'glow' : 'surf', start: v0, count: acc.pos.length / 3 - v0 });
     if (!noCollide) {
       // conservative world-aligned AABB for the rotated box
       const ex = Math.abs(hw * c) + Math.abs(hd * s), ez = Math.abs(hw * s) + Math.abs(hd * c);
-      this.collider(x, z, ex * 2, ez * 2, h, y);
+      const col = this.collider(x, z, ex * 2, ez * 2, h, y);
+      if (brk) {
+        this.attachBreak(col, brk);
+        // The AABB is inflated for a rotated box; remember the TRUE dimensions
+        // so the debris chunks are barrier-shaped rather than square.
+        if (brk.w === undefined) { brk.w = w; brk.h = h; brk.d = d; brk.rot = rot; brk.color = color; }
+      }
     }
     return this;
+  };
+
+  /**
+   * Start a breakable barrier section. Everything tagged with the returned
+   * token — `b.box({breakable: tok})` and `b.instance(k, g, m, {..., brk: tok})`
+   * — disappears together the moment the engine calls world.breakObstacle() on
+   * the section's collider.
+   *
+   * `o.breakAt` overrides the engine's default break threshold (closing speed
+   * along the contact normal, in world units/s) for a tougher or flimsier rail.
+   */
+  Builder.prototype.breakGroup = function (o) {
+    const g = { vis: [], col: null, broken: false };
+    if (o) { if (o.w !== undefined) g.w = o.w; if (o.h !== undefined) g.h = o.h; if (o.d !== undefined) g.d = o.d;
+             if (o.rot !== undefined) g.rot = o.rot; if (o.color !== undefined) g.color = o.color;
+             if (o.breakAt !== undefined) g.breakAt = o.breakAt; }
+    this._breakables.push(g);
+    return g;
+  };
+
+  /** Flag an existing collider as this section's breakable body. */
+  Builder.prototype.attachBreak = function (col, brk) {
+    if (!col || !brk) return brk;
+    brk.col = col; col.breakable = true; col.brk = brk;
+    if (brk.breakAt !== undefined) col.breakAt = brk.breakAt;
+    return brk;
+  };
+
+  /**
+   * Convenience for districts that build their barrier visuals as instanced
+   * props: hand it the collider, get the token back, pass the token as `brk`
+   * on each instance transform.
+   */
+  Builder.prototype.breakable = function (col, o) {
+    return this.attachBreak(col, this.breakGroup(o));
+  };
+
+  /** Erase one visual span. Merged geometry collapses to a degenerate point;
+   *  an instance gets a zero-scale matrix. Both are a sub-buffer update, so
+   *  smashing a run of barriers costs one upload per frame, not per barrier. */
+  Builder.prototype._eraseVisual = function (v) {
+    if (v.batch) {
+      const im = v.batch.im; if (!im) return;
+      if (!this._zeroM) this._zeroM = new this.THREE.Matrix4().makeScale(0, 0, 0);
+      im.setMatrixAt(v.index, this._zeroM);
+      im.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    const mesh = v.acc === 'glow' ? this._glowMesh : this._surfMesh;
+    if (!mesh || v.count < 1) return;
+    const attr = mesh.geometry.attributes.position, a = attr.array, s = v.start * 3;
+    const px = a[s], py = a[s + 1], pz = a[s + 2];
+    for (let i = 1; i < v.count; i++) { a[s + i * 3] = px; a[s + i * 3 + 1] = py; a[s + i * 3 + 2] = pz; }
+    attr.needsUpdate = true;
+  };
+
+  /**
+   * Smash one breakable section: its collider leaves the world for good and its
+   * geometry is erased. Returns the section's real dimensions so the engine can
+   * throw debris of the right shape, or null if it was not breakable / already
+   * broken.
+   */
+  Builder.prototype.breakCollider = function (col) {
+    if (!col || !col.brk || col.broken) return null;
+    const g = col.brk;
+    col.broken = true; g.broken = true;
+    this.colliders.remove(col, col.x - col.w / 2, col.z - col.d / 2, col.x + col.w / 2, col.z + col.d / 2);
+    const i = this.colliderList.indexOf(col); if (i >= 0) this.colliderList.splice(i, 1);
+    for (let k = 0; k < g.vis.length; k++) this._eraseVisual(g.vis[k]);
+    this.stats.broken = (this.stats.broken || 0) + 1;
+    return {
+      x: col.x, z: col.z, y: col.baseY,
+      w: g.w === undefined ? col.w : g.w,
+      h: g.h === undefined ? col.h : g.h,
+      d: g.d === undefined ? col.d : g.d,
+      rot: g.rot || 0,
+      color: g.color === undefined ? 0x9aa4b4 : g.color
+    };
   };
 
   /** Register a collision box (visual-free). w/d are FULL extents. */
@@ -475,10 +584,13 @@
     return this;
   };
 
-  /** Queue an instanced prop. Geometry+material are shared per key. */
+  /** Queue an instanced prop. Geometry+material are shared per key.
+   *  `transform.brk` (a breakGroup token) makes this instance part of a
+   *  breakable section — it is zeroed out when that section is smashed. */
   Builder.prototype.instance = function (key, geoFactory, matFactory, transform) {
     let batch = this._instances.get(key);
-    if (!batch) { batch = { geo: geoFactory(), mat: matFactory(), items: [] }; this._instances.set(key, batch); }
+    if (!batch) { batch = { geo: geoFactory(), mat: matFactory(), items: [], im: null }; this._instances.set(key, batch); }
+    if (transform && transform.brk) transform.brk.vis.push({ batch: batch, index: batch.items.length });
     batch.items.push(transform);
     return this;
   };
@@ -497,11 +609,13 @@
         vertexColors: true, roughness: 0.82, metalness: 0.06, side: THREE.DoubleSide
       }));
       m.receiveShadow = true; m.castShadow = false; m.frustumCulled = false;
+      this._surfMesh = m;
       this.group.add(m);
     }
     if (!this._glow.isEmpty()) {
       const m = new THREE.Mesh(this._glow.build(THREE), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
       m.frustumCulled = false;
+      this._glowMesh = m;
       this.group.add(m);
     }
     const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), Pv = new THREE.Vector3(), E = new THREE.Euler();
@@ -518,6 +632,7 @@
       im.instanceMatrix.needsUpdate = true;
       im.frustumCulled = false;
       im.castShadow = !!batch.items.castShadow;
+      batch.im = im;
       this.group.add(im);
       this.stats.instances += batch.items.length;
     }
@@ -634,6 +749,14 @@
         return builder.ramps.query(x, z, scratchRamp);
       },
 
+      /**
+       * Smash a breakable collider (a crash barrier or guardrail section) out of
+       * the world. Called from the engine's collision resolver, never scanned
+       * for. Returns {x,z,y,w,h,d,rot,color} for debris, or null if that
+       * collider is not breakable or has already gone.
+       */
+      breakObstacle(col) { return builder.breakCollider(col); },
+
       nearestRoad(x, z) { return builder.roads.nearest(x, z); },
 
       isDrowningAt(x, z) {
@@ -665,7 +788,8 @@
         return {
           colliders: builder.stats.colliders, ramps: builder.stats.ramps,
           roads: builder.stats.roadSegs, decks: decks.all.length,
-          props: builder.stats.instances, districts: built.length
+          props: builder.stats.instances, districts: built.length,
+          breakables: builder._breakables.length, broken: builder.stats.broken || 0
         };
       },
 
