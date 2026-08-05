@@ -462,12 +462,31 @@
     b.box({ x: x + s * jib, z: z + c * jib, y: g + h - 18, w: 2.4, h: 18, d: 2.4, color: 0x4a4f57, rot: ry, noCollide: true });
   }
 
-  // ---- site vehicles (b.box: merged geometry, and they collide) ------------
+  // ---- site vehicles -------------------------------------------------------
+  /**
+   * One collider for a whole machine, from the ground to its roof.
+   *
+   * These are modelled as a stack of boxes, and each box used to register its
+   * own collider at its own base height. The engine skips a collider whose
+   * `baseY` is more than 2.2 ABOVE the car, so every box above the chassis was
+   * permanently inactive — measured, the cab and house of every excavator, the
+   * cab and bed of every dump truck and the drum of every mixer in this district
+   * reported SKIP(below) from ground level. The chassis still stopped you, so
+   * the machines read as solid, but nothing could be landed on and a car that
+   * came in above chassis height passed through the bodywork. One box from the
+   * ground up is both correct and two colliders cheaper per machine.
+   */
+  function machineCollider(b, x, z, ry, w, d, h) {
+    const c = Math.abs(Math.cos(ry)), s = Math.abs(Math.sin(ry));
+    b.collider(x, z, (w * c + d * s), (w * s + d * c), h, groundY(x, z));
+  }
+
   function excavator(b, x, z, ry) {
     const g = groundY(x, z), c = Math.cos(ry), s = Math.sin(ry);
-    b.box({ x: x, z: z, y: g, w: 12, h: 4.5, d: 20, color: MACHINE_DK, rot: ry });
-    b.box({ x: x, z: z, y: g + 4.5, w: 13, h: 7.5, d: 14, color: MACHINE, rot: ry });
-    b.box({ x: x - s * 5, z: z - c * 5, y: g + 12, w: 8, h: 6, d: 8, color: 0x1d2733, rot: ry });
+    machineCollider(b, x, z, ry, 12, 20, 18);
+    b.box({ x: x, z: z, y: g, w: 12, h: 4.5, d: 20, color: MACHINE_DK, rot: ry, noCollide: true });
+    b.box({ x: x, z: z, y: g + 4.5, w: 13, h: 7.5, d: 14, color: MACHINE, rot: ry, noCollide: true });
+    b.box({ x: x - s * 5, z: z - c * 5, y: g + 12, w: 8, h: 6, d: 8, color: 0x1d2733, rot: ry, noCollide: true });
     // boom + dipper reaching forward and down
     b.box({ x: x + s * 12, z: z + c * 12, y: g + 12, w: 3.4, h: 3.4, d: 24, color: MACHINE, rot: ry, noCollide: true });
     b.box({ x: x + s * 24, z: z + c * 24, y: g + 5, w: 3, h: 12, d: 3, color: MACHINE, rot: ry, noCollide: true });
@@ -477,9 +496,10 @@
 
   function dumpTruck(b, x, z, ry, loaded) {
     const g = groundY(x, z), c = Math.cos(ry), s = Math.sin(ry);
-    b.box({ x: x, z: z, y: g + 2, w: 14, h: 5, d: 30, color: MACHINE_DK, rot: ry });
-    b.box({ x: x + s * 11, z: z + c * 11, y: g + 7, w: 12, h: 8, d: 9, color: MACHINE, rot: ry });
-    b.box({ x: x - s * 4, z: z - c * 4, y: g + 7, w: 16, h: 9, d: 20, color: 0x8e6a2c, rot: ry });
+    machineCollider(b, x, z, ry, 16, 32, 16);
+    b.box({ x: x, z: z, y: g + 2, w: 14, h: 5, d: 30, color: MACHINE_DK, rot: ry, noCollide: true });
+    b.box({ x: x + s * 11, z: z + c * 11, y: g + 7, w: 12, h: 8, d: 9, color: MACHINE, rot: ry, noCollide: true });
+    b.box({ x: x - s * 4, z: z - c * 4, y: g + 7, w: 16, h: 9, d: 20, color: 0x8e6a2c, rot: ry, noCollide: true });
     if (loaded) b.box({ x: x - s * 4, z: z - c * 4, y: g + 15.5, w: 14, h: 2.6, d: 17, color: DIRT_DK, rot: ry, noCollide: true });
     for (const o of [-9, 0, 9]) {
       b.box({ x: x + s * o + c * 7.4, z: z + c * o - s * 7.4, y: g, w: 3, h: 5.6, d: 5.6, color: 0x22252b, rot: ry, noCollide: true });
@@ -490,9 +510,10 @@
 
   function mixer(b, x, z, ry) {
     const g = groundY(x, z), c = Math.cos(ry), s = Math.sin(ry);
-    b.box({ x: x, z: z, y: g + 2, w: 10, h: 4, d: 26, color: MACHINE_DK, rot: ry });
-    b.box({ x: x + s * 9, z: z + c * 9, y: g + 6, w: 9, h: 7, d: 8, color: SITE_BLUE, rot: ry });
-    b.box({ x: x - s * 4, z: z - c * 4, y: g + 6.5, w: 10, h: 9.5, d: 15, color: 0xdedad2, rot: ry });
+    machineCollider(b, x, z, ry, 10, 28, 16);
+    b.box({ x: x, z: z, y: g + 2, w: 10, h: 4, d: 26, color: MACHINE_DK, rot: ry, noCollide: true });
+    b.box({ x: x + s * 9, z: z + c * 9, y: g + 6, w: 9, h: 7, d: 8, color: SITE_BLUE, rot: ry, noCollide: true });
+    b.box({ x: x - s * 4, z: z - c * 4, y: g + 6.5, w: 10, h: 9.5, d: 15, color: 0xdedad2, rot: ry, noCollide: true });
     b.box({ x: x - s * 4, z: z - c * 4, y: g + 8, w: 11, h: 1.4, d: 15.6, color: SITE_BLUE, rot: ry, noCollide: true });
   }
 

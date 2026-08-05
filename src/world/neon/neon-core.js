@@ -268,6 +268,7 @@
     this.decks = new DeckSystem();
     this.roads = new RoadNet();
     this.colliders = new SpatialHash(CELL);
+    this.colliderList = [];         // same objects as the hash — see sinkCollidersToTerrain
     this.ramps = new SpatialHash(CELL);
     this.rampList = [];
     this.group = new THREE.Group();
@@ -321,6 +322,7 @@
   Builder.prototype.collider = function (x, z, w, d, h, baseY) {
     const c = { x, z, w, d, h: h || 40, baseY: baseY || 0 };
     this.colliders.insert(c, x - w / 2, z - d / 2, x + w / 2, z + d / 2);
+    this.colliderList.push(c);
     this.stats.colliders++;
     return c;
   };
@@ -523,6 +525,56 @@
     return this;
   };
 
+  /**
+   * Drop each ground-standing collider's base to the lowest terrain under its
+   * own footprint, keeping its TOP where it is.
+   *
+   * A collider records the height of the single point it was placed at. On flat
+   * ground that is the whole story, but on a bench edge or a haul-road riser the
+   * ground under the far side of the same box is metres lower — and the engine's
+   * height gate skips any box whose `baseY` is more than 2.2 above the car
+   * (`carY < baseY - 2.2`). The box is then simply not there for a car standing
+   * on the low side of it.
+   *
+   * Measured before this pass, in the quarry: the excavator at (2960,3120)
+   * straddles the pit-floor riser with `baseY -70`, while the terrain at its
+   * downhill edge is -74.8. A car climbing out of the pit drove clean through
+   * all three of its boxes at 99 mph and at 252 mph — every one of them reported
+   * SKIP(below). Twelve more colliders in that district had the same defect.
+   *
+   * Only boxes that were placed ON the ground are lowered. A box whose base is
+   * already well above the terrain under it is an elevated slab, beam or deck
+   * soffit, and lowering it would wall off the route underneath — the concrete
+   * frame's floor slabs at (1880,2960) and (1880,2720) are exactly that case.
+   * The drop is capped so a prop perched on a cliff lip cannot grow a collider
+   * down the whole cliff face.
+   */
+  const SINK_STANDING_TOL = 0.75;   // base must be this close to its own ground
+  const SINK_MAX = 12;              // never extend further down than this
+  function sinkCollidersToTerrain(list, terrain) {
+    let changed = 0;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const gCentre = terrain.heightAt(c.x, c.z);
+      if (c.baseY > gCentre + SINK_STANDING_TOL) continue;    // elevated by intent
+      const hw = c.w / 2, hd = c.d / 2;
+      let gMin = gCentre;
+      for (let ix = -1; ix <= 1; ix++) {
+        for (let iz = -1; iz <= 1; iz++) {
+          const g = terrain.heightAt(c.x + hw * ix, c.z + hd * iz);
+          if (g < gMin) gMin = g;
+        }
+      }
+      const drop = c.baseY - gMin;
+      if (drop <= 0.05) continue;
+      const d = drop > SINK_MAX ? SINK_MAX : drop;
+      c.baseY -= d;                                           // top stays put:
+      c.h += d;                                               // baseY + h unchanged
+      changed++;
+    }
+    return changed;
+  }
+
   // =========================================================================
   // World instance
   // =========================================================================
@@ -546,6 +598,11 @@
 
     const scratchObs = [], scratchRamp = [];
     const terrain = builder.terrain, decks = builder.decks;
+
+    // Runs after every district has registered its height zones, so a collider
+    // is measured against the finished terrain rather than whatever existed when
+    // its own district happened to build.
+    builder.stats.sunkColliders = sinkCollidersToTerrain(builder.colliderList, terrain);
 
     const world = {
       id: 'neon',

@@ -2745,7 +2745,18 @@ function updateDrive(dt){
     }else if(carState.ramp&&carState.y>terrainY+.55){carState.airborne=true;carState.vy=0;carState.airtime=0;carState.maxAir=carState.y;carState.ramp=null;}
     // drove off the edge of an elevated deck → real drop, not a slow sink
     else if(carState.y>terrainY+2.6){carState.airborne=true;carState.vy=0;carState.airtime=0;carState.maxAir=carState.y;carState.ramp=null;}
-    else{carState.y=lerp(carState.y,terrainY,clamp(dt*9,0,1));carState.ramp=null;carSurfacePitch=lerp(carSurfacePitch,-WORLD_surfacePitchAt(carState.x,carState.z,carState.heading),clamp(dt*7,0,1));}
+    // Follow the ground. Climbing is tightened; descending is left exactly as it
+    // was. A plain lerp lags the surface by speed*tan(slope)/9 in BOTH directions,
+    // and on the quarry's 17-21 degree risers that buried the car up to 6.6 units
+    // UNDER the slope it was driving up (measured at 3100,2100). Two things break
+    // when the car is below the surface: it is visibly inside the hill, and the
+    // collider height gate below skips every box whose baseY is more than 2.2
+    // above the car — so it drives straight through machinery standing on the same
+    // slope. Only the climbing half is accelerated here; the descending half still
+    // feeds the airborne test above, so no jump, deck edge or ramp changes.
+    else{const gErr=terrainY-carState.y;
+      carState.y+=gErr*clamp(dt*(gErr>0?9+Math.max(0,gErr-0.5)*48:9),0,1);
+      carState.ramp=null;carSurfacePitch=lerp(carSurfacePitch,-WORLD_surfacePitchAt(carState.x,carState.z,carState.heading),clamp(dt*7,0,1));}
   }
   if(carState.airborne){
     carState.airtime+=dt;carState.y+=carState.vy*dt;carState.vy-=55*dt;carState.maxAir=Math.max(carState.maxAir,carState.y);

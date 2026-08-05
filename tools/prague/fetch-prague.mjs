@@ -14,6 +14,29 @@
  *   node tools/prague/fetch-prague.mjs --south 50.082 --west 14.412 --north 50.092 --east 14.430
  *   node tools/prague/fetch-prague.mjs --raw            (also keep the raw Overpass response)
  *   node tools/prague/fetch-prague.mjs --offline        (rebuild JSON from a saved raw response)
+ *   node tools/prague/fetch-prague.mjs --out stage2.json    (write somewhere other than prague1.json)
+ *   node tools/prague/fetch-prague.mjs --minor 0        (drop footway/path/steps/cycleway/track)
+ *
+ * ---------------------------------------------------------------------------
+ * OVERPASS ETIQUETTE — this is a free, volunteer-funded, shared service
+ * ---------------------------------------------------------------------------
+ * Rules this script follows, and you should not loosen:
+ *
+ *   - Query at BUILD time only. Nothing in the shipped game contacts Overpass.
+ *   - A big box is TILED into several small queries rather than thrown at the
+ *     server as one monster that will time out and then get retried. Tiling is
+ *     exactly equivalent: Overpass returns any way with >=1 node in the box, so
+ *     the union of the tiles is the same element set as the whole box.
+ *   - PAUSE_MS between requests, and at most 2 attempts per endpoint — a
+ *     timeout means "ask for less", not "ask again harder".
+ *   - The merged raw response is saved, so every later re-run is `--offline`
+ *     and touches the network zero times.
+ *
+ * Because `--offline` CLIPS the saved raw to whatever bbox you ask for, and
+ * that clip uses the same ">=1 node inside" rule Overpass itself uses, a
+ * smaller box can be derived from a bigger saved fetch with no new request and
+ * an identical result. Fetch the largest box you will ever want, once, then
+ * stage downward offline.
  *
  * Node 24+, zero dependencies (uses global fetch).
  */
@@ -26,10 +49,11 @@ import path from 'node:path';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
 const OUT_DIR = path.join(REPO, 'assets', 'prague');
-const OUT_FILE = path.join(OUT_DIR, 'prague1.json');
 const RAW_FILE = path.join(OUT_DIR, 'overpass-raw.json');
 
 /* ---------------------------------------------------------------- args --- */
+
+const STRING_ARGS = new Set(['out']);
 
 function parseArgs(argv) {
   const out = { raw: false, offline: false };
@@ -37,12 +61,27 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--raw') out.raw = true;
     else if (a === '--offline') out.offline = true;
-    else if (a.startsWith('--')) out[a.slice(2)] = Number(argv[++i]);
+    else if (a.startsWith('--')) {
+      const k = a.slice(2);
+      const v = argv[++i];
+      out[k] = STRING_ARGS.has(k) ? v : Number(v);
+    }
   }
   return out;
 }
 
 const args = parseArgs(process.argv.slice(2));
+const OUT_FILE = path.join(OUT_DIR, args.out || 'prague1.json');
+
+/**
+ * Minor pedestrian classes (footway/path/steps/cycleway/track) are ~3/4 of all
+ * ways in the historic core, because Prague is exhaustively sidewalk-mapped.
+ * They cost JSON bytes and road-ribbon triangles while adding little the
+ * ground plane does not already convey. `--minor 0` drops them; the genuinely
+ * street-like `pedestrian` class (Old Town Square, Karlova) is always kept.
+ */
+const KEEP_MINOR = args.minor === undefined ? 1 : !!args.minor;
+const MINOR_CLASSES = new Set(['footway', 'path', 'steps', 'cycleway', 'track']);
 
 // Default box: Prague 1 historic core. Covers Old Town Square, Karlova,
 // Kriznovnicke nam. (east end of Charles Bridge), Namesti Republiky,
@@ -100,43 +139,178 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 /* ------------------------------------------------------------ overpass --- */
 
-const QUERY = `[out:json][timeout:180];
+const PAUSE_MS = 5000;          // between tiles — be a good neighbour
+const MAX_ATTEMPTS = 2;         // a timeout means "ask for less", not "ask again harder"
+const TILE_TARGET_KM2 = 1.6;    // tile size that reliably answers in ~1-2 s
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function queryFor(box) {
+  return `[out:json][timeout:180];
 (
-  way["building"](${BBOX.south},${BBOX.west},${BBOX.north},${BBOX.east});
-  relation["building"](${BBOX.south},${BBOX.west},${BBOX.north},${BBOX.east});
-  way["highway"](${BBOX.south},${BBOX.west},${BBOX.north},${BBOX.east});
+  way["building"](${box.south},${box.west},${box.north},${box.east});
+  relation["building"](${box.south},${box.west},${box.north},${box.east});
+  way["highway"](${box.south},${box.west},${box.north},${box.east});
 );
 out geom;`;
+}
 
-async function fetchOverpass() {
+/** Split a bbox into a grid of tiles each roughly TILE_TARGET_KM2 in area. */
+function tileBox(box) {
+  const h = (box.north - box.south) * metresPerDegLat((box.south + box.north) / 2);
+  const w = (box.east - box.west) * metresPerDegLon((box.south + box.north) / 2);
+  const area = (h * w) / 1e6;
+  if (area <= TILE_TARGET_KM2 * 1.35) return [box];
+  // keep tiles roughly square rather than blindly splitting both axes equally
+  const n = Math.sqrt(area / TILE_TARGET_KM2);
+  const cols = Math.max(1, Math.round(n * Math.sqrt(w / h)));
+  const rows = Math.max(1, Math.round(n * Math.sqrt(h / w)));
+  const tiles = [];
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      tiles.push({
+        south: box.south + (box.north - box.south) * (j / rows),
+        north: box.south + (box.north - box.south) * ((j + 1) / rows),
+        west: box.west + (box.east - box.west) * (i / cols),
+        east: box.west + (box.east - box.west) * ((i + 1) / cols),
+      });
+    }
+  }
+  return tiles;
+}
+
+async function fetchTile(box, label) {
   let lastErr;
   for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        process.stderr.write(`[overpass] POST ${endpoint} (attempt ${attempt})\n`);
+        process.stderr.write(`[overpass] ${label} POST ${new URL(endpoint).host} (attempt ${attempt})\n`);
         const t0 = Date.now();
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'cargame-prague-extractor/1.0 (offline build step)',
+            'User-Agent': 'cargame-prague-extractor/1.1 (offline build step)',
           },
-          body: new URLSearchParams({ data: QUERY }),
+          body: new URLSearchParams({ data: queryFor(box) }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
         const text = await res.text();
         process.stderr.write(
-          `[overpass] ${(text.length / 1048576).toFixed(2)} MiB in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`
+          `[overpass] ${label} ${(text.length / 1048576).toFixed(2)} MiB in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`
         );
         return JSON.parse(text);
       } catch (err) {
         lastErr = err;
-        process.stderr.write(`[overpass] failed: ${err.message}\n`);
-        if (attempt < 3) await new Promise((r) => setTimeout(r, 4000 * attempt));
+        process.stderr.write(`[overpass] ${label} failed: ${err.message}\n`);
+        if (attempt < MAX_ATTEMPTS) await sleep(PAUSE_MS);
       }
     }
   }
-  throw new Error(`All Overpass endpoints failed. Last error: ${lastErr?.message}`);
+  throw new Error(`All Overpass endpoints failed for ${label}. Last error: ${lastErr?.message}`);
+}
+
+/**
+ * Fetch the box, tiled if it is big, and merge into one element list.
+ *
+ * Ways that cross a tile edge come back from every tile they touch, so the
+ * merge dedupes on type+id. The first copy wins; Overpass emits full geometry
+ * for a way regardless of which tile asked, so the copies are identical.
+ */
+async function fetchOverpass(box) {
+  const tiles = tileBox(box);
+  process.stderr.write(`[overpass] ${tiles.length} tile(s) for the requested box\n`);
+  const byKey = new Map();
+  for (let i = 0; i < tiles.length; i++) {
+    if (i > 0) await sleep(PAUSE_MS);
+    const osm = await fetchTile(tiles[i], `tile ${i + 1}/${tiles.length}`);
+    let added = 0;
+    for (const el of osm.elements || []) {
+      const k = `${el.type}/${el.id}`;
+      if (!byKey.has(k)) { byKey.set(k, el); added++; }
+    }
+    process.stderr.write(`[overpass] tile ${i + 1}: +${added} new elements (${byKey.size} total)\n`);
+  }
+  return { elements: [...byKey.values()] };
+}
+
+/* ------------------------------------------------------------- clipping --- */
+
+/** Every polyline an element carries: a way's geometry, or each relation member's. */
+function* elementLines(el) {
+  if (Array.isArray(el.geometry)) yield el.geometry.filter(Boolean);
+  for (const m of el.members || []) {
+    if (Array.isArray(m.geometry)) yield m.geometry.filter(Boolean);
+  }
+}
+
+/**
+ * Liang-Barsky segment-versus-axis-aligned-rectangle test.
+ * Returns true if any part of the segment lies inside the rectangle.
+ */
+function segHitsBox(x0, y0, x1, y1, minX, minY, maxX, maxY) {
+  const dx = x1 - x0, dy = y1 - y0;
+  const p = [-dx, dx, -dy, dy];
+  const q = [x0 - minX, maxX - x0, y0 - minY, maxY - y0];
+  let t0 = 0, t1 = 1;
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) { if (q[i] < 0) return false; continue; }
+    const r = q[i] / p[i];
+    if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return true;
+}
+
+/**
+ * Keep the elements a real Overpass bbox query would have returned for `box`.
+ *
+ * The rule is NOT "has a node inside". Overpass keeps any way that INTERSECTS
+ * the box, and the difference is not academic: the building tagged "Sovereign"
+ * straddles the south-east corner of the default box with all twelve of its
+ * nodes outside it, and a node-only test silently loses it. Matching Overpass
+ * exactly is the whole point — it is what lets a smaller stage be derived from
+ * one big saved fetch with a result identical to querying for it directly.
+ *
+ * Three cases, cheapest first:
+ *   1. any node inside the box;
+ *   2. any segment crossing the box (the "Sovereign" case);
+ *   3. the box entirely inside a closed ring — a footprint big enough to
+ *      swallow the query area. Vanishingly rare at these sizes, but it costs
+ *      one point-in-polygon test to be right rather than nearly right.
+ */
+function clipToBox(elements, box) {
+  const cx = (box.west + box.east) / 2, cy = (box.south + box.north) / 2;
+  const out = [];
+
+  for (const el of elements) {
+    let keep = false;
+    for (const line of elementLines(el)) {
+      if (!line.length) continue;
+      for (let i = 0; i < line.length && !keep; i++) {
+        const g = line[i];
+        if (g.lat >= box.south && g.lat <= box.north && g.lon >= box.west && g.lon <= box.east) keep = true;
+      }
+      if (keep) break;
+      for (let i = 0; i + 1 < line.length; i++) {
+        const a = line[i], b = line[i + 1];
+        if (segHitsBox(a.lon, a.lat, b.lon, b.lat, box.west, box.south, box.east, box.north)) { keep = true; break; }
+      }
+      if (keep) break;
+      // case 3: closed ring containing the whole box
+      const first = line[0], last = line[line.length - 1];
+      if (line.length > 3 && first.lat === last.lat && first.lon === last.lon) {
+        let inside = false;
+        for (let i = 0, j = line.length - 1; i < line.length; j = i++) {
+          const yi = line[i].lat, yj = line[j].lat, xi = line[i].lon, xj = line[j].lon;
+          if ((yi > cy) !== (yj > cy) && cx < ((xj - xi) * (cy - yi)) / (yj - yi) + xi) inside = !inside;
+        }
+        if (inside) { keep = true; break; }
+      }
+    }
+    if (keep) out.push(el);
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------- height --- */
@@ -320,6 +494,7 @@ function convert(osm) {
     roadsDrivable: 0,
     roadsPedestrian: 0,
     roadsSkipped: 0,
+    roadsMinorDropped: 0,
     buildingVerts: 0,
     roadVerts: 0,
   };
@@ -388,6 +563,10 @@ function convert(osm) {
         stats.roadsSkipped++;
         continue;
       }
+      if (!KEEP_MINOR && MINOR_CLASSES.has(cls)) {
+        stats.roadsMinorDropped++;
+        continue;
+      }
       const pts = (el.geometry || []).filter(Boolean).map((g) => project(g.lat, g.lon));
       if (pts.length < 2) {
         stats.roadsSkipped++;
@@ -449,12 +628,20 @@ async function main() {
   let osm;
   if (args.offline) {
     process.stderr.write(`[offline] reading ${RAW_FILE}\n`);
-    osm = JSON.parse(await readFile(RAW_FILE, 'utf8'));
+    const saved = JSON.parse(await readFile(RAW_FILE, 'utf8'));
+    const before = (saved.elements || []).length;
+    osm = { elements: clipToBox(saved.elements || [], BBOX) };
+    process.stderr.write(
+      `[offline] clipped ${before} -> ${osm.elements.length} elements for the requested box\n`);
+    if (!osm.elements.length) {
+      throw new Error('the saved raw response has nothing inside the requested bbox — ' +
+                      'it was fetched for a different area; re-run without --offline');
+    }
   } else {
-    osm = await fetchOverpass();
+    osm = await fetchOverpass(BBOX);
     if (args.raw) {
       await writeFile(RAW_FILE, JSON.stringify(osm));
-      process.stderr.write(`[raw] wrote ${RAW_FILE}\n`);
+      process.stderr.write(`[raw] wrote ${RAW_FILE} (${osm.elements.length} elements)\n`);
     }
   }
 

@@ -88,8 +88,72 @@
   const COLLIDER_EROSION = 1;
   const CELL_COLLIDE = 12 * SCALE;     // spatial-hash cell for colliders (see note in stats())
   const CELL_ROAD = 48 * SCALE;        // spatial-hash cell for road segments
-  const TILE_N = 3;            // building geometry is split TILE_N x TILE_N for culling
+  /**
+   * Building geometry is split into a TILE_N x TILE_N grid so the GPU can
+   * frustum-cull most of the city. TILE_N is DERIVED from the extent rather
+   * than fixed, because the two are only meaningful together: 3x3 was right
+   * for a 1.7 km map, but the same 3x3 over the whole centre would make each
+   * tile ~4 km across, which is to say larger than the view frustum — every
+   * tile always visible, culling switched off in all but name.
+   *
+   * Holding the TILE SIZE constant instead keeps culling as effective at 8 km²
+   * as it was at 1.4. The cost is draw calls: 2 per non-empty tile (opaque +
+   * glow), so TILE_N=7 is ~100 calls. That is a good trade — draw calls are
+   * cheap next to pushing the whole city through the vertex stage every frame.
+   */
+  const TILE_TARGET = 1700;    // aim for tiles about this many world units across
+  const TILE_MIN = 3, TILE_MAX = 8;
   const MARGIN = 30 * SCALE;           // playable margin beyond the data extent
+
+  /**
+   * Facade window layout, in REAL metres and scaled at use.
+   *
+   * These are measured against geometry that has ALREADY been through
+   * scaleWorld(), so every one of them has to carry the same factor. Leaving
+   * them raw (which is how this started) is not a small cosmetic slip: it draws
+   * a 17 m five-storey building — Hotel Paříž, say — with FOURTEEN rows of
+   * windows, each a third of its proper size, spaced a third of its proper
+   * distance apart. Window count goes as floors x slots, so the error is
+   * quadratic: measured at 436 k of the map's 573 k triangles, 76 % of the
+   * entire budget spent on windows that were wrong anyway.
+   *
+   * W_LIT is the honest tuning knob if the triangle budget ever needs one; the
+   * rest are geometry and should stay as they are.
+   */
+  const W_FLOOR   = 3.4  * SCALE;  // vertical pitch between window rows
+  const W_PITCH   = 4.2  * SCALE;  // horizontal spacing along a facade
+  const W_HALFW   = 0.55 * SCALE;  // half window width
+  const W_HEIGHT  = 1.45 * SCALE;  // window height
+  const W_SILL    = 2.0  * SCALE;  // first row's height above the wall base
+  const W_PROUD   = 0.09 * SCALE;  // stand-off, so it does not z-fight the wall
+  const W_MINEDGE = 4    * SCALE;  // skip walls shorter than this
+  const W_MINTALL = 5    * SCALE;  // skip buildings shorter than this
+  const W_INSET   = 2.1  * SCALE;  // keep windows clear of the wall corners
+  const W_EAVES   = 0.8  * SCALE;  // clear space under the roofline
+  const W_HEAD    = 3.0  * SCALE;  // headroom removed before counting floors
+  const W_LIT     = 0.17;          // fraction of candidate slots that are lit
+
+  /**
+   * Street furniture and road paint, same story as the window block above:
+   * real metres, measured against already-scaled geometry, so they need the
+   * factor too.
+   *
+   * Lamps mattered most. Unscaled, LAMP_SPACING put a lamp every 34 UNITS —
+   * every 11 real metres — and each lamp is two boxes, so the map carried
+   * 2 081 lamps and 49 944 triangles, the largest single category once the
+   * windows were fixed. They were also a third of their proper height, which
+   * is why the street lighting read as bollards.
+   */
+  const LAMP_SPACING = 34   * SCALE;  // along-street pitch between lamps
+  const LAMP_OFFSET  = 1.4  * SCALE;  // clearance beyond the kerb
+  const LAMP_H       = 6.2  * SCALE;  // pole height
+  const LAMP_POLE_W  = 0.28 * SCALE;
+  const LAMP_HEAD    = [0.95 * SCALE, 0.34 * SCALE, 0.5 * SCALE];
+  const KERB_W       = 0.55 * SCALE;  // kerb strip width
+  const DASH_LEN     = 3    * SCALE;  // centre-line dash
+  const DASH_GAP     = 5    * SCALE;
+  const DASH_HALFW   = 0.16 * SCALE;
+  const SIGN_H       = 7.2  * SCALE;  // attribution gantry clearance
 
   const ATTRIBUTION = 'Prague map data © OpenStreetMap contributors, licensed under ODbL 1.0.';
   const ATTRIBUTION_URL = 'https://www.openstreetmap.org/copyright';
@@ -540,6 +604,8 @@
     // Buildings are tiled TILE_N x TILE_N so the GPU can frustum-cull most of
     // a 1.6 km city; the flat layers (ground, roads, markings) are one mesh
     // each because they are cheap and always underfoot.
+    const TILE_N = Math.max(TILE_MIN, Math.min(TILE_MAX,
+      Math.round(Math.max(BOUNDS.maxX - BOUNDS.minX, BOUNDS.maxZ - BOUNDS.minZ) / TILE_TARGET)));
     const tiles = [];
     for (let i = 0; i < TILE_N * TILE_N; i++) tiles.push({ surf: new MeshAccum(), glow: new MeshAccum() });
     const tileW = (BOUNDS.maxX - BOUNDS.minX) / TILE_N, tileD = (BOUNDS.maxZ - BOUNDS.minZ) / TILE_N;
@@ -624,7 +690,7 @@
 
           // kerb strips, pulled in from the ends so junctions stay open
           if (len > rw * 1.4) {
-            const k0 = hw * 0.9, kw = 0.55;
+            const k0 = hw * 0.9, kw = KERB_W;
             const cax = a[0] + dx * k0, caz = a[1] + dz * k0;
             const cbx = b[0] - dx * k0, cbz = b[1] - dz * k0;
             // walk the perimeter the other way round on the left-hand kerb, or
@@ -642,7 +708,7 @@
 
           // dashed centre line on anything wide enough for two-way traffic
           if (road.w >= 6.5) {
-            const dash = 3, gap = 5, step = dash + gap, mw = 0.16;
+            const dash = DASH_LEN, gap = DASH_GAP, step = dash + gap, mw = DASH_HALFW;
             for (let s = gap * 0.5; s + dash < len; s += step) {
               const p0x = a[0] + dx * s, p0z = a[1] + dz * s;
               const p1x = a[0] + dx * (s + dash), p1z = a[1] + dz * (s + dash);
@@ -653,11 +719,11 @@
           }
 
           // candidate lamp positions, alternating sides every ~34 m
-          let s2 = 34 - (along % 34);
-          for (; s2 < len; s2 += 34) {
+          let s2 = LAMP_SPACING - (along % LAMP_SPACING);
+          for (; s2 < len; s2 += LAMP_SPACING) {
             const side = ((lampSpots.length & 1) ? 1 : -1);
-            lampSpots.push([a[0] + dx * s2 + nx * side * (hw + 1.4),
-                            a[1] + dz * s2 + nz * side * (hw + 1.4),
+            lampSpots.push([a[0] + dx * s2 + nx * side * (hw + LAMP_OFFSET),
+                            a[1] + dz * s2 + nz * side * (hw + LAMP_OFFSET),
                             Math.atan2(nx * side, nz * side)]);
           }
           along += len;
@@ -712,21 +778,21 @@
           wallTris += 2;
 
           // ---- lit windows on street-facing (outer) walls ----------------
-          if (!isOuter || el < 4 || y1 - y0 < 5) continue;
+          if (!isOuter || el < W_MINEDGE || y1 - y0 < W_MINTALL) continue;
           const ux = ex / el, uz = ez / el;
-          const ox = uz * 0.09, oz = -ux * 0.09;       // 9 cm proud of the facade
-          const floors = Math.floor((y1 - y0 - 3.0) / 3.4);
+          const ox = uz * W_PROUD, oz = -ux * W_PROUD;
+          const floors = Math.floor((y1 - y0 - W_HEAD) / W_FLOOR);
           for (let f = 0; f < floors; f++) {
-            const wy = y0 + 2.0 + f * 3.4;
-            if (wy + 1.5 > y1 - 0.8) break;
-            for (let s = 2.1; s < el - 2.1; s += 4.2) {
-              if (r() > 0.17) continue;
+            const wy = y0 + W_SILL + f * W_FLOOR;
+            if (wy + W_HEIGHT > y1 - W_EAVES) break;
+            for (let s = W_INSET; s < el - W_INSET; s += W_PITCH) {
+              if (r() > W_LIT) continue;
               const wc = WINDOW[(r() * WINDOW.length) | 0];
               const mx = p[0] + ux * s + ox, mz = p[1] + uz * s + oz;
-              const hwv = 0.55;
               glow.quad(
-                [mx - ux * hwv, wy, mz - uz * hwv], [mx + ux * hwv, wy, mz + uz * hwv],
-                [mx + ux * hwv, wy + 1.45, mz + uz * hwv], [mx - ux * hwv, wy + 1.45, mz - uz * hwv], wc);
+                [mx - ux * W_HALFW, wy, mz - uz * W_HALFW], [mx + ux * W_HALFW, wy, mz + uz * W_HALFW],
+                [mx + ux * W_HALFW, wy + W_HEIGHT, mz + uz * W_HALFW],
+                [mx - ux * W_HALFW, wy + W_HEIGHT, mz - uz * W_HALFW], wc);
               winTris += 2;
             }
           }
@@ -798,7 +864,7 @@
     // =====================================================================
     // 7. ATTRIBUTION GANTRY — the ODbL credit, standing over the spawn street
     // =====================================================================
-    const attributionMesh = buildAttributionSign(THREE, spawn, raster);
+    const attributionMesh = buildAttributionSign(THREE, spawn, raster, coverageLabel(meta));
 
     // =====================================================================
     // 8. FINALISE — build the meshes
@@ -832,9 +898,9 @@
 
     // lamps: two instanced draw calls for the whole city
     if (lampXforms.length) {
-      const poleGeo = new THREE.BoxGeometry(0.28, 6.2, 0.28);
+      const poleGeo = new THREE.BoxGeometry(LAMP_POLE_W, LAMP_H, LAMP_POLE_W);
       const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2b2a, roughness: 0.9 });
-      const headGeo = new THREE.BoxGeometry(0.95, 0.34, 0.5);
+      const headGeo = new THREE.BoxGeometry(LAMP_HEAD[0], LAMP_HEAD[1], LAMP_HEAD[2]);
       const headMat = new THREE.MeshBasicMaterial({ color: 0xffcf8c });
       const poles = new THREE.InstancedMesh(poleGeo, poleMat, lampXforms.length);
       const heads = new THREE.InstancedMesh(headGeo, headMat, lampXforms.length);
@@ -843,8 +909,8 @@
       for (let i = 0; i < lampXforms.length; i++) {
         const L = lampXforms[i];
         E.set(0, L[2], 0); Q.setFromEuler(E);
-        Pv.set(L[0], 3.1, L[1]); M.compose(Pv, Q, S); poles.setMatrixAt(i, M);
-        Pv.set(L[0], 6.2, L[1]); M.compose(Pv, Q, S); heads.setMatrixAt(i, M);
+        Pv.set(L[0], LAMP_H / 2, L[1]); M.compose(Pv, Q, S); poles.setMatrixAt(i, M);
+        Pv.set(L[0], LAMP_H, L[1]); M.compose(Pv, Q, S); heads.setMatrixAt(i, M);
       }
       poles.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
       poles.frustumCulled = false; heads.frustumCulled = false;
@@ -964,6 +1030,14 @@
           lamps: lampXforms.length,
           landmarks: landmarks.length,
           triangles: tris + lampTris,
+          // Breakdown, because "triangles" alone hides which lever to pull.
+          // wall/roof/window are the building budget; flat is ground + road
+          // ribbons + kerbs + lane paint; lamp is the two instanced meshes.
+          triWall: wallTris,
+          triRoof: roofTris,
+          triWindow: winTris,
+          triFlat: flat.count() + flatGlow.count(),
+          triLamp: lampTris,
           draws: draws,
           chunks: TILE_N * TILE_N,
           buildMs: buildMs,
@@ -1035,7 +1109,25 @@
   // A lit sign panel on two thin posts, spanning the spawn street. No collider:
   // it must never be the thing that stops the player on their first metre.
   // =========================================================================
-  function buildAttributionSign(THREE, spawn, raster) {
+  /**
+   * What the extract actually covers, for the gantry headline.
+   *
+   * The sign used to read "PRAHA 1" because the first extract genuinely was
+   * only Prague 1. Once the box grows past the old town it also takes in Malá
+   * Strana, Hradčany and the edges of Vinohrady and Smíchov — which are Prague
+   * 2, 5, 6 and 7 — and a sign still claiming "PRAHA 1" would be quietly
+   * wrong. Deriving it from the bbox means the label cannot drift out of step
+   * with the data again.
+   */
+  function coverageLabel(meta) {
+    const b = meta && meta.bbox;
+    if (!b) return 'PRAHA';
+    const km2 = ((b.north - b.south) * (meta.metresPerDegLat || 111230)) *
+                ((b.east - b.west) * (meta.metresPerDegLon || 71566)) / 1e6;
+    return km2 > 2.2 ? 'PRAHA · CENTRUM' : 'PRAHA 1';
+  }
+
+  function buildAttributionSign(THREE, spawn, raster, label) {
     const cv = document.createElement('canvas');
     cv.width = 1024; cv.height = 168;
     const g = cv.getContext('2d');
@@ -1045,7 +1137,7 @@
     g.textAlign = 'center';
     g.fillStyle = '#ffd9a0';
     g.font = 'bold 46px Georgia, serif';
-    g.fillText('PRAHA 1', 512, 54);
+    g.fillText(label || 'PRAHA', 512, 54);
     g.fillStyle = '#ddd0b6';
     g.font = 'bold 30px Georgia, serif';
     g.fillText('map data © OpenStreetMap contributors · ODbL 1.0', 512, 100);
@@ -1077,14 +1169,14 @@
     const panel = new THREE.Mesh(
       new THREE.PlaneGeometry(span, panelH),
       new THREE.MeshBasicMaterial({ map: tex, transparent: false, side: THREE.DoubleSide }));
-    panel.position.set(px, 7.2, pz);
+    panel.position.set(px, SIGN_H, pz);
     panel.rotation.y = spawn.heading + Math.PI;
     grp.add(panel);
 
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.9 });
     for (const sgn of [1, -1]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.2, 0.3), postMat);
-      post.position.set(px + nx * sgn * span / 2, 3.6, pz + nz * sgn * span / 2);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3 * SCALE, SIGN_H, 0.3 * SCALE), postMat);
+      post.position.set(px + nx * sgn * span / 2, SIGN_H / 2, pz + nz * sgn * span / 2);
       grp.add(post);
     }
     return grp;
