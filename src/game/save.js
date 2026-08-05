@@ -125,6 +125,15 @@
     return true;
   }
 
+  /* Nothing usable at KEY. Every fresh start gets the same treatment, whether
+   * it is the player's first run or the aftermath of a corrupt file: try the
+   * v1 save, then write immediately so the migration is not lost to a crash. */
+  function startFresh() {
+    store = blankStore();
+    migrateV1(store.data);
+    persist();
+  }
+
   function quarantineCorrupt(raw, why) {
     console.error('[save] ' + KEY + ' is unreadable (' + why + '). Backing the broken value up to "' +
       CORRUPT_KEY + '" and starting a fresh save.');
@@ -138,26 +147,20 @@
 
     const raw = lsGet(KEY);
 
-    if (raw == null) {
-      store = blankStore();
-      if (migrateV1(store.data)) persist();   // don't risk losing the migration
-      return;
-    }
+    if (raw == null) { startFresh(); return; }
 
     let parsed;
     try { parsed = JSON.parse(raw); }
     catch (e) {
       quarantineCorrupt(raw, 'JSON parse error: ' + (e && e.message));
-      store = blankStore();
-      persist();
+      startFresh();
       return;
     }
 
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
         !parsed.data || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
       quarantineCorrupt(raw, 'not a save envelope');
-      store = blankStore();
-      persist();
+      startFresh();
       return;
     }
 

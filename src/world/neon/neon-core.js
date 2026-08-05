@@ -759,6 +759,22 @@
 
       nearestRoad(x, z) { return builder.roads.nearest(x, z); },
 
+      /**
+       * Optional surface hint for the engine's off-road traction: 'paved'
+       * short-circuits the road-corridor test. These three districts are
+       * poured concrete/asphalt edge to edge by design (the downtown grid and
+       * plazas, the docks container yard — a drift playground — and the retail
+       * strip with its lots). Everything else answers null and the engine
+       * falls back to distance-from-road: hills grass, quarry dirt and the
+       * beach genuinely are loose surfaces.
+       */
+      surfaceTypeAt(x, z) {
+        if (x > -1300 && x < 1300 && z > -1300 && z < 1300) return 'paved';   // downtown
+        if (x > -1400 && x < 1400 && z > 1700 && z < 3900) return 'paved';    // docks yard
+        if (x > 1500 && x < 3900 && z > -1000 && z < 1000) return 'paved';    // retail strip
+        return null;
+      },
+
       isDrowningAt(x, z) {
         return x < BOUNDS.minX - 400 || x > BOUNDS.maxX + 400 || z < BOUNDS.minZ - 400 || z > BOUNDS.maxZ + 400;
       },

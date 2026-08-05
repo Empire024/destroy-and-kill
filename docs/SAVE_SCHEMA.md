@@ -95,6 +95,7 @@ Behaviour you must know:
 | `radioVolume` | number | 0..1. |
 | `waypoint` | `{worldId,x,z}` \| null | The player's map waypoint. |
 | `cameraOrbit` | object \| null | Orbit-camera preferences (sensitivity, invert, last mode). Shape owned by the camera system. |
+| `helpSeen` | bool | The "H — controls" nudge has been shown once. Written by `src/game/help.js`. |
 
 ### `meta` — bookkeeping; survives `resetProgression()`
 
@@ -107,7 +108,8 @@ Behaviour you must know:
 
 ## Migration v1 → v2
 
-Runs once, only when `dk_save_v2` is absent and `gta6vc_save` exists. Logs
+Runs whenever the save starts from nothing — `dk_save_v2` absent, or quarantined
+as corrupt — and `gta6vc_save` exists. Logs
 `[save] migrated v1 → v2`. **`gta6vc_save` is not modified or deleted** — the
 engine's safehouse save/load keeps using it for position and health.
 

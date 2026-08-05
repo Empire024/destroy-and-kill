@@ -1,0 +1,21 @@
+{
+  "$comment": [
+    "MY FM playlist. SHIPS EMPTY ON PURPOSE — this build bundles no music.",
+    "Add only files you have the right to use, drop them in assets/audio/tracks/,",
+    "and give every one of them a real licence line. See assets/audio/README.md",
+    "for the how-to and assets/audio/ATTRIBUTION.md for the rules.",
+    "",
+    "Track shape:",
+    "  file    (required) filename inside assets/audio/tracks/",
+    "  title   (required) what the radio panel shows",
+    "  artist  (required) who made it",
+    "  license (required) the exact licence, e.g. 'CC BY 4.0', 'CC0 1.0',",
+    "                     'Purchased licence #12345', 'Own composition'",
+    "  source  (recommended) the URL you got it from",
+    "",
+    "Entries missing `file` are ignored. Files that will not load are skipped",
+    "with a single console warning — the station never spams the log."
+  ],
+  "version": 1,
+  "tracks": []
+}

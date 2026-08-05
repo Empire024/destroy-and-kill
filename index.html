@@ -718,8 +718,13 @@ addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.upd
 
 // ---------- Lights ----------
 const moon=new THREE.DirectionalLight(0x9db0ff,0.9);
-moon.position.set(-400,600,300); moon.castShadow=true; moon.shadow.mapSize.set(2048,2048);
-const sc=1200; moon.shadow.camera.left=-sc;moon.shadow.camera.right=sc;moon.shadow.camera.top=sc;moon.shadow.camera.bottom=-sc; moon.shadow.camera.far=3200;
+// Shadow settings follow the gta6 upstream's scale-up (use authorised by its
+// author, same as the traffic signals): 4096 maps + a 1450 frustum give crisp
+// building shadows at speed. Desktop only — 4x the depth-buffer memory is the
+// wrong trade on a phone, which keeps the original 2048/1200.
+moon.position.set(-400,600,300); moon.castShadow=true;
+moon.shadow.mapSize.set(MOBILE_UI?2048:4096,MOBILE_UI?2048:4096);
+const sc=MOBILE_UI?1200:1450; moon.shadow.camera.left=-sc;moon.shadow.camera.right=sc;moon.shadow.camera.top=sc;moon.shadow.camera.bottom=-sc; moon.shadow.camera.far=3200;
 scene.add(moon);
 // Named, not anonymous: the day/night system re-colours and re-levels all three
 // of these every frame. `moon` keeps its (misleading) historic name — it is the
@@ -2199,9 +2204,10 @@ function axleWheelWorldPositions(axle='rear'){
   return {left:{x:axleX-rx*half,z:axleZ-rz*half},right:{x:axleX+rx*half,z:axleZ+rz*half}};
 }
 function spawnTireSmoke(x,z,intensity){
-  // On sand the "smoke" is kicked-up dust: warm ochre, a touch denser.
-  const sandFx=carSurface.fx==='sand';
-  const mat=new THREE.MeshBasicMaterial({color:sandFx?0xcbb083:0xc9c9c9,transparent:true,opacity:(sandFx?.34:.30)+intensity*.28,depthWrite:false});
+  // Off tarmac the "smoke" is kicked-up dust: warm ochre on beach sand, a
+  // grey-brown on grass and dirt, a touch denser than tyre smoke either way.
+  const fx=carSurface.fx,loose=fx==='sand'||fx==='dirt';
+  const mat=new THREE.MeshBasicMaterial({color:fx==='sand'?0xcbb083:fx==='dirt'?0x9a8a6e:0xc9c9c9,transparent:true,opacity:(loose?.34:.30)+intensity*.28,depthWrite:false});
   const mesh=new THREE.Mesh(tireSmokeGeo,mat),scale=.55+intensity*1.15;
   mesh.position.set(x+rand(-.35,.35),carState.y+.38,z+rand(-.35,.35));mesh.scale.set(scale*.8,scale*.45,scale*.8);scene.add(mesh);
   tireSmoke.push({mesh,vx:carState.vx*.10+rand(-1.8,1.8),vy:1.1+intensity*2.1,vz:carState.vz*.10+rand(-1.8,1.8),life:.72+intensity*.65,max:.72+intensity*.65});
@@ -2255,7 +2261,7 @@ function emitTireEffects(dt,intensity,axle='rear',frontIntensity=0){
       tireSmokeClock=lerp(.105,.032,tireEffectIntensity);
     }
   }else tireSmokeClock=0;
-  if(tireEffectIntensity>.40&&mph>8&&carSurface.fx!=='sand'){   // no rubber laid on sand
+  if(tireEffectIntensity>.40&&mph>8&&carSurface.fx==='smoke'){   // rubber only marks tarmac
     tireMarkClock-=dt;
     if(tireMarkClock<=0){
       addTireMark(lastL,primary.left,tireEffectIntensity);addTireMark(lastR,primary.right,tireEffectIntensity);
@@ -2350,8 +2356,33 @@ let driftYawRate=0, driftAngle=0, rearSlip=0, frontSlip=0, gripLost=false, gripU
 //   grip: lateral+braking grip multiplier   drag: added rolling resistance (1/s)
 //   spin: driven-wheel slip multiplier      fx:  'smoke' | 'sand'
 const SURFACE_ROAD={type:'road',grip:1,drag:0,spin:1,fx:'smoke'};
+// Off the road, traction falls off a cliff — deliberately. Roads are where the
+// game happens; grass, dirt and courtyards are survivable but slow and loose,
+// so cutting across them loses time instead of winning it.
+const SURFACE_OFFROAD={type:'offroad',grip:.55,drag:.42,spin:1.55,fx:'dirt'};
 let carSurface=SURFACE_ROAD;
-function setCarSurface(s){ carSurface=s&&s.type?s:SURFACE_ROAD; }
+// External claims (the coast's beach sand) override the engine's own
+// road/off-road resolution below. null = no claim.
+let carSurfaceClaim=null;
+function setCarSurface(s){ carSurfaceClaim=s&&s.type?s:null; }
+function resolveCarSurface(){
+  if(carSurfaceClaim) return carSurfaceClaim;
+  // Airborne or on a stunt ramp: no surface is touching the tyres.
+  if(carState.airborne||carState.ramp) return SURFACE_ROAD;
+  const w=activeWorld;
+  // Worlds that know their paved areas answer directly (NEON's downtown grid,
+  // docks yard and retail strip are poured edge to edge by design).
+  if(w.surfaceTypeAt&&w.surfaceTypeAt(carState.x,carState.z)==='paved') return SURFACE_ROAD;
+  if(!w.nearestRoad) return SURFACE_ROAD;           // world publishes no road data — never punish
+  const r=WORLD_nearestRoad(carState.x,carState.z);
+  // A road-aware world answering null means nothing in query range at all —
+  // that is DEEPLY off-road (hills grass, quarry dirt, open desert), not
+  // missing data. The no-data case is the early return above.
+  if(!r) return SURFACE_OFFROAD;
+  if(r.d<=(r.width||24)*.5+6) return SURFACE_ROAD;  // inside the road corridor (+ shoulder)
+  if(carState.y-(r.y||0)>2.5) return SURFACE_ROAD;  // on a deck/garage/overpass above the road plan
+  return SURFACE_OFFROAD;
+}
 // Brakes and weight transfer. brakePressure is the pedal after the hydraulic
 // ramp — a keyboard S is a step input and a real pedal is not, and slamming the
 // full force on frame one is most of what made braking feel like an anchor.
@@ -3887,6 +3918,7 @@ function updateBlastedVehicles(dt){
   }
 }
 function updateDrive(dt){
+  carSurface=resolveCarSurface();   // one resolution per frame; physics, FX and audio all read this
   const controlsLocked=wheelSetupOpen||carSelectionOpen;
   const keyboardForward=!controlsLocked&&!!(keys['w']||keys['arrowup']||mobileInput.gas),backInput=!controlsLocked&&!!(keys['s']||keys['arrowdown']||mobileInput.brake);
   const keyboardSteer=!controlsLocked?(((keys['a']||keys['arrowleft'])?1:0)-((keys['d']||keys['arrowright'])?1:0)):0,mobileSteering=!controlsLocked&&MOBILE_UI?mobileSteerInput(dt):0;
@@ -4423,7 +4455,7 @@ function updateDrive(dt){
   const lockFx=brakeLock*clamp((sp-6)/14,0,1),fourWheelLock=!braking&&lockFx>.34;
   let tireFx=Math.max(gripLost?.68:0,drivenSlip*.92,Math.abs(driftAngle)*2.15,braking?.92:0,lockFx*.95,throttle>0&&steerLoad>.28?slipOver*.92:0);
   // Loose surfaces kick up dust from ordinary rolling, not just from slip.
-  if(carSurface.fx==='sand'&&Math.abs(carState.speed)*1.6>14)tireFx=Math.max(tireFx,.42+Math.min(.3,Math.abs(throttle)*.3));
+  if((carSurface.fx==='sand'||carSurface.fx==='dirt')&&Math.abs(carState.speed)*1.6>14)tireFx=Math.max(tireFx,.42+Math.min(.3,Math.abs(throttle)*.3));
   emitTireEffects(dt,tireFx,fourWheelLock?'both':(vehicleTune.drive==='FWD'?'front':'rear'),Math.max(lockFx*.92,frontSlip*.85));
 }
 
@@ -4682,6 +4714,9 @@ const legacyWorld={
   rampsNear:()=>ramps,
   // normalise to the world contract: callers read .width, not .seg.width
   nearestRoad:(x,z)=>{ const q=nearestStateRoad(x,z); if(q&&q.width===undefined)q.width=q.seg.width; return q; },
+  // The capital's core is kerb-to-kerb pavement; between its grid lines is
+  // plaza, not grass. Everything outside the core resolves by road distance.
+  surfaceTypeAt:(x,z)=>isCityCore(x,z)?'paved':null,
   isDrowningAt:(x,z)=>isOceanAt(x,z),
   inBounds:(x,z)=>insideState(x,z),
   clampToBounds:(x,z)=>clampToState(x,z),
@@ -4812,7 +4847,7 @@ window.GAME_DEBUG={
                     // handling telemetry — the drift and brake models are tuned against
                     // measured numbers, so the harness has to be able to read them
                     driftAngle:+driftAngle.toFixed(3),yawRate:+driftYawRate.toFixed(3),
-                    rearSlip:+rearSlip.toFixed(3),frontSlip:+frontSlip.toFixed(3),gripLost,
+                    rearSlip:+rearSlip.toFixed(3),frontSlip:+frontSlip.toFixed(3),gripLost,surface:carSurface.type,
                     brake:+brakePressure.toFixed(3),brakeLock:+brakeLock.toFixed(3),
                     marks:tireMarks.length,debris:carDebris.length};},
   get camera(){return {x:camera.position.x,y:camera.position.y,z:camera.position.z};},
