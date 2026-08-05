@@ -949,7 +949,10 @@
 
     const world = {
       id: 'prague',
-      name: 'PRAGUE 1',
+      // Derived, not fixed: the extract outgrew Prague 1 the moment the box
+      // reached Malá Strana and Hradčany, and a hardcoded name would go quietly
+      // stale the next time the bbox moves.
+      name: coverageLabel(meta) === 'PRAHA 1' ? 'PRAGUE 1' : 'PRAGUE CENTRE',
       group: group,
       spawn: spawn,
       bounds: BOUNDS,
@@ -1236,8 +1239,11 @@
 
   window.GameWorlds.register({
     id: 'prague',
-    name: 'PRAGUE 1',
-    tagline: 'The real Prague 1 from OpenStreetMap — tight cobbled streets, no room for error.',
+    // The registration is read before the map data has loaded, so this one
+    // cannot be derived the way world.name is. Keep it broad enough to stay
+    // true whichever bbox ships.
+    name: 'PRAGUE CENTRE',
+    tagline: 'The real Prague city centre from OpenStreetMap — tight cobbled streets, no room for error.',
     accent: '#e8a33d',
     fog: FOG,
     attribution: ATTRIBUTION + ' ' + ATTRIBUTION_URL,

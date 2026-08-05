@@ -93,9 +93,13 @@ const BBOX = {
   east: args.east ?? 14.4300,
 };
 
+// Tried in order, and only ever moved down the list when one actually fails.
+// Spreading a struggling request across mirrors is kinder than retrying the
+// same overloaded host harder; all three are long-standing public instances.
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
 ];
 
 /* -------------------------------------------------------- projection ----- */
@@ -142,6 +146,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
 const PAUSE_MS = 12000;         // between tiles — be a good neighbour
 const BACKOFF_429_MS = 45000;   // a 429 means "slow down", so actually slow down
 const MAX_ATTEMPTS = 2;         // a timeout means "ask for less", not "ask again harder"
+const FETCH_TIMEOUT_MS = 200000; // client-side cap, just above the query's [timeout:180]
 const TILE_TARGET_KM2 = 1.6;    // tile size that reliably answers in ~1-2 s
 
 /**
@@ -209,6 +214,11 @@ async function fetchTile(box, label) {
             'User-Agent': 'cargame-prague-extractor/1.1 (offline build step)',
           },
           body: new URLSearchParams({ data: queryFor(box) }),
+          // The query carries [timeout:180] as a server-side hint, but nothing
+          // bounds the CLIENT side, and a mirror that accepts the connection
+          // and then goes quiet will hang the run indefinitely. Holding a dead
+          // socket open serves nobody — give up and let another endpoint try.
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
         const text = await res.text();
