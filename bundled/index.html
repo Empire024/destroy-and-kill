@@ -20867,12 +20867,9 @@ body.shop-open #mobileControls{display:none!important}
   };
 
   const PATROL = {
-    perWorld: { neon: 3, prague: 2 },
-    defaultCount: 2,
-    parkedPair: {                // one authored "police post" per world
-      neon: { x: -30, z: 250 },
-      prague: { x: 0, z: 0 }
-    },
+    perWorld: { neon: 6, prague: 4 },
+    defaultCount: 4,
+    parkedPair: {},              // no phantom intersection furniture; moving patrols provide presence
     cruise: 34,
     // Has to beat the fastest thing it can be sent after: a reckless driver runs
     // base cruise (up to 46) × 1.28 = 59 u/s, so 34 × 1.45 would never close and
@@ -20916,7 +20913,7 @@ body.shop-open #mobileControls{display:none!important}
   const junctionReservations=new Map();
   let rightOfWayStops=0,detours=0,emergencyYields=0,trafficControlClock=0;
 
-  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t;
   const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
 
   /** Deterministic weighted pick — same spawn order gives the same city. */
@@ -20944,7 +20941,7 @@ body.shop-open #mobileControls{display:none!important}
     t._slowFor = 0;
     t._otCd = 0;
     t._scrapes=0;t._scrapeT=0;t._homeLaneSign=Math.sign(t.laneSign||1)||1;t._trafficCap=Infinity;t._controlBlocked=0;t._avoidBias=0;t._sirenYield=0;
-    t._blockPhase='clear';t._blockTimer=0;t._blockHorned=false;t._reverseT=0;t._reverseCd=0;t._rerouteCd=0;
+    t._blockPhase='clear';t._blockTimer=0;t._blockHorned=false;t._reverseT=0;t._reverseCd=0;t._rerouteCd=0;t._leadDecision=.07+((t._collisionId||spawnSeq)%11)*.019;t._leadCache=null;t._followSpeed=t.spd||0;t._laneDecision=.05+((t._collisionId||spawnSeq)%7)*.023;
     return p;
   }
 
@@ -20960,7 +20957,7 @@ body.shop-open #mobileControls{display:none!important}
     for(let i=0;i<near.length;i++){const o=near[i].actor;if(o===t||o.dead||o.burning||o._patrol)continue;
       const dx=o.x-t.x,dz=o.z-t.z;if(Math.abs((o.y||0)-(t.y||0))>6)continue;
       const along=dx*fx+dz*fz;if(along<=0||along>range)continue;
-      const lat=Math.abs(dx*fz-dz*fx);if(lat>FOLLOW_LAT)continue;
+      const lat=Math.abs(dx*fz-dz*fx),odot=Math.sin(o.heading||0)*fx+Math.cos(o.heading||0)*fz;if(lat>FOLLOW_LAT||odot<.35)continue;
       if(bestGap<0||along<bestGap){bestGap=along;best=o;}
     }
     return best?{car:best,gap:bestGap}:null;
@@ -21062,7 +21059,7 @@ body.shop-open #mobileControls{display:none!important}
     if (!near || (near.width || 0) < OT.minWidth) { t._otCd = 3; return; }
     if (!oncomingClear(t, OT.oncoming)) { t._otCd = 1.2; return; }
     if (t.laneSign === undefined) return;                  // engine has not seeded it yet
-    const home = Math.sign(t.laneSign) || 1;
+    const home=Math.sign(t._homeLaneSign||t.laneSign)||1;
     t._ot = { phase: 'out', timer: 0, home: home, target: -home, victim: lead.car, life: 0 };
     t.cruise = t._tBase * t._tp.cruiseMult * OT.boost;
   }
@@ -21343,14 +21340,10 @@ body.shop-open #mobileControls{display:none!important}
       follower has moved everyone. Following prevents most contacts; this keeps
       different lanes and merging/overtaking cars from ghosting through each other. */
   function separateLiveTraffic(){
-    const minGap=7.6,mask=ctx.actors.DYNAMIC_MASK.TRAFFIC;
-    for(let i=0;i<live.length;i++){const a=live[i];if(a.dead||a.burning)continue;
-      const near=ctx.actors.queryDynamic(a.x,a.z,minGap,mask,nearCarsA);
-      for(let j=0;j<near.length;j++){const b=near[j].actor;if(b===a||b.dead||b.burning||b._patrol||(b._collisionId||0)<=(a._collisionId||0)||Math.abs((a.y||0)-(b.y||0))>5)continue;
-        let dx=a.x-b.x,dz=a.z-b.z,d2=dx*dx+dz*dz;if(d2>=minGap*minGap)continue;let d=Math.sqrt(d2);if(d<.01){dx=Math.sin((a._collisionId||1)*2.17);dz=Math.cos((b._collisionId||2)*1.73);d=1;}
-        const nx=dx/d,nz=dz/d,ma=a.mass||1480,mb=b.mass||1480,ia=1/ma,ib=1/mb,is=ia+ib,pen=minGap-d,corr=pen/is;a.x+=nx*corr*ia;a.z+=nz*corr*ia;b.x-=nx*corr*ib;b.z-=nz*corr*ib;
-        const avx=a._physVx===undefined?Math.sin(a.heading)*(a.spd||0):a._physVx,avz=a._physVz===undefined?Math.cos(a.heading)*(a.spd||0):a._physVz,bvx=b._physVx===undefined?Math.sin(b.heading)*(b.spd||0):b._physVx,bvz=b._physVz===undefined?Math.cos(b.heading)*(b.spd||0):b._physVz;
-        const vn=(avx-bvx)*nx+(avz-bvz)*nz;if(vn<0){const imp=-(1.04)*vn/is;a._physVx=avx+nx*imp*ia;a._physVz=avz+nz*imp*ia;b._physVx=bvx-nx*imp*ib;b._physVz=bvz-nz*imp*ib;a.spd=Math.hypot(a._physVx,a._physVz);b.spd=Math.hypot(b._physVx,b._physVz);}
+    const minGap=8.6,mask=ctx.actors.DYNAMIC_MASK.TRAFFIC;
+    for(let i=0;i<live.length;i++){const a=live[i];if(a.dead||a.burning)continue;const near=ctx.actors.queryDynamic(a.x,a.z,minGap,mask,nearCarsA);
+      for(let j=0;j<near.length;j++){const b=near[j].actor;if(b===a||b.dead||b.burning||b._patrol||(b._collisionId||0)<=(a._collisionId||0)||Math.abs((a.y||0)-(b.y||0))>5)continue;let dx=a.x-b.x,dz=a.z-b.z,d=Math.hypot(dx,dz);if(d>=minGap)continue;if(d<.01){dx=Math.sin((a._collisionId||1)*2.17);dz=Math.cos((b._collisionId||2)*1.73);d=1;}const nx=dx/d,nz=dz/d,af=Math.sin(a.heading),az=Math.cos(a.heading),bf=Math.sin(b.heading),bz=Math.cos(b.heading),same=af*bf+az*bz>.25,pen=minGap-d,corr=pen*(same?.28:.52);a.x+=nx*corr;b.x-=nx*corr;a.z+=nz*corr;b.z-=nz*corr;
+        if(same){const avg=(Math.max(0,a.spd||0)+Math.max(0,b.spd||0))*.5;a.spd=lerp(a.spd||0,avg,.18);b.spd=lerp(b.spd||0,avg,.18);const avx=a._physVx===undefined?af*a.spd:a._physVx,avz=a._physVz===undefined?az*a.spd:a._physVz,bvx=b._physVx===undefined?bf*b.spd:b._physVx,bvz=b._physVz===undefined?bz*b.spd:b._physVz;a._physVx=lerp(avx,af*a.spd,.22);a._physVz=lerp(avz,az*a.spd,.22);b._physVx=lerp(bvx,bf*b.spd,.22);b._physVz=lerp(bvz,bz*b.spd,.22);}
         if(a.mesh)a.mesh.position.set(a.x,a.y||0,a.z);if(b.mesh)b.mesh.position.set(b.x,b.y||0,b.z);
       }
     }
@@ -21409,7 +21402,7 @@ body.shop-open #mobileControls{display:none!important}
     live.length = 0;hazardCars.length = 0;
     for (let i = 0; i < traffic.length; i++) {
       const t = traffic[i];
-      if (t.dead || t.burning) { if(!t._patrol)hazardCars.push(t); continue; }
+      if(t.dead||t.burning||t._driverExited){if(!t._patrol)hazardCars.push(t);continue;}
       if(t._patrol)continue;
       live.push(t);
     }
@@ -21431,38 +21424,10 @@ body.shop-open #mobileControls{display:none!important}
         continue;
       }
 
-      const lead = leadCar(t, Math.max(pr.followDist * 2.2, 30) + t.spd * 0.5);
-      if (lead) {
-        const leadSpd = lead.car.spd || 0;
-        // The engine has no car-to-car awareness at all — traffic drives through
-        // traffic. This is the whole of the following model, and it has to be a
-        // CLOSING-SPEED model rather than a gap threshold: a car doing 47 into a
-        // crawler needs to be braking 25 units out, not at 9. `needed` is the
-        // deceleration that arrives at matched speed exactly as the gap closes
-        // to followDist. Down only, so a red light always wins.
-        const closing = t.spd - leadSpd;
-        if (closing > 0) {
-          const room = Math.max(0.5, lead.gap - pr.followDist);
-          const needed = (closing * closing) / (2 * room);
-          if (needed > 2) t.spd = Math.max(leadSpd, t.spd - Math.min(needed, FOLLOW_BRAKE * 2.6) * dt);
-        }
-        // Inside the gap it wants, it simply does not go faster than the car in
-        // front. Without this the engine's +16/s push toward `cruise` creeps a
-        // tailgater through the bumper ahead one frame at a time.
-        if (lead.gap < pr.followDist) t.spd = Math.min(t.spd, leadSpd * 0.98);
-        // Horns are about being HELD UP, not about proximity. The follower above
-        // settles at roughly followDist, so a pure gap trigger is unreachable —
-        // what a driver reacts to is sitting behind someone at half the speed it
-        // wanted. hornThreshold buys patience: aggressive complains after 1.2s,
-        // nervous after 4.2s.
-        const heldUp = lead.gap < pr.followDist * 1.6 && t.spd < t.cruise * 0.55;
-        if (heldUp) {
-          t._blocked = (t._blocked || 0) + dt;
-          if (t._blocked > HORN_BLOCKED_T + (1.2 - pr.hornThreshold) * 3) {
-            horn(t, pr.hornThreshold); t._blocked = -4;
-          }
-        } else t._blocked = 0;
-      } else t._blocked = 0;
+      t._leadDecision=(t._leadDecision||0)-dt;if(t._leadDecision<=0){t._leadCache=leadCar(t,Math.max(pr.followDist*3.2,46)+t.spd*.72);t._leadDecision=.11+((t._collisionId||i)%9)*.021;}
+      const lead=t._leadCache&&live.indexOf(t._leadCache.car)>=0&&!t._leadCache.car.dead?t._leadCache:null;
+      if(lead){const leadSpd=Math.max(0,lead.car.spd||0),desiredGap=pr.followDist+clamp(t.spd*.34,3,18),gapError=lead.gap-desiredGap,rawTarget=leadSpd+clamp(gapError*.58,-12,14);t._followSpeed=lerp(Number.isFinite(t._followSpeed)?t._followSpeed:t.spd,Math.max(0,rawTarget),1-Math.exp(-dt*(gapError<0?6.5:2.7)));if(lead.gap<desiredGap*.68)t._followSpeed=Math.min(t._followSpeed,Math.max(0,leadSpd-2.5));t._trafficCap=Math.min(t._trafficCap,Math.max(0,t._followSpeed));t.spd+=clamp(t._followSpeed-t.spd,-30*dt,9*dt);const heldUp=lead.gap<desiredGap*1.7&&leadSpd<t.cruise*.68;t._blocked=heldUp?(t._blocked||0)+dt:Math.max(0,(t._blocked||0)-dt*2);if(t._blocked>HORN_BLOCKED_T+(1.2-pr.hornThreshold)*3){horn(t,pr.hornThreshold);t._blocked=-3.5;}}
+      else{t._blocked=0;t._followSpeed=lerp(Number.isFinite(t._followSpeed)?t._followSpeed:t.spd,t.cruise,1-Math.exp(-dt*1.4));}
 
       // Nervous drivers back off when the player is coming up fast behind them.
       if (pr.id === 'nervous' && !ctx.player.onFoot) {
@@ -21620,6 +21585,2255 @@ body.shop-open #mobileControls{display:none!important}
 
 </script>
 <script>
+/*
+===============================================================================
+MELEE COMBAT MODULE — integration guide for destroy-and-kill-neon-city-v18.html
+===============================================================================
+
+PURPOSE
+  Standalone melee mechanics and presentation. This file does not patch the game.
+  It exports `globalThis.MeleeCombatModule` with metadata plus:
+
+    const melee = MeleeCombatModule.create(ctx, options);
+    melee.update(dt);
+    melee.player.equip('fists' | 'bat' | 'knife' | 'crowbar');
+    melee.player.attack({ target });        // target is optional
+    const npc = melee.createNpc(actor, { kind:'ped', weaponId:'fists' });
+    npc.attack({ target: ctx.player });     // identical combatant API
+
+ACTUAL V18 ANCHORS FOUND IN THE ATTACHED GAME
+
+1) Existing weapon table and slot:
+     "const WEAPONS = Object.freeze({"
+     "melee:Object.freeze({id:'melee',name:'BAT',icon:'🏏',slot:5,range:3.7,damage:30,headshot:1,vehicleDamage:5,interval:.48,auto:false,mag:Infinity,starterReserve:Infinity,reload:0,inCar:false,spread:0,price:250})"
+     "const CYCLE=[null,'pistol','smg','shotgun','rifle','melee'];"
+     "const BY_SLOT={'1':'pistol','2':'smg','3':'shotgun','4':'rifle','5':'melee'};"
+
+   Replace the placeholder `melee` record with the four records returned by:
+     MeleeCombatModule.combatWeaponDefinitions()
+
+   All four use slot 5 and wheelGroup "melee". `fists` should be owned by default.
+   Add `fists`, `bat`, `knife`, and `crowbar` to `inv.owned` and `inv.ammo`.
+   Their ammo objects may remain `{mag:Infinity,reserve:Infinity}` because the
+   existing save serializer already converts Infinity to "inf".
+
+   A simple v18-compatible cycle is:
+     const CYCLE=[null,'pistol','smg','shotgun','rifle',
+                  'fists','bat','knife','crowbar'];
+     const BY_SLOT={'1':'pistol','2':'smg','3':'shotgun','4':'rifle','5':'fists'};
+
+   For a real wheel, group entries by metadata.wheelGroup and render each entry
+   with `metadata.drawIcon(g,cx,cy,size,selected)`. `ammo` is always "none".
+
+2) Combat construction:
+     "GameSystems.register({"
+     "id: 'combat',"
+     "init(ctx) {"
+     "ctxRef=ctx;loadCombat();buildWeaponUI(ctx);installCombatInput(ctx);rebuildWeaponModels(ctx);"
+     "function tryFire(ctx) {"
+     "const w = inv.equipped && WEAPONS[inv.equipped];"
+
+   Create the module in combat.init(ctx), after `ctxRef=ctx`:
+     melee = MeleeCombatModule.create(ctx,{
+       getPlayerWeapon:()=>inv.equipped,
+       isFirstPerson:()=>firstPersonActive(),
+       getTargets:()=>[
+         ...ctx.actors.peds,
+         ...officers.map(of=>({target:of,kind:'officer',radius:1.45})),
+         ...ctx.actors.traffic.map(v=>({target:v,kind:'traffic',radius:3.5})),
+         ...ctx.actors.cops.map(v=>({target:v,kind:'copVehicle',radius:3.5}))
+       ],
+       damageCharacter:(target,amount,opts)=>damageCharacter(ctx,target,amount,opts),
+       screenShake:(amount,duration,meta)=>{
+         // Add a writable engine/camera hook here. The current game exposes only
+         // the read-only `ctx.cameraInternals.crashShake` getter.
+         ctx.events.emit('camera:shake',{amount,duration,meta});
+       },
+       onHit:hit=>{
+         hitMarkerTimer=.16;
+         if(hit.kind==='officer'||hit.kind==='copVehicle')raiseWantedForCop(ctx);
+       }
+     });
+
+   Before the ammo test in tryFire(), delegate melee:
+     if(melee && melee.isWeapon(w.id)){
+       const fired=melee.player.attack({weaponId:w.id});
+       if(fired){inv.cd=w.interval;paintWeaponUI();}
+       return fired;
+     }
+
+3) Weapon meshes:
+     "function createWeaponModel(ctx,id,view){"
+     "function rebuildWeaponModels(ctx){"
+
+   This module manages its own player world/view melee models by default. In
+   rebuildWeaponModels(), after disposing the firearm models, use:
+     if(melee && melee.isWeapon(inv.equipped)){
+       melee.player.equip(inv.equipped);
+       return;
+     }
+
+   Keep the existing firearm branches in createWeaponModel(). Remove the final
+   catch-all bat branch so an unknown firearm id does not silently become a bat.
+   External callers may also use:
+     MeleeCombatModule.createWeaponModel(ctx,'crowbar',false)
+
+4) Per-frame call:
+     "updateFx(dt);updateWeaponPresentation(dt,ctx);"
+
+   Immediately after that line in combat.update(dt,ctx), call:
+     if(melee)melee.update(dt);
+
+   Core `updateFoot(dt)` runs before GameSystems.update(), so the melee module
+   applies its arm/weapon pose after walking/running animation. It never freezes
+   movement and therefore attacks work while walking or sprinting.
+
+5) Death, map change, disposal:
+     "worldChanged(w, ctx) { clearFootPolice(ctx); clearFx(); }"
+
+   The module listens to `player:died`; GameSystems map changes are method calls,
+   not an event, so extend the quoted worldChanged hook:
+     if(melee){melee.cancelAll();melee.clearEffects();}
+
+   In combat.dispose() call:
+     if(melee){melee.dispose();melee=null;}
+
+6) Combat public API:
+     "api: {"
+     "character(target,kind){return characterSnapshot(target,kind);},damageCharacter(target,amount,opts){return damageCharacter(ctxRef,target,amount,opts);},"
+
+   Expose the instance for existing NPC systems:
+     melee(){return melee;}
+     createMeleeNpc(actor,opts){return melee.createNpc(actor,opts);}
+     removeMeleeNpc(actor){return melee.removeNpc(actor);}
+
+   Cops and civilians use the same returned shape as `melee.player`:
+     fighter.equip(id)
+     fighter.attack({target})
+     fighter.setAttackHeld(boolean)
+     fighter.cancel()
+     fighter.snapshot()
+     fighter.dispose()
+
+7) Armed NPC hooks:
+   In `updateArmedPeds(dt,ctx)` or the foot-officer state machine, bind once:
+     const fighter=melee.getNpc(p)||
+       melee.createNpc(p,{kind:'ped',weaponId:'fists'});
+     fighter.attack({target:ctx.player});
+
+   For an officer:
+     const fighter=melee.getNpc(of)||
+       melee.createNpc(of,{kind:'officer',weaponId:'bat',
+         mesh:()=>of.group,heading:()=>of.heading,
+         setHeading:h=>{of.heading=h;}});
+     fighter.attack({target:ctx.player});
+
+   Instanced civilians have no individual Three.js Group. The module still draws
+   their bat as a pooled independent world model and writes `actor._meleePose`.
+   To animate their instanced arms exactly, read `_meleePose` in
+   `updatePedCrowd(px,pz)` beside the existing `_aiState==='combat'` pose.
+
+8) Ammu-Nation:
+     "Object.freeze({id:'ammu-downtown',name:'AMMU-NATION · DOWNTOWN',x:-760,z:430,accent:0xff3b6b,stock:['ammo:pistol','weapon:melee','weapon:smg','ammo:smg','armour:25']})"
+     "const WEAPON_LABELS={pistol:'PISTOL',smg:'NEON SMG',shotgun:'PUMP SHOTGUN',rifle:'CARBINE',melee:'BAT'},WEAPON_PRICES={smg:1600,shotgun:2400,rifle:4200,melee:250},AMMO=..."
+
+   Replace weapon:melee with explicit stock, for example:
+     downtown: weapon:bat, weapon:knife
+     strip:    weapon:crowbar
+     crown:    weapon:knife, weapon:crowbar
+
+   Merge:
+     Object.assign(WEAPON_LABELS,MeleeCombatModule.shopLabels());
+     Object.assign(WEAPON_PRICES,MeleeCombatModule.shopPrices());
+
+9) Expected ctx dependencies. The v18 engine publishes these under:
+     "const gameCtx={"
+     "THREE, scene, camera, renderer,"
+     "actors:{traffic,peds,cops,...,killCivilian,knockCivilian,alertPedestrians,"
+     "fx:{toast:addToast,banner:setBanner,flash:doFlash,...},"
+     "audio:{get ctx(){return audioCtx;},get muted(){return muted;},ensure:initAudio,"
+     "engine:{"
+     "hurtPlayer(hearts,meta){"
+
+   Required:
+     ctx.THREE
+     ctx.scene
+     ctx.camera
+     ctx.player.{x,z,heading,onFoot,dead,dying,footMesh}
+     ctx.world.{groundHeightAt,obstaclesNear}
+     ctx.actors.{peds,traffic,cops,knockCivilian,alertPedestrians}
+     ctx.audio.{ctx,muted,ensure}
+     ctx.fx.flash
+     ctx.engine.{addWanted,hurtPlayer}
+     ctx.events.emit/on
+
+   Resolved automatically when present:
+     GameSystems.api('combat').damageCharacter
+     GameSystems.api('vdamage').damage
+     GameSystems.api('destructibles').breakAt
+
+   Optional options:
+     getPlayerWeapon() -> melee weapon id or null
+     isFirstPerson() -> boolean
+     getTargets(fighter,ctx) -> raw targets or {target,kind,radius} wrappers
+     getExtraTargets(fighter,ctx) -> additional targets
+     damageCharacter(target,amount,opts)
+     damageTarget(target,amount,meta)
+     knockdown(target,dirX,dirZ,impact,meta)
+     screenShake(amount,duration,meta)
+     onHit(hit)
+     onMiss(miss)
+     onCrime(crime)
+     managePlayerModels=false to let another presenter own player models
+===============================================================================
+*/
+
+(function (root, factory) {
+  'use strict';
+  const exported = factory();
+  if (typeof module === 'object' && module.exports) module.exports = exported;
+  else root.MeleeCombatModule = exported;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const VERSION = '1.0.0';
+  const TAU = Math.PI * 2;
+  const IMPACT_POOL_MAX = 24;
+  const MODEL_POOL_PER_KEY = 10;
+  const MELEE_IDS = Object.freeze(['fists', 'bat', 'knife', 'crowbar']);
+
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function smooth01(t) {
+    t = clamp(t, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
+  function easeOutCubic(t) {
+    t = 1 - clamp(t, 0, 1);
+    return 1 - t * t * t;
+  }
+
+  function angleWrap(a) {
+    while (a > Math.PI) a -= TAU;
+    while (a < -Math.PI) a += TAU;
+    return a;
+  }
+
+  function safeCall(fn, fallback) {
+    try {
+      return typeof fn === 'function' ? fn() : fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function roundedRectPath(g, x, y, w, h, radius) {
+    const r = Math.min(Math.abs(radius || 0), Math.abs(w) * .5, Math.abs(h) * .5);
+    if (typeof g.roundRect === 'function') {
+      g.roundRect(x, y, w, h, r);
+      return;
+    }
+    g.moveTo(x + r, y);
+    g.lineTo(x + w - r, y);
+    g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r);
+    g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h);
+    g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r);
+    g.quadraticCurveTo(x, y, x + r, y);
+  }
+
+  function drawFistsIcon(g, cx, cy, size, selected) {
+    if (!g) return;
+    const s = size || 32;
+    g.save();
+    g.translate(cx, cy);
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.strokeStyle = selected ? '#20e3ff' : '#eaf2ff';
+    g.fillStyle = selected ? 'rgba(32,227,255,.24)' : 'rgba(234,242,255,.16)';
+    g.lineWidth = Math.max(1.5, s * .065);
+    g.beginPath();
+    roundedRectPath(g, -s * .29, -s * .02, s * .49, s * .34, s * .08);
+    g.fill();
+    g.stroke();
+    for (let i = 0; i < 4; i++) {
+      g.beginPath();
+      roundedRectPath(g, -s * .28 + i * s * .13, -s * .22, s * .12, s * .24, s * .055);
+      g.fill();
+      g.stroke();
+    }
+    g.beginPath();
+    g.moveTo(-s * .25, s * .05);
+    g.quadraticCurveTo(-s * .43, s * .02, -s * .34, s * .22);
+    g.stroke();
+    g.restore();
+  }
+
+  function drawBatIcon(g, cx, cy, size, selected) {
+    if (!g) return;
+    const s = size || 32;
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(-Math.PI * .22);
+    g.lineCap = 'round';
+    g.strokeStyle = selected ? '#20e3ff' : '#eaf2ff';
+    g.lineWidth = s * .22;
+    g.beginPath();
+    g.moveTo(-s * .34, s * .28);
+    g.lineTo(s * .27, -s * .29);
+    g.stroke();
+    g.strokeStyle = selected ? '#ffd23f' : '#9aa8bb';
+    g.lineWidth = s * .09;
+    g.beginPath();
+    g.moveTo(-s * .42, s * .36);
+    g.lineTo(-s * .22, s * .17);
+    g.stroke();
+    g.restore();
+  }
+
+  function drawKnifeIcon(g, cx, cy, size, selected) {
+    if (!g) return;
+    const s = size || 32;
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(-Math.PI * .2);
+    g.lineJoin = 'round';
+    g.strokeStyle = selected ? '#20e3ff' : '#eaf2ff';
+    g.fillStyle = selected ? 'rgba(32,227,255,.34)' : 'rgba(234,242,255,.22)';
+    g.lineWidth = Math.max(1.4, s * .055);
+    g.beginPath();
+    g.moveTo(-s * .02, s * .12);
+    g.lineTo(s * .42, -s * .3);
+    g.lineTo(s * .2, s * .18);
+    g.closePath();
+    g.fill();
+    g.stroke();
+    g.fillStyle = selected ? '#ffd23f' : '#49566b';
+    g.fillRect(-s * .35, s * .06, s * .35, s * .14);
+    g.strokeRect(-s * .35, s * .06, s * .35, s * .14);
+    g.restore();
+  }
+
+  function drawCrowbarIcon(g, cx, cy, size, selected) {
+    if (!g) return;
+    const s = size || 32;
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(-Math.PI * .2);
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.strokeStyle = selected ? '#20e3ff' : '#eaf2ff';
+    g.lineWidth = s * .105;
+    g.beginPath();
+    g.moveTo(-s * .34, s * .34);
+    g.lineTo(s * .2, -s * .22);
+    g.quadraticCurveTo(s * .37, -s * .38, s * .46, -s * .18);
+    g.stroke();
+    g.lineWidth = s * .045;
+    g.beginPath();
+    g.moveTo(-s * .37, s * .37);
+    g.lineTo(-s * .2, s * .2);
+    g.stroke();
+    g.restore();
+  }
+
+  function freezeMove(move) {
+    return Object.freeze(Object.assign({}, move));
+  }
+
+  function freezeWeapon(def) {
+    const moves = def.moves.map(freezeMove);
+    return Object.freeze(Object.assign({}, def, { moves: Object.freeze(moves) }));
+  }
+
+  const WEAPONS = Object.freeze({
+    fists: freezeWeapon({
+      id: 'fists',
+      name: 'FISTS',
+      icon: '✊',
+      drawIcon: drawFistsIcon,
+      slot: 5,
+      wheelGroup: 'melee',
+      wheelOrder: 0,
+      ammo: 'none',
+      mag: Infinity,
+      starterReserve: Infinity,
+      reload: 0,
+      inCar: false,
+      auto: false,
+      spread: 0,
+      range: 3.15,
+      arcDegrees: 76,
+      damage: 12,
+      vehicleDamage: 1,
+      interval: .36,
+      swingSpeed: 2.75,
+      knockdownChance: .08,
+      price: 0,
+      impactType: 'flesh',
+      moves: [
+        { id: 'jab', pose: 'jab', duration: .31, hitTime: .145, whooshTime: .09, damage: 10, range: 3.0, arcDegrees: 68, knockdownChance: .045 },
+        { id: 'cross', pose: 'cross', duration: .39, hitTime: .19, whooshTime: .12, damage: 15, range: 3.25, arcDegrees: 80, knockdownChance: .15 }
+      ]
+    }),
+    bat: freezeWeapon({
+      id: 'bat',
+      name: 'BASEBALL BAT',
+      icon: '▰',
+      drawIcon: drawBatIcon,
+      slot: 5,
+      wheelGroup: 'melee',
+      wheelOrder: 1,
+      ammo: 'none',
+      mag: Infinity,
+      starterReserve: Infinity,
+      reload: 0,
+      inCar: false,
+      auto: false,
+      spread: 0,
+      range: 4.55,
+      arcDegrees: 108,
+      damage: 31,
+      vehicleDamage: 7,
+      interval: .61,
+      swingSpeed: 1.64,
+      knockdownChance: .34,
+      price: 250,
+      impactType: 'wood',
+      moves: [
+        { id: 'bat_swing', pose: 'bat', duration: .56, hitTime: .285, whooshTime: .18, damage: 31, range: 4.55, arcDegrees: 108, knockdownChance: .34 }
+      ]
+    }),
+    knife: freezeWeapon({
+      id: 'knife',
+      name: 'KNIFE',
+      icon: '†',
+      drawIcon: drawKnifeIcon,
+      slot: 5,
+      wheelGroup: 'melee',
+      wheelOrder: 2,
+      ammo: 'none',
+      mag: Infinity,
+      starterReserve: Infinity,
+      reload: 0,
+      inCar: false,
+      auto: false,
+      spread: 0,
+      range: 3.35,
+      arcDegrees: 72,
+      damage: 24,
+      vehicleDamage: 2,
+      interval: .37,
+      swingSpeed: 2.7,
+      knockdownChance: .055,
+      price: 550,
+      impactType: 'blade',
+      moves: [
+        { id: 'knife_slash_a', pose: 'knifeA', duration: .31, hitTime: .135, whooshTime: .075, damage: 23, range: 3.3, arcDegrees: 70, knockdownChance: .045 },
+        { id: 'knife_slash_b', pose: 'knifeB', duration: .34, hitTime: .155, whooshTime: .09, damage: 26, range: 3.4, arcDegrees: 76, knockdownChance: .065 }
+      ]
+    }),
+    crowbar: freezeWeapon({
+      id: 'crowbar',
+      name: 'CROWBAR',
+      icon: '⌝',
+      drawIcon: drawCrowbarIcon,
+      slot: 5,
+      wheelGroup: 'melee',
+      wheelOrder: 3,
+      ammo: 'none',
+      mag: Infinity,
+      starterReserve: Infinity,
+      reload: 0,
+      inCar: false,
+      auto: false,
+      spread: 0,
+      range: 4.2,
+      arcDegrees: 100,
+      damage: 38,
+      vehicleDamage: 10,
+      interval: .72,
+      swingSpeed: 1.39,
+      knockdownChance: .42,
+      price: 700,
+      impactType: 'metal',
+      moves: [
+        { id: 'crowbar_swing', pose: 'crowbar', duration: .66, hitTime: .34, whooshTime: .22, damage: 38, range: 4.2, arcDegrees: 100, knockdownChance: .42 }
+      ]
+    })
+  });
+
+  function metadataList() {
+    return MELEE_IDS.map(function (id) {
+      const w = WEAPONS[id];
+      return {
+        id: w.id,
+        name: w.name,
+        icon: w.icon,
+        drawIcon: w.drawIcon,
+        slot: w.slot,
+        wheelGroup: w.wheelGroup,
+        wheelOrder: w.wheelOrder,
+        ammo: 'none',
+        price: w.price,
+        damage: w.damage,
+        range: w.range,
+        swingSpeed: w.swingSpeed,
+        interval: w.interval,
+        ownedByDefault: id === 'fists'
+      };
+    });
+  }
+
+  function combatWeaponDefinitions() {
+    const out = {};
+    for (const id of MELEE_IDS) {
+      const w = WEAPONS[id];
+      out[id] = Object.freeze({
+        id: w.id,
+        name: w.name,
+        icon: w.icon,
+        drawIcon: w.drawIcon,
+        slot: w.slot,
+        wheelGroup: w.wheelGroup,
+        wheelOrder: w.wheelOrder,
+        kind: 'melee',
+        ammo: 'none',
+        range: w.range,
+        damage: w.damage,
+        headshot: 1,
+        vehicleDamage: w.vehicleDamage,
+        interval: w.interval,
+        swingSpeed: w.swingSpeed,
+        auto: false,
+        mag: Infinity,
+        starterReserve: Infinity,
+        reload: 0,
+        inCar: false,
+        spread: 0,
+        price: w.price
+      });
+    }
+    return Object.freeze(out);
+  }
+
+  function shopLabels() {
+    const out = {};
+    for (const id of MELEE_IDS) out[id] = WEAPONS[id].name;
+    return out;
+  }
+
+  function shopPrices() {
+    const out = {};
+    for (const id of MELEE_IDS) out[id] = WEAPONS[id].price;
+    return out;
+  }
+
+  function makeMaterial(ctx, color, view, metalness, roughness) {
+    if (view) {
+      return new ctx.THREE.MeshBasicMaterial({
+        color: color,
+        depthTest: false,
+        depthWrite: false
+      });
+    }
+    return new ctx.THREE.MeshStandardMaterial({
+      color: color,
+      metalness: metalness == null ? .2 : metalness,
+      roughness: roughness == null ? .65 : roughness
+    });
+  }
+
+  function addPart(ctx, group, geometry, color, view, transform, materialOptions) {
+    const o = transform || {};
+    const mo = materialOptions || {};
+    const mesh = new ctx.THREE.Mesh(
+      geometry,
+      makeMaterial(ctx, color, view, mo.metalness, mo.roughness)
+    );
+    mesh.position.set(o.x || 0, o.y || 0, o.z || 0);
+    mesh.rotation.set(o.rx || 0, o.ry || 0, o.rz || 0);
+    mesh.scale.set(
+      o.sx == null ? 1 : o.sx,
+      o.sy == null ? 1 : o.sy,
+      o.sz == null ? 1 : o.sz
+    );
+    mesh.renderOrder = view ? 1000 : 0;
+    mesh.castShadow = !view;
+    group.add(mesh);
+    return mesh;
+  }
+
+  function makeKnifeBladeGeometry(THREE) {
+    const positions = new Float32Array([
+      -.11, -.04, -.52,   .11, -.04, -.52,   .06, -.025, .72,  -.06, -.025, .72,
+      -.11,  .04, -.52,   .11,  .04, -.52,   .06,  .025, .72,  -.06,  .025, .72,
+       0,    0,    1.02
+    ]);
+    const indices = [
+      0,1,2, 0,2,3,
+      4,7,6, 4,6,5,
+      0,4,5, 0,5,1,
+      3,2,6, 3,6,7,
+      0,3,7, 0,7,4,
+      1,5,6, 1,6,2,
+      3,2,8, 2,6,8, 6,7,8, 7,3,8
+    ];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  function addCylinderBetween(ctx, group, a, b, radius, color, view, materialOptions) {
+    const THREE = ctx.THREE;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    const length = Math.hypot(dx, dy, dz) || .001;
+    const geo = new THREE.CylinderGeometry(radius, radius, length, 8, 1, false);
+    const mesh = addPart(
+      ctx,
+      group,
+      geo,
+      color,
+      view,
+      { x: (a.x + b.x) * .5, y: (a.y + b.y) * .5, z: (a.z + b.z) * .5 },
+      materialOptions
+    );
+    mesh.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(dx, dy, dz).normalize()
+    );
+    return mesh;
+  }
+
+  function createWeaponModel(ctx, id, view) {
+    if (!ctx || !ctx.THREE) throw new Error('MeleeCombatModule.createWeaponModel requires ctx.THREE');
+    if (!WEAPONS[id]) throw new Error('Unknown melee weapon: ' + id);
+    const THREE = ctx.THREE;
+    const group = new THREE.Group();
+    group.name = (view ? 'view_' : 'world_') + 'melee_' + id;
+    group.userData.meleeWeaponId = id;
+    group.userData.meleeView = !!view;
+
+    if (id === 'fists') {
+      if (view) {
+        const fistGeo = new THREE.DodecahedronGeometry(.18, 0);
+        const left = addPart(ctx, group, fistGeo, 0xc99370, true, { x: -.29, y: -.13, z: .12 });
+        const right = addPart(ctx, group, fistGeo, 0xc99370, true, { x: .29, y: -.13, z: .12 });
+        left.scale.set(.95, .82, 1.12);
+        right.scale.copy(left.scale);
+        group.userData.leftFist = left;
+        group.userData.rightFist = right;
+      }
+    } else if (id === 'bat') {
+      addPart(
+        ctx,
+        group,
+        new THREE.CylinderGeometry(.13, .22, 2.75, 10, 1, false),
+        0x8d572f,
+        view,
+        { z: .95, rx: Math.PI / 2 },
+        { metalness: .02, roughness: .78 }
+      );
+      addPart(
+        ctx,
+        group,
+        new THREE.CylinderGeometry(.15, .15, .78, 10),
+        0x171b24,
+        view,
+        { z: -.78, rx: Math.PI / 2 },
+        { metalness: .1, roughness: .92 }
+      );
+      addPart(
+        ctx,
+        group,
+        new THREE.CylinderGeometry(.24, .24, .16, 10),
+        0x252b34,
+        view,
+        { z: 2.36, rx: Math.PI / 2 },
+        { metalness: .42, roughness: .55 }
+      );
+    } else if (id === 'knife') {
+      addPart(
+        ctx,
+        group,
+        new THREE.BoxGeometry(.28, .24, .92),
+        0x171c25,
+        view,
+        { z: -.42 },
+        { metalness: .15, roughness: .8 }
+      );
+      addPart(
+        ctx,
+        group,
+        new THREE.BoxGeometry(.42, .10, .16),
+        0x3a4657,
+        view,
+        { z: .06 },
+        { metalness: .72, roughness: .3 }
+      );
+      addPart(
+        ctx,
+        group,
+        makeKnifeBladeGeometry(THREE),
+        0xb9c8d8,
+        view,
+        { z: .75, sx: 1, sy: 1, sz: 1.25 },
+        { metalness: .86, roughness: .18 }
+      );
+      addPart(
+        ctx,
+        group,
+        new THREE.BoxGeometry(.05, .045, .56),
+        0x20e3ff,
+        view,
+        { x: .07, y: .04, z: .84 },
+        { metalness: .25, roughness: .35 }
+      );
+    } else if (id === 'crowbar') {
+      const metal = { metalness: .78, roughness: .32 };
+      addCylinderBetween(ctx, group, { x: 0, y: 0, z: -.92 }, { x: 0, y: 0, z: 1.65 }, .105, 0x8f2838, view, metal);
+      addCylinderBetween(ctx, group, { x: 0, y: 0, z: 1.65 }, { x: .20, y: 0, z: 1.96 }, .105, 0x8f2838, view, metal);
+      addCylinderBetween(ctx, group, { x: .20, y: 0, z: 1.96 }, { x: .43, y: 0, z: 1.72 }, .095, 0xa73545, view, metal);
+      addCylinderBetween(ctx, group, { x: 0, y: 0, z: -.92 }, { x: -.18, y: 0, z: -1.16 }, .09, 0x772230, view, metal);
+      addPart(
+        ctx,
+        group,
+        new THREE.BoxGeometry(.30, .07, .11),
+        0xb84654,
+        view,
+        { x: -.22, z: -1.20, ry: -.45 },
+        metal
+      );
+    }
+
+    const scale = view
+      ? (id === 'knife' ? 1.08 : id === 'fists' ? 1 : .88)
+      : (id === 'knife' ? .95 : id === 'fists' ? 1 : .92);
+    group.scale.setScalar(scale);
+    return group;
+  }
+
+  function disposeModel(model) {
+    if (!model) return;
+    if (model.parent) model.parent.remove(model);
+    model.traverse(function (object) {
+      if (object.geometry && object.geometry.dispose) object.geometry.dispose();
+      if (object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach(function (m) { if (m && m.dispose) m.dispose(); });
+        } else if (object.material.dispose) {
+          object.material.dispose();
+        }
+      }
+    });
+  }
+
+  function create(ctx, options) {
+    options = options || {};
+    validateContext(ctx);
+
+    const THREE = ctx.THREE;
+    const fighters = new Set();
+    const npcByActor = new Map();
+    const modelPool = new Map();
+    const impactLive = [];
+    const impactFree = [];
+    const obstacleScratch = [];
+    const obstacleSeen = new Set();
+    const tempVector = new THREE.Vector3();
+    const noiseBuffers = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+    let impactGeometry = null;
+    let disposed = false;
+    let frameClock = 0;
+    let unsubscribeDied = null;
+
+    function gameApi(id) {
+      try {
+        if (options.api) return options.api(id);
+        if (typeof globalThis !== 'undefined' && globalThis.GameSystems && globalThis.GameSystems.api) {
+          return globalThis.GameSystems.api(id);
+        }
+      } catch (_) {
+        return null;
+      }
+      return null;
+    }
+
+    function takeModel(id, view) {
+      const key = id + ':' + (view ? 'view' : 'world');
+      const pool = modelPool.get(key);
+      let model = pool && pool.pop();
+      if (!model) model = createWeaponModel(ctx, id, view);
+      model.visible = true;
+      model.position.set(0, 0, 0);
+      model.rotation.set(0, 0, 0);
+      model.scale.setScalar(view
+        ? (id === 'knife' ? 1.08 : id === 'fists' ? 1 : .88)
+        : (id === 'knife' ? .95 : id === 'fists' ? 1 : .92));
+      ctx.scene.add(model);
+      return model;
+    }
+
+    function releaseModel(model) {
+      if (!model) return;
+      const id = model.userData.meleeWeaponId;
+      const view = !!model.userData.meleeView;
+      const key = id + ':' + (view ? 'view' : 'world');
+      if (model.parent) model.parent.remove(model);
+      model.visible = false;
+      let pool = modelPool.get(key);
+      if (!pool) {
+        pool = [];
+        modelPool.set(key, pool);
+      }
+      if (pool.length < MODEL_POOL_PER_KEY) pool.push(model);
+      else disposeModel(model);
+    }
+
+    function clearFighterModels(fighter) {
+      releaseModel(fighter.worldModel);
+      releaseModel(fighter.viewModel);
+      fighter.worldModel = null;
+      fighter.viewModel = null;
+      fighter.modelWeaponId = null;
+    }
+
+    function ensureFighterModels(fighter) {
+      if (!fighter.weaponId || !WEAPONS[fighter.weaponId]) {
+        clearFighterModels(fighter);
+        return;
+      }
+      if (fighter.modelWeaponId === fighter.weaponId) return;
+      clearFighterModels(fighter);
+      fighter.modelWeaponId = fighter.weaponId;
+      if (fighter.weaponId !== 'fists') fighter.worldModel = takeModel(fighter.weaponId, false);
+      if (fighter.isPlayer) fighter.viewModel = takeModel(fighter.weaponId, true);
+    }
+
+    function ensureImpactGeometry() {
+      if (!impactGeometry) {
+        impactGeometry = new THREE.OctahedronGeometry(1, 0);
+        impactGeometry.userData.shared = true;
+      }
+      return impactGeometry;
+    }
+
+    function takeImpact(color) {
+      let effect = impactFree.pop();
+      if (!effect) {
+        const material = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 1,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending
+        });
+        effect = {
+          mesh: new THREE.Mesh(ensureImpactGeometry(), material),
+          life: 0,
+          max: 0,
+          peak: 1,
+          spin: 0
+        };
+      }
+      effect.mesh.material.color.setHex(color);
+      effect.mesh.material.opacity = 1;
+      effect.mesh.visible = true;
+      if (!effect.mesh.parent) ctx.scene.add(effect.mesh);
+      impactLive.push(effect);
+      return effect;
+    }
+
+    function retireImpact(index) {
+      const effect = impactLive[index];
+      effect.mesh.visible = false;
+      impactLive.splice(index, 1);
+      impactFree.push(effect);
+    }
+
+    function spawnImpactFlash(x, y, z, color, strength) {
+      if (impactLive.length >= IMPACT_POOL_MAX) retireImpact(0);
+      const effect = takeImpact(color == null ? 0xffd23f : color);
+      const size = .28 + clamp(strength || .5, 0, 1.5) * .35;
+      effect.mesh.position.set(x, y, z);
+      effect.mesh.scale.setScalar(size);
+      effect.mesh.rotation.set(Math.random() * TAU, Math.random() * TAU, Math.random() * TAU);
+      effect.life = effect.max = .16 + clamp(strength || .5, 0, 1.5) * .06;
+      effect.peak = .92;
+      effect.spin = 8 + Math.random() * 8;
+    }
+
+    function updateImpactEffects(dt) {
+      for (let i = impactLive.length - 1; i >= 0; i--) {
+        const effect = impactLive[i];
+        effect.life -= dt;
+        if (effect.life <= 0) {
+          retireImpact(i);
+          continue;
+        }
+        const t = effect.life / effect.max;
+        effect.mesh.material.opacity = effect.peak * t;
+        const scale = effect.mesh.scale.x * (1 + dt * 5.5);
+        effect.mesh.scale.setScalar(scale);
+        effect.mesh.rotation.x += effect.spin * dt;
+        effect.mesh.rotation.y -= effect.spin * .73 * dt;
+      }
+    }
+
+    function clearEffects() {
+      while (impactLive.length) retireImpact(impactLive.length - 1);
+    }
+
+    function getAudioContext() {
+      if (!ctx.audio || ctx.audio.muted) return null;
+      if (!ctx.audio.ctx && ctx.audio.ensure) {
+        try { ctx.audio.ensure(); } catch (_) { /* optional gesture gate */ }
+      }
+      const ac = ctx.audio.ctx;
+      if (!ac) return null;
+      if (typeof document !== 'undefined' && document.hidden) return null;
+      return ac;
+    }
+
+    function getNoiseBuffer(ac) {
+      if (noiseBuffers && noiseBuffers.has(ac)) return noiseBuffers.get(ac);
+      const length = Math.max(1, Math.floor(ac.sampleRate * .18));
+      const buffer = ac.createBuffer(1, length, ac.sampleRate);
+      const data = buffer.getChannelData(0);
+      let low = 0;
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        low = low * .78 + white * .22;
+        data[i] = (white * .68 + low * .32) * (1 - i / length);
+      }
+      if (noiseBuffers) noiseBuffers.set(ac, buffer);
+      return buffer;
+    }
+
+    function connectAndDispose(nodes, delayMs) {
+      setTimeout(function () {
+        for (const node of nodes) {
+          try { node.disconnect(); } catch (_) { /* already disconnected */ }
+        }
+      }, delayMs);
+    }
+
+    function playSwingSfx(weaponId, scale) {
+      const ac = getAudioContext();
+      if (!ac) return;
+      const t = ac.currentTime;
+      const source = ac.createBufferSource();
+      const filter = ac.createBiquadFilter();
+      const gain = ac.createGain();
+      source.buffer = getNoiseBuffer(ac);
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(weaponId === 'knife' ? 1550 : 760, t);
+      filter.frequency.exponentialRampToValueAtTime(weaponId === 'knife' ? 520 : 240, t + .11);
+      filter.Q.value = weaponId === 'knife' ? 1.1 : .65;
+      gain.gain.setValueAtTime(.0001, t);
+      gain.gain.exponentialRampToValueAtTime((weaponId === 'fists' ? .035 : .065) * (scale || 1), t + .012);
+      gain.gain.exponentialRampToValueAtTime(.0001, t + .13);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(ac.destination);
+      source.start(t);
+      source.stop(t + .15);
+      connectAndDispose([source, filter, gain], 260);
+    }
+
+    function playImpactSfx(type, strength) {
+      const ac = getAudioContext();
+      if (!ac) return;
+      const s = clamp(strength || .7, .15, 1.4);
+      const t = ac.currentTime;
+      const master = ac.createGain();
+      const compressor = ac.createDynamicsCompressor();
+      master.gain.setValueAtTime(.0001, t);
+      master.gain.exponentialRampToValueAtTime(.18 * s, t + .003);
+      master.gain.exponentialRampToValueAtTime(.0001, t + .16);
+      compressor.threshold.value = -20;
+      compressor.knee.value = 9;
+      compressor.ratio.value = 7;
+      compressor.attack.value = .002;
+      compressor.release.value = .08;
+      master.connect(compressor);
+      compressor.connect(ac.destination);
+
+      const source = ac.createBufferSource();
+      const filter = ac.createBiquadFilter();
+      source.buffer = getNoiseBuffer(ac);
+      filter.type = type === 'metal' || type === 'blade' ? 'bandpass' : 'lowpass';
+      filter.frequency.value = type === 'metal' ? 1800 : type === 'blade' ? 2350 : type === 'wood' ? 720 : 520;
+      filter.Q.value = type === 'metal' ? 2.2 : type === 'blade' ? 2.8 : .75;
+      source.connect(filter);
+      filter.connect(master);
+      source.start(t);
+      source.stop(t + .17);
+
+      const body = ac.createOscillator();
+      const bodyGain = ac.createGain();
+      body.type = type === 'metal' ? 'square' : type === 'blade' ? 'sawtooth' : 'triangle';
+      const startHz = type === 'metal' ? 310 : type === 'blade' ? 520 : type === 'wood' ? 145 : 112;
+      const endHz = type === 'metal' ? 115 : type === 'blade' ? 180 : 48;
+      body.frequency.setValueAtTime(startHz, t);
+      body.frequency.exponentialRampToValueAtTime(endHz, t + .095);
+      bodyGain.gain.setValueAtTime(.14 * s, t);
+      bodyGain.gain.exponentialRampToValueAtTime(.0001, t + .12);
+      body.connect(bodyGain);
+      bodyGain.connect(master);
+      body.start(t);
+      body.stop(t + .13);
+
+      if (type === 'metal' || type === 'blade') {
+        const ring = ac.createOscillator();
+        const ringGain = ac.createGain();
+        ring.type = 'sine';
+        ring.frequency.setValueAtTime(type === 'blade' ? 1380 : 920, t);
+        ring.frequency.exponentialRampToValueAtTime(type === 'blade' ? 780 : 510, t + .12);
+        ringGain.gain.setValueAtTime(.045 * s, t);
+        ringGain.gain.exponentialRampToValueAtTime(.0001, t + .15);
+        ring.connect(ringGain);
+        ringGain.connect(master);
+        ring.start(t);
+        ring.stop(t + .16);
+        connectAndDispose([ring, ringGain], 300);
+      }
+
+      connectAndDispose([source, filter, body, bodyGain, master, compressor], 340);
+    }
+
+    function emitShake(amount, duration, meta) {
+      if (typeof options.screenShake === 'function') {
+        options.screenShake(amount, duration, meta);
+        return;
+      }
+      const ci = ctx.cameraInternals;
+      if (ci) {
+        const descriptor = Object.getOwnPropertyDescriptor(ci, 'crashShake');
+        if (descriptor && descriptor.set) {
+          try {
+            ci.crashShake = Math.max(Number(ci.crashShake) || 0, amount);
+            return;
+          } catch (_) { /* use event fallback */ }
+        }
+      }
+      if (ctx.events && ctx.events.emit) {
+        ctx.events.emit('camera:shake', { amount: amount, duration: duration, meta: meta });
+      }
+    }
+
+    function playerAdapter() {
+      return {
+        actor: ctx.player,
+        kind: 'player',
+        isPlayer: true,
+        position: function () {
+          return {
+            x: Number(ctx.player.x) || 0,
+            y: Number(ctx.player.y) || 0,
+            z: Number(ctx.player.z) || 0
+          };
+        },
+        heading: function () {
+          return Number(ctx.player.heading) || 0;
+        },
+        setHeading: function () {},
+        mesh: function () {
+          return ctx.player.footMesh || null;
+        },
+        alive: function () {
+          return !!ctx.player.onFoot && !ctx.player.dead && !ctx.player.dying;
+        },
+        radius: 1.1
+      };
+    }
+
+    function npcAdapter(actor, config) {
+      config = config || {};
+      const meshGetter = typeof config.mesh === 'function'
+        ? config.mesh
+        : function () { return config.mesh || actor.group || null; };
+      const headingGetter = typeof config.heading === 'function'
+        ? config.heading
+        : function () {
+          if (actor.face != null) return Number(actor.face) || 0;
+          return Number(actor.heading) || 0;
+        };
+      const setHeading = typeof config.setHeading === 'function'
+        ? config.setHeading
+        : function (h) {
+          if ('face' in actor || !('heading' in actor)) actor.face = h;
+          if ('heading' in actor) actor.heading = h;
+        };
+      return {
+        actor: actor,
+        kind: config.kind || actor._meleeKind || 'ped',
+        isPlayer: false,
+        position: function () {
+          const x = Number(actor.x != null ? actor.x : actor.position && actor.position.x) || 0;
+          const z = Number(actor.z != null ? actor.z : actor.position && actor.position.z) || 0;
+          const yValue = actor.y != null ? actor.y : actor.position && actor.position.y;
+          return {
+            x: x,
+            y: yValue == null ? ctx.world.groundHeightAt(x, z, 0) : Number(yValue) || 0,
+            z: z
+          };
+        },
+        heading: headingGetter,
+        setHeading: setHeading,
+        mesh: meshGetter,
+        alive: typeof config.alive === 'function'
+          ? config.alive
+          : function () {
+            return !actor.dead && !actor.down && !actor._bDead && !actor._removed && !actor._knocked;
+          },
+        radius: config.radius == null ? (config.kind === 'officer' ? 1.45 : 1.2) : config.radius
+      };
+    }
+
+    function makeFighter(adapter, config) {
+      config = config || {};
+      const fighter = {
+        adapter: adapter,
+        actor: adapter.actor,
+        kind: adapter.kind,
+        isPlayer: !!adapter.isPlayer,
+        weaponId: WEAPONS[config.weaponId] ? config.weaponId : 'fists',
+        modelWeaponId: null,
+        worldModel: null,
+        viewModel: null,
+        attackState: null,
+        attackHeld: false,
+        queued: false,
+        queuedOptions: null,
+        cooldown: 0,
+        comboWindow: 0,
+        comboIndex: 0,
+        knifeIndex: 0,
+        disposed: false,
+        speed: 0,
+        lastX: null,
+        lastZ: null,
+        presentationEnabled: config.presentation !== false,
+        faceTarget: config.faceTarget !== false,
+        config: config,
+        api: null
+      };
+
+      const api = {
+        actor: fighter.actor,
+        kind: fighter.kind,
+        isPlayer: fighter.isPlayer,
+        equip: function (id) {
+          return equipFighter(fighter, id);
+        },
+        equipped: function () {
+          return fighter.weaponId;
+        },
+        attack: function (attackOptions) {
+          return requestAttack(fighter, attackOptions || {});
+        },
+        setAttackHeld: function (held, attackOptions) {
+          fighter.attackHeld = !!held;
+          if (held && !fighter.attackState && fighter.cooldown <= 0) {
+            requestAttack(fighter, attackOptions || {});
+          }
+          return fighter.attackHeld;
+        },
+        cancel: function () {
+          cancelFighter(fighter);
+        },
+        snapshot: function () {
+          const state = fighter.attackState;
+          return {
+            kind: fighter.kind,
+            weaponId: fighter.weaponId,
+            attacking: !!state,
+            move: state ? state.move.id : null,
+            elapsed: state ? +state.elapsed.toFixed(3) : 0,
+            cooldown: +fighter.cooldown.toFixed(3),
+            comboWindow: +fighter.comboWindow.toFixed(3),
+            queued: !!fighter.queued,
+            speed: +fighter.speed.toFixed(2)
+          };
+        },
+        dispose: function () {
+          disposeFighter(fighter);
+        }
+      };
+      fighter.api = api;
+      fighters.add(fighter);
+      ensureFighterModels(fighter);
+      return fighter;
+    }
+
+    function equipFighter(fighter, id) {
+      if (!WEAPONS[id]) return false;
+      if (fighter.weaponId === id) return true;
+      fighter.weaponId = id;
+      fighter.comboWindow = 0;
+      fighter.comboIndex = 0;
+      fighter.knifeIndex = 0;
+      fighter.cooldown = 0;
+      cancelFighter(fighter);
+      ensureFighterModels(fighter);
+      if (fighter.actor && !fighter.isPlayer) {
+        fighter.actor._meleeWeaponId = id;
+        fighter.actor._armed = id !== 'fists';
+      }
+      return true;
+    }
+
+    function selectMove(fighter, weapon) {
+      if (weapon.id === 'fists') {
+        if (fighter.comboWindow <= 0) fighter.comboIndex = 0;
+        const move = weapon.moves[fighter.comboIndex % weapon.moves.length];
+        fighter.comboIndex = (fighter.comboIndex + 1) % weapon.moves.length;
+        return move;
+      }
+      if (weapon.id === 'knife') {
+        const move = weapon.moves[fighter.knifeIndex % weapon.moves.length];
+        fighter.knifeIndex = (fighter.knifeIndex + 1) % weapon.moves.length;
+        return move;
+      }
+      return weapon.moves[0];
+    }
+
+    function requestAttack(fighter, attackOptions) {
+      if (disposed || fighter.disposed || !fighter.adapter.alive()) return false;
+      const weaponId = attackOptions.weaponId || fighter.weaponId;
+      if (!WEAPONS[weaponId]) return false;
+      if (weaponId !== fighter.weaponId) equipFighter(fighter, weaponId);
+      if (fighter.attackState || fighter.cooldown > .035) {
+        fighter.queued = true;
+        fighter.queuedOptions = attackOptions;
+        return false;
+      }
+
+      const weapon = WEAPONS[fighter.weaponId];
+      const move = selectMove(fighter, weapon);
+      fighter.attackState = {
+        weapon: weapon,
+        move: move,
+        elapsed: 0,
+        hitDone: false,
+        whooshDone: false,
+        target: attackOptions.target,
+        targetKind: attackOptions.targetKind,
+        startedAt: frameClock
+      };
+      fighter.cooldown = Math.max(weapon.interval, move.duration);
+      fighter.queued = false;
+      fighter.queuedOptions = null;
+
+      if (fighter.actor && !fighter.isPlayer) {
+        fighter.actor._aiState = 'combat';
+        fighter.actor._aiTimer = Math.max(Number(fighter.actor._aiTimer) || 0, move.duration + .15);
+      }
+      if (ctx.events && ctx.events.emit) {
+        ctx.events.emit('melee:swing', {
+          attacker: fighter.actor,
+          attackerKind: fighter.kind,
+          weaponId: weapon.id,
+          move: move.id
+        });
+      }
+      return true;
+    }
+
+    function cancelFighter(fighter) {
+      fighter.attackState = null;
+      fighter.attackHeld = false;
+      fighter.queued = false;
+      fighter.queuedOptions = null;
+      if (fighter.actor && fighter.actor._meleePose) fighter.actor._meleePose = null;
+    }
+
+    function disposeFighter(fighter) {
+      if (!fighter || fighter.disposed) return;
+      fighter.disposed = true;
+      cancelFighter(fighter);
+      clearFighterModels(fighter);
+      fighters.delete(fighter);
+      if (!fighter.isPlayer && npcByActor.get(fighter.actor) === fighter) npcByActor.delete(fighter.actor);
+    }
+
+    function fighterPosition(fighter) {
+      return fighter.adapter.position();
+    }
+
+    function fighterHeading(fighter) {
+      return angleWrap(Number(fighter.adapter.heading()) || 0);
+    }
+
+    function updateMeasuredSpeed(fighter, dt) {
+      const p = fighterPosition(fighter);
+      if (fighter.lastX != null && dt > 0) {
+        const instant = Math.min(60, Math.hypot(p.x - fighter.lastX, p.z - fighter.lastZ) / dt);
+        fighter.speed += (instant - fighter.speed) * Math.min(1, dt * 8);
+      }
+      fighter.lastX = p.x;
+      fighter.lastZ = p.z;
+    }
+
+    function currentPose(fighter) {
+      const state = fighter.attackState;
+      const weapon = WEAPONS[fighter.weaponId];
+      const idle = {
+        active: false,
+        amount: 0,
+        armLX: null,
+        armRX: null,
+        armLZ: null,
+        armRZ: null,
+        weaponYaw: 0,
+        weaponPitch: 0,
+        weaponRoll: 0,
+        weaponForward: .52,
+        weaponSide: .38,
+        weaponHeight: 3.55,
+        fistLZ: .12,
+        fistRZ: .12,
+        fistLY: -.13,
+        fistRY: -.13
+      };
+
+      if (!state) {
+        if (weapon.id === 'bat') {
+          idle.armLX = -.56;
+          idle.armRX = -.38;
+          idle.armLZ = .13;
+          idle.armRZ = -.16;
+          idle.weaponYaw = .22;
+          idle.weaponPitch = .18;
+          idle.weaponRoll = -.12;
+          idle.weaponForward = .30;
+          idle.weaponSide = .52;
+          idle.weaponHeight = 3.45;
+        } else if (weapon.id === 'knife') {
+          idle.armRX = -.60;
+          idle.armRZ = -.16;
+          idle.weaponYaw = -.06;
+          idle.weaponPitch = .12;
+          idle.weaponRoll = -.10;
+          idle.weaponForward = .48;
+          idle.weaponSide = .50;
+          idle.weaponHeight = 3.48;
+        } else if (weapon.id === 'crowbar') {
+          idle.armLX = -.60;
+          idle.armRX = -.42;
+          idle.armLZ = .14;
+          idle.armRZ = -.17;
+          idle.weaponYaw = .26;
+          idle.weaponPitch = .22;
+          idle.weaponRoll = -.13;
+          idle.weaponForward = .28;
+          idle.weaponSide = .53;
+          idle.weaponHeight = 3.46;
+        }
+        return idle;
+      }
+
+      const move = state.move;
+      const t = clamp(state.elapsed, 0, move.duration);
+      const wind = smooth01(t / Math.max(.001, move.hitTime));
+      const followEnd = Math.min(move.duration, move.hitTime + (move.pose === 'knifeA' || move.pose === 'knifeB' ? .075 : .11));
+      const through = t <= move.hitTime
+        ? 0
+        : smooth01((t - move.hitTime) / Math.max(.001, followEnd - move.hitTime));
+      const recovery = t <= followEnd
+        ? 0
+        : smooth01((t - followEnd) / Math.max(.001, move.duration - followEnd));
+      const power = t <= followEnd ? 1 : 1 - recovery;
+
+      const pose = Object.assign({}, idle, { active: true, amount: power });
+
+      if (move.pose === 'jab') {
+        pose.armLX = lerp(-.46, -2.25, wind) + through * .18;
+        pose.armRX = -.94;
+        pose.armLZ = lerp(.10, .02, wind);
+        pose.armRZ = -.26;
+        pose.fistLZ = .12 + wind * .48 - recovery * .48;
+        pose.fistLY = -.13 + wind * .05;
+      } else if (move.pose === 'cross') {
+        pose.armLX = -1.02;
+        pose.armRX = lerp(-.42, -2.34, wind) + through * .20;
+        pose.armLZ = .25;
+        pose.armRZ = lerp(-.10, -.02, wind);
+        pose.fistRZ = .12 + wind * .55 - recovery * .55;
+        pose.fistRY = -.13 + wind * .05;
+        pose.weaponYaw = lerp(.30, -.14, wind);
+      } else if (move.pose === 'bat') {
+        const sweep = lerp(1.18, -1.12, easeOutCubic(clamp((t - move.hitTime * .35) / (move.hitTime * .9), 0, 1)));
+        pose.armLX = lerp(-.72, -1.54, wind) + recovery * .82;
+        pose.armRX = lerp(-.62, -1.68, wind) + recovery * 1.02;
+        pose.armLZ = lerp(.22, -.15, through);
+        pose.armRZ = lerp(-.20, .18, through);
+        pose.weaponYaw = sweep * power;
+        pose.weaponPitch = lerp(.62, -.26, through) * power;
+        pose.weaponRoll = lerp(-.78, .62, through) * power;
+        pose.weaponForward = .42 + through * .38;
+        pose.weaponSide = .48 - through * .32;
+        pose.weaponHeight = 3.72 - through * .22;
+      } else if (move.pose === 'knifeA') {
+        pose.armRX = lerp(-.52, -1.74, wind) + recovery * 1.10;
+        pose.armRZ = lerp(-.20, .20, through);
+        pose.armLX = -.88;
+        pose.armLZ = .20;
+        pose.weaponYaw = lerp(.72, -.70, through) * power;
+        pose.weaponPitch = lerp(.18, -.35, through) * power;
+        pose.weaponRoll = lerp(-.20, .46, through) * power;
+        pose.weaponForward = .48 + through * .48;
+        pose.weaponSide = .50 - through * .18;
+        pose.weaponHeight = 3.52;
+      } else if (move.pose === 'knifeB') {
+        pose.armRX = lerp(-.58, -1.92, wind) + recovery * 1.22;
+        pose.armRZ = lerp(-.12, -.30, through);
+        pose.armLX = -.92;
+        pose.armLZ = .22;
+        pose.weaponYaw = lerp(-.46, .58, through) * power;
+        pose.weaponPitch = lerp(.28, -.22, through) * power;
+        pose.weaponRoll = lerp(.24, -.35, through) * power;
+        pose.weaponForward = .46 + through * .52;
+        pose.weaponSide = .46 + through * .10;
+        pose.weaponHeight = 3.54;
+      } else if (move.pose === 'crowbar') {
+        const sweep = lerp(1.28, -1.20, easeOutCubic(clamp((t - move.hitTime * .38) / (move.hitTime * .86), 0, 1)));
+        pose.armLX = lerp(-.68, -1.58, wind) + recovery * .90;
+        pose.armRX = lerp(-.58, -1.74, wind) + recovery * 1.08;
+        pose.armLZ = lerp(.24, -.17, through);
+        pose.armRZ = lerp(-.22, .20, through);
+        pose.weaponYaw = sweep * power;
+        pose.weaponPitch = lerp(.70, -.30, through) * power;
+        pose.weaponRoll = lerp(-.86, .68, through) * power;
+        pose.weaponForward = .38 + through * .42;
+        pose.weaponSide = .52 - through * .34;
+        pose.weaponHeight = 3.76 - through * .24;
+      }
+      return pose;
+    }
+
+    function applyArmPose(fighter, pose) {
+      const mesh = fighter.adapter.mesh();
+      const userData = mesh && mesh.userData;
+      const armL = userData && userData.armL;
+      const armR = userData && userData.armR;
+
+      if (armL && pose.armLX != null) armL.rotation.x = pose.armLX;
+      if (armR && pose.armRX != null) armR.rotation.x = pose.armRX;
+      if (armL && pose.armLZ != null) armL.rotation.z = pose.armLZ;
+      if (armR && pose.armRZ != null) armR.rotation.z = pose.armRZ;
+
+      if (!mesh && fighter.actor) {
+        fighter.actor._meleePose = {
+          armLX: pose.armLX,
+          armRX: pose.armRX,
+          armLZ: pose.armLZ,
+          armRZ: pose.armRZ,
+          active: !!pose.active,
+          weaponId: fighter.weaponId
+        };
+      }
+    }
+
+    function firstPersonFor(fighter) {
+      if (!fighter.isPlayer) return false;
+      if (typeof options.isFirstPerson === 'function') return !!safeCall(options.isFirstPerson, false);
+      const combat = gameApi('combat');
+      return !!(combat && combat.isFirstPerson && combat.isFirstPerson());
+    }
+
+    function updateFistViewModel(model, pose) {
+      const left = model && model.userData.leftFist;
+      const right = model && model.userData.rightFist;
+      if (left) left.position.set(-.29, pose.fistLY, pose.fistLZ);
+      if (right) right.position.set(.29, pose.fistRY, pose.fistRZ);
+    }
+
+    function updateModelPresentation(fighter, pose) {
+      if (!fighter.presentationEnabled) return;
+      ensureFighterModels(fighter);
+
+      const alive = fighter.adapter.alive();
+      const firstPerson = firstPersonFor(fighter);
+      if (fighter.worldModel) fighter.worldModel.visible = alive && !firstPerson;
+      if (fighter.viewModel) fighter.viewModel.visible = alive && firstPerson;
+      if (!alive) return;
+
+      const p = fighterPosition(fighter);
+      const heading = fighterHeading(fighter);
+      const fx = Math.sin(heading);
+      const fz = Math.cos(heading);
+      const rx = Math.cos(heading);
+      const rz = -Math.sin(heading);
+      const ground = ctx.world.groundHeightAt(p.x, p.z, p.y);
+      const bob = fighter.speed > .4 ? Math.sin(frameClock * Math.min(14, 7 + fighter.speed * .25)) * .035 : 0;
+
+      if (fighter.worldModel) {
+        fighter.worldModel.position.set(
+          p.x + fx * pose.weaponForward + rx * pose.weaponSide,
+          ground + pose.weaponHeight + bob,
+          p.z + fz * pose.weaponForward + rz * pose.weaponSide
+        );
+        fighter.worldModel.rotation.order = 'YXZ';
+        fighter.worldModel.rotation.set(
+          pose.weaponPitch,
+          heading + pose.weaponYaw,
+          pose.weaponRoll
+        );
+      }
+
+      if (fighter.viewModel) {
+        const camera = ctx.camera;
+        const id = fighter.weaponId;
+        let ox = id === 'fists' ? 0 : id === 'knife' ? .38 : .43;
+        let oy = id === 'fists' ? -.36 : id === 'knife' ? -.47 : -.55;
+        let oz = id === 'fists' ? -.72 : id === 'knife' ? -.92 : -1.08;
+        if (pose.active) {
+          ox += Math.sin(pose.weaponYaw) * .16;
+          oy -= Math.abs(pose.weaponRoll) * .05;
+          oz -= Math.cos(pose.weaponYaw) * .10;
+        }
+        tempVector.set(ox, oy + bob, oz).applyQuaternion(camera.quaternion);
+        fighter.viewModel.position.copy(camera.position).add(tempVector);
+        fighter.viewModel.quaternion.copy(camera.quaternion);
+        fighter.viewModel.rotateY(Math.PI);
+        fighter.viewModel.rotateY(-pose.weaponYaw * .72);
+        fighter.viewModel.rotateX(-pose.weaponPitch * .65);
+        fighter.viewModel.rotateZ(pose.weaponRoll * .74);
+        if (id === 'fists') updateFistViewModel(fighter.viewModel, pose);
+      }
+    }
+
+    function normalizeTarget(entry) {
+      if (!entry) return null;
+      if (entry === 'player') {
+        return { target: ctx.player, kind: 'player', radius: 1.1 };
+      }
+      if (entry.actor && typeof entry.attack === 'function' && typeof entry.equipped === 'function') {
+        return {
+          target: entry.actor,
+          kind: entry.kind || 'ped',
+          radius: entry._fighterRadius || 1.2,
+          fighterApi: entry
+        };
+      }
+      if (entry.target) {
+        return {
+          target: entry.target,
+          kind: entry.kind || classifyTarget(entry.target),
+          radius: entry.radius == null ? targetRadius(entry.target, entry.kind) : entry.radius,
+          y: entry.y,
+          hitHeight: entry.hitHeight
+        };
+      }
+      return {
+        target: entry,
+        kind: classifyTarget(entry),
+        radius: targetRadius(entry),
+        y: undefined,
+        hitHeight: undefined
+      };
+    }
+
+    function classifyTarget(target) {
+      if (!target) return 'unknown';
+      if (target === ctx.player) return 'player';
+      if (target._meleeKind) return target._meleeKind;
+      if (ctx.actors.peds && ctx.actors.peds.indexOf(target) >= 0) return 'ped';
+      if (ctx.actors.traffic && ctx.actors.traffic.indexOf(target) >= 0) return 'traffic';
+      if (ctx.actors.cops && ctx.actors.cops.indexOf(target) >= 0) return 'copVehicle';
+      if (target.group && target.profile) return 'officer';
+      if (target.isVehicle || target._bHp != null) return 'traffic';
+      return 'ped';
+    }
+
+    function targetRadius(target, kind) {
+      kind = kind || classifyTarget(target);
+      if (kind === 'traffic' || kind === 'copVehicle' || kind === 'vehicle') return 3.5;
+      if (kind === 'officer') return 1.45;
+      if (kind === 'player') return 1.1;
+      return Number(target && target._meleeRadius) || 1.2;
+    }
+
+    function targetPosition(targetInfo) {
+      const target = targetInfo.target;
+      if (target === ctx.player) {
+        return {
+          x: Number(ctx.player.x) || 0,
+          y: Number(ctx.player.y) || 0,
+          z: Number(ctx.player.z) || 0
+        };
+      }
+      if (target && target.position && target.x == null) {
+        return {
+          x: Number(target.position.x) || 0,
+          y: Number(target.position.y) || 0,
+          z: Number(target.position.z) || 0
+        };
+      }
+      const x = Number(target && target.x) || 0;
+      const z = Number(target && target.z) || 0;
+      const explicitY = targetInfo.y == null ? target && target.y : targetInfo.y;
+      return {
+        x: x,
+        y: explicitY == null ? ctx.world.groundHeightAt(x, z, 0) : Number(explicitY) || 0,
+        z: z
+      };
+    }
+
+    function targetAlive(targetInfo) {
+      const target = targetInfo.target;
+      if (!target) return false;
+      if (target === ctx.player) return !!ctx.player.onFoot && !ctx.player.dead && !ctx.player.dying;
+      if (target.dead || target.down || target._bDead || target._removed || target._knocked) return false;
+      return true;
+    }
+
+    function gatherDefaultTargets(fighter) {
+      if (!fighter.isPlayer) return [ctx.player];
+      const list = [];
+      if (ctx.actors.peds) list.push.apply(list, ctx.actors.peds);
+      if (ctx.actors.traffic) {
+        for (const vehicle of ctx.actors.traffic) list.push({ target: vehicle, kind: 'traffic', radius: 3.5 });
+      }
+      if (ctx.actors.cops) {
+        for (const cop of ctx.actors.cops) list.push({ target: cop, kind: 'copVehicle', radius: 3.5 });
+      }
+      return list;
+    }
+
+    function candidateTargets(fighter, state) {
+      if (state.target) {
+        return [state.targetKind
+          ? { target: state.target, kind: state.targetKind }
+          : state.target];
+      }
+      let list;
+      if (typeof options.getTargets === 'function') {
+        list = options.getTargets(fighter.api, ctx);
+      } else {
+        list = gatherDefaultTargets(fighter);
+      }
+      list = Array.isArray(list) ? list.slice() : [];
+      if (typeof options.getExtraTargets === 'function') {
+        const extra = options.getExtraTargets(fighter.api, ctx);
+        if (Array.isArray(extra)) list.push.apply(list, extra);
+      }
+      return list;
+    }
+
+    function rayBox2D(ox, oz, dx, dz, box, range) {
+      const hx = (Number(box.w) || 1) * .5;
+      const hz = (Number(box.d) || 1) * .5;
+      let tMin = 0;
+      let tMax = range;
+
+      if (Math.abs(dx) < 1e-6) {
+        if (ox < box.x - hx || ox > box.x + hx) return -1;
+      } else {
+        let t1 = (box.x - hx - ox) / dx;
+        let t2 = (box.x + hx - ox) / dx;
+        if (t1 > t2) {
+          const swap = t1;
+          t1 = t2;
+          t2 = swap;
+        }
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+      }
+
+      if (Math.abs(dz) < 1e-6) {
+        if (oz < box.z - hz || oz > box.z + hz) return -1;
+      } else {
+        let t1 = (box.z - hz - oz) / dz;
+        let t2 = (box.z + hz - oz) / dz;
+        if (t1 > t2) {
+          const swap = t1;
+          t1 = t2;
+          t2 = swap;
+        }
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+      }
+      return tMin <= tMax ? tMin : -1;
+    }
+
+    function wallDistance(ox, oy, oz, dx, dz, range) {
+      obstacleScratch.length = 0;
+      obstacleSeen.clear();
+      const step = Math.max(.7, range / 5);
+      for (let t = 0; t <= range + .001; t += step) {
+        const near = ctx.world.obstaclesNear(ox + dx * t, oz + dz * t) || [];
+        for (let i = 0; i < near.length; i++) {
+          const box = near[i];
+          if (obstacleSeen.has(box)) continue;
+          obstacleSeen.add(box);
+          obstacleScratch.push(box);
+        }
+      }
+
+      let best = range;
+      for (let i = 0; i < obstacleScratch.length; i++) {
+        const box = obstacleScratch[i];
+        const baseY = box.baseY == null ? 0 : Number(box.baseY) || 0;
+        const height = box.h == null ? 40 : Number(box.h) || 40;
+        if (oy < baseY - 1.2 || oy > baseY + height + 1.2) continue;
+        const hit = rayBox2D(ox, oz, dx, dz, box, range);
+        if (hit >= 0 && hit < best) best = hit;
+      }
+      return best;
+    }
+
+    function findBestTarget(fighter, state) {
+      const attacker = fighterPosition(fighter);
+      const heading = fighterHeading(fighter);
+      const forwardX = Math.sin(heading);
+      const forwardZ = Math.cos(heading);
+      const move = state.move;
+      const range = move.range == null ? state.weapon.range : move.range;
+      const arc = (move.arcDegrees == null ? state.weapon.arcDegrees : move.arcDegrees) * Math.PI / 180;
+      const minDot = Math.cos(arc * .5);
+      const candidates = candidateTargets(fighter, state);
+      const seen = new Set();
+      let best = null;
+      let bestScore = Infinity;
+
+      for (let i = 0; i < candidates.length; i++) {
+        const info = normalizeTarget(candidates[i]);
+        if (!info || !info.target || info.target === fighter.actor || seen.has(info.target)) continue;
+        seen.add(info.target);
+        if (!targetAlive(info)) continue;
+
+        const target = targetPosition(info);
+        const dx = target.x - attacker.x;
+        const dz = target.z - attacker.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance < .08 || distance > range + info.radius) continue;
+        if (Math.abs((target.y || 0) - (attacker.y || 0)) > 5.5) continue;
+
+        const ux = dx / distance;
+        const uz = dz / distance;
+        const dot = forwardX * ux + forwardZ * uz;
+        if (dot < minDot) continue;
+
+        const wall = wallDistance(
+          attacker.x,
+          (attacker.y || 0) + 3.0,
+          attacker.z,
+          ux,
+          uz,
+          Math.max(.1, distance - info.radius * .5)
+        );
+        if (wall < distance - info.radius * .7) continue;
+
+        const anglePenalty = Math.abs(angleWrap(Math.atan2(ux, uz) - heading));
+        const score = Math.max(0, distance - info.radius) + anglePenalty * .72 - dot * .16;
+        if (score < bestScore) {
+          bestScore = score;
+          best = {
+            info: info,
+            position: target,
+            distance: distance,
+            ux: ux,
+            uz: uz,
+            dot: dot
+          };
+        }
+      }
+      return best;
+    }
+
+    function resolveDamage(fighter, hit, state) {
+      const target = hit.info.target;
+      const kind = hit.info.kind;
+      const move = state.move;
+      const weapon = state.weapon;
+      const amount = move.damage == null ? weapon.damage : move.damage;
+      const meta = {
+        kind: kind,
+        from: fighter.isPlayer ? 'player' : fighter.kind,
+        attacker: fighter.actor,
+        attackerKind: fighter.kind,
+        weaponId: weapon.id,
+        move: move.id,
+        fromX: fighterPosition(fighter).x,
+        fromZ: fighterPosition(fighter).z,
+        dirX: hit.ux,
+        dirZ: hit.uz,
+        x: hit.position.x - hit.ux * Math.min(.8, hit.info.radius * .45),
+        y: (hit.position.y || 0) + (hit.info.hitHeight == null ? (kind === 'traffic' || kind === 'copVehicle' ? 1.6 : 2.8) : hit.info.hitHeight),
+        z: hit.position.z - hit.uz * Math.min(.8, hit.info.radius * .45),
+        channel: 'melee',
+        critical: false
+      };
+
+      if (typeof options.damageTarget === 'function') {
+        return {
+          result: options.damageTarget(target, amount, meta),
+          amount: amount,
+          meta: meta
+        };
+      }
+
+      if (kind === 'player' || target === ctx.player) {
+        const hearts = amount * 3 / 100;
+        if (ctx.engine && ctx.engine.hurtPlayer) ctx.engine.hurtPlayer(hearts, meta);
+        else if (ctx.fx && ctx.fx.flash) ctx.fx.flash(.22);
+        return { result: { applied: amount, killed: false }, amount: amount, meta: meta };
+      }
+
+      if (kind === 'ped' || kind === 'officer' || kind === 'civilian' || kind === 'cop') {
+        const damageCharacter = options.damageCharacter ||
+          (function () {
+            const combat = gameApi('combat');
+            return combat && combat.damageCharacter
+              ? function (t, a, o) { return combat.damageCharacter(t, a, o); }
+              : null;
+          })();
+        if (damageCharacter) {
+          const result = damageCharacter(target, amount, Object.assign({}, meta, {
+            kind: kind === 'officer' || kind === 'cop' ? 'officer' : 'ped',
+            headshotMultiplier: 1
+          }));
+          return { result: result, amount: amount, meta: meta };
+        }
+        if (typeof target.takeDamage === 'function') {
+          return { result: target.takeDamage(amount, meta), amount: amount, meta: meta };
+        }
+      }
+
+      if (kind === 'traffic' || kind === 'copVehicle' || kind === 'vehicle') {
+        const vehicleDamage = weapon.vehicleDamage || Math.max(1, amount * .2);
+        const vdamage = gameApi('vdamage');
+        if (vdamage && vdamage.damage) {
+          const result = vdamage.damage(target, Object.assign({}, meta, {
+            amount: vehicleDamage,
+            channel: 'collision'
+          }));
+          return { result: result, amount: vehicleDamage, meta: meta };
+        }
+      }
+
+      if (typeof target.takeMeleeDamage === 'function') {
+        return { result: target.takeMeleeDamage(amount, meta), amount: amount, meta: meta };
+      }
+      if (typeof target.takeDamage === 'function') {
+        return { result: target.takeDamage(amount, meta), amount: amount, meta: meta };
+      }
+      return { result: null, amount: 0, meta: meta };
+    }
+
+    function tryKnockdown(fighter, hit, state, damage) {
+      const target = hit.info.target;
+      const kind = hit.info.kind;
+      const result = damage.result || {};
+      if (result.killed || result.dead) return false;
+      if (kind !== 'ped' && kind !== 'civilian') return false;
+
+      const moveChance = state.move.knockdownChance;
+      let chance = moveChance == null ? state.weapon.knockdownChance : moveChance;
+      chance += clamp((fighter.speed - 8) / 80, 0, .12);
+      if (Math.random() >= chance) return false;
+
+      const impact = clamp((damage.amount || state.weapon.damage) * .52 + fighter.speed * .38, 7, 24);
+      if (typeof options.knockdown === 'function') {
+        return options.knockdown(target, hit.ux, hit.uz, impact, damage.meta) !== false;
+      }
+      if (ctx.actors && ctx.actors.knockCivilian) {
+        return !!ctx.actors.knockCivilian(target, hit.ux, hit.uz, impact);
+      }
+      return false;
+    }
+
+    function reportCrime(fighter, hit, state) {
+      if (!fighter.isPlayer) return;
+      const kind = hit.info.kind;
+      const point = fighterPosition(fighter);
+      const crime = {
+        kind: kind === 'officer' || kind === 'copVehicle' ? 'assault_police' : 'assault',
+        target: hit.info.target,
+        targetKind: kind,
+        weaponId: state.weapon.id,
+        x: point.x,
+        z: point.z
+      };
+
+      if (typeof options.onCrime === 'function') {
+        options.onCrime(crime);
+        return;
+      }
+      if (ctx.actors && ctx.actors.alertPedestrians) {
+        ctx.actors.alertPedestrians(point.x, point.z, 82, 'assault', true);
+      }
+      if ((kind === 'officer' || kind === 'copVehicle') && ctx.engine && ctx.engine.addWanted) {
+        ctx.engine.addWanted(2);
+      }
+    }
+
+    function hitColor(kind, weaponId) {
+      if (kind === 'traffic' || kind === 'copVehicle' || kind === 'vehicle') return 0xffb347;
+      if (weaponId === 'crowbar' || weaponId === 'knife') return 0x20e3ff;
+      return 0xff3b6b;
+    }
+
+    function resolveStrike(fighter, state) {
+      const hit = findBestTarget(fighter, state);
+      if (!hit) {
+        resolveWallMiss(fighter, state);
+        if (typeof options.onMiss === 'function') {
+          options.onMiss({
+            attacker: fighter.actor,
+            attackerKind: fighter.kind,
+            weaponId: state.weapon.id,
+            move: state.move.id
+          });
+        }
+        if (ctx.events && ctx.events.emit) {
+          ctx.events.emit('melee:miss', {
+            attacker: fighter.actor,
+            attackerKind: fighter.kind,
+            weaponId: state.weapon.id,
+            move: state.move.id
+          });
+        }
+        return null;
+      }
+
+      const damage = resolveDamage(fighter, hit, state);
+      const knockedDown = tryKnockdown(fighter, hit, state, damage);
+      const color = hitColor(hit.info.kind, state.weapon.id);
+      const impactStrength = clamp((damage.amount || state.weapon.damage) / 38, .25, 1.25);
+      spawnImpactFlash(damage.meta.x, damage.meta.y, damage.meta.z, color, impactStrength);
+      playImpactSfx(state.weapon.impactType, .62 + impactStrength * .38);
+      emitShake(
+        .045 + impactStrength * .085,
+        .075 + impactStrength * .055,
+        {
+          attacker: fighter.actor,
+          target: hit.info.target,
+          weaponId: state.weapon.id,
+          kind: hit.info.kind
+        }
+      );
+
+      if (fighter.isPlayer && ctx.fx && ctx.fx.flash) ctx.fx.flash(.035 + impactStrength * .025);
+      reportCrime(fighter, hit, state);
+
+      const payload = {
+        attacker: fighter.actor,
+        attackerKind: fighter.kind,
+        target: hit.info.target,
+        kind: hit.info.kind,
+        weaponId: state.weapon.id,
+        move: state.move.id,
+        damage: damage.amount,
+        result: damage.result,
+        knockedDown: knockedDown,
+        x: damage.meta.x,
+        y: damage.meta.y,
+        z: damage.meta.z,
+        dirX: hit.ux,
+        dirZ: hit.uz
+      };
+      if (typeof options.onHit === 'function') options.onHit(payload);
+      if (ctx.events && ctx.events.emit) ctx.events.emit('melee:hit', payload);
+      return payload;
+    }
+
+    function resolveWallMiss(fighter, state) {
+      const p = fighterPosition(fighter);
+      const heading = fighterHeading(fighter);
+      const dx = Math.sin(heading);
+      const dz = Math.cos(heading);
+      const range = state.move.range == null ? state.weapon.range : state.move.range;
+      const wall = wallDistance(p.x, (p.y || 0) + 2.8, p.z, dx, dz, range);
+      if (wall >= range - .05) return false;
+
+      const x = p.x + dx * wall;
+      const y = (p.y || 0) + 2.8;
+      const z = p.z + dz * wall;
+      const strength = state.weapon.id === 'fists' ? .22 : .52;
+      spawnImpactFlash(x, y, z, state.weapon.id === 'crowbar' || state.weapon.id === 'knife' ? 0x20e3ff : 0xffd23f, strength);
+      playImpactSfx(state.weapon.id === 'fists' ? 'flesh' : state.weapon.impactType, strength);
+      emitShake(.025 + strength * .04, .06, {
+        attacker: fighter.actor,
+        weaponId: state.weapon.id,
+        kind: 'wall'
+      });
+
+      const destructibles = gameApi('destructibles');
+      if (destructibles && destructibles.breakAt && state.weapon.id !== 'fists') {
+        destructibles.breakAt(x, z, 1.8, state.weapon.vehicleDamage, {
+          kind: 'melee',
+          from: fighter.isPlayer ? 'player' : fighter.kind,
+          weaponId: state.weapon.id
+        });
+      }
+      return true;
+    }
+
+    function faceExplicitTarget(fighter, state) {
+      if (!fighter.faceTarget || !state || !state.target || fighter.isPlayer) return;
+      const info = normalizeTarget(state.targetKind
+        ? { target: state.target, kind: state.targetKind }
+        : state.target);
+      if (!info || !targetAlive(info)) return;
+      const from = fighterPosition(fighter);
+      const to = targetPosition(info);
+      const heading = Math.atan2(to.x - from.x, to.z - from.z);
+      fighter.adapter.setHeading(heading);
+    }
+
+    function updateFighter(fighter, dt) {
+      if (fighter.disposed) return;
+      updateMeasuredSpeed(fighter, dt);
+
+      if (fighter.isPlayer && typeof options.getPlayerWeapon === 'function') {
+        const wanted = safeCall(options.getPlayerWeapon, null);
+        if (!wanted || !WEAPONS[wanted]) {
+          cancelFighter(fighter);
+          if (fighter.worldModel) fighter.worldModel.visible = false;
+          if (fighter.viewModel) fighter.viewModel.visible = false;
+          return;
+        }
+        if (wanted !== fighter.weaponId) equipFighter(fighter, wanted);
+      }
+
+      if (!fighter.adapter.alive()) {
+        cancelFighter(fighter);
+        if (fighter.worldModel) fighter.worldModel.visible = false;
+        if (fighter.viewModel) fighter.viewModel.visible = false;
+        return;
+      }
+
+      fighter.cooldown = Math.max(0, fighter.cooldown - dt);
+      fighter.comboWindow = Math.max(0, fighter.comboWindow - dt);
+      const state = fighter.attackState;
+
+      if (state) {
+        faceExplicitTarget(fighter, state);
+        const previous = state.elapsed;
+        state.elapsed += dt;
+
+        if (!state.whooshDone && previous < state.move.whooshTime && state.elapsed >= state.move.whooshTime) {
+          state.whooshDone = true;
+          playSwingSfx(state.weapon.id, .85 + fighter.speed / 80);
+        }
+
+        if (!state.hitDone && previous < state.move.hitTime && state.elapsed >= state.move.hitTime) {
+          state.hitDone = true;
+          resolveStrike(fighter, state);
+        }
+
+        if (state.elapsed >= state.move.duration) {
+          if (state.weapon.id === 'fists') fighter.comboWindow = .56;
+          fighter.attackState = null;
+        }
+      }
+
+      const pose = currentPose(fighter);
+      applyArmPose(fighter, pose);
+      updateModelPresentation(fighter, pose);
+
+      if (!fighter.attackState && fighter.cooldown <= 0 && (fighter.queued || fighter.attackHeld)) {
+        const nextOptions = fighter.queuedOptions || {};
+        fighter.queued = false;
+        fighter.queuedOptions = null;
+        requestAttack(fighter, nextOptions);
+      }
+    }
+
+    function createNpc(actor, config) {
+      if (!actor) throw new Error('MeleeCombatModule.createNpc requires an actor');
+      const existing = npcByActor.get(actor);
+      if (existing && !existing.disposed) {
+        if (config && config.weaponId) equipFighter(existing, config.weaponId);
+        return existing.api;
+      }
+      const fighter = makeFighter(npcAdapter(actor, config), config || {});
+      npcByActor.set(actor, fighter);
+      actor._meleeWeaponId = fighter.weaponId;
+      actor._meleeKind = fighter.kind;
+      return fighter.api;
+    }
+
+    function getNpc(actor) {
+      const fighter = npcByActor.get(actor);
+      return fighter && !fighter.disposed ? fighter.api : null;
+    }
+
+    function removeNpc(actor) {
+      const fighter = npcByActor.get(actor);
+      if (!fighter) return false;
+      disposeFighter(fighter);
+      return true;
+    }
+
+    function cancelAll() {
+      for (const fighter of fighters) cancelFighter(fighter);
+    }
+
+    function update(dt) {
+      if (disposed) return;
+      dt = clamp(Number(dt) || 0, 0, .08);
+      frameClock += dt;
+      for (const fighter of Array.from(fighters)) updateFighter(fighter, dt);
+      updateImpactEffects(dt);
+    }
+
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (unsubscribeDied) unsubscribeDied();
+      for (const fighter of Array.from(fighters)) disposeFighter(fighter);
+      clearEffects();
+
+      for (const pool of modelPool.values()) {
+        while (pool.length) disposeModel(pool.pop());
+      }
+      modelPool.clear();
+
+      for (const effect of impactFree) {
+        if (effect.mesh.parent) effect.mesh.parent.remove(effect.mesh);
+        if (effect.mesh.material && effect.mesh.material.dispose) effect.mesh.material.dispose();
+      }
+      impactFree.length = 0;
+      if (impactGeometry && impactGeometry.dispose) impactGeometry.dispose();
+      impactGeometry = null;
+    }
+
+    const playerFighter = makeFighter(playerAdapter(), {
+      weaponId: safeCall(options.getPlayerWeapon, 'fists') || 'fists',
+      presentation: options.managePlayerModels !== false,
+      faceTarget: false
+    });
+
+    if (ctx.events && ctx.events.on) {
+      unsubscribeDied = ctx.events.on('player:died', function () {
+        cancelAll();
+        clearEffects();
+      });
+    }
+
+    return Object.freeze({
+      version: VERSION,
+      player: playerFighter.api,
+      weapons: WEAPONS,
+      metadata: metadataList(),
+      isWeapon: function (id) { return !!WEAPONS[id]; },
+      weapon: function (id) { return WEAPONS[id] || null; },
+      createNpc: createNpc,
+      getNpc: getNpc,
+      removeNpc: removeNpc,
+      update: update,
+      cancelAll: cancelAll,
+      clearEffects: clearEffects,
+      createWeaponModel: function (id, view) { return createWeaponModel(ctx, id, !!view); },
+      dispose: dispose,
+      debug: function () {
+        return {
+          version: VERSION,
+          disposed: disposed,
+          fighters: Array.from(fighters).map(function (fighter) {
+            return fighter.api.snapshot();
+          }),
+          npcCount: npcByActor.size,
+          impactLive: impactLive.length,
+          impactFree: impactFree.length,
+          modelPools: Array.from(modelPool.entries()).reduce(function (out, pair) {
+            out[pair[0]] = pair[1].length;
+            return out;
+          }, {})
+        };
+      }
+    });
+  }
+
+  function validateContext(ctx) {
+    const missing = [];
+    if (!ctx) missing.push('ctx');
+    if (!ctx || !ctx.THREE) missing.push('ctx.THREE');
+    if (!ctx || !ctx.scene) missing.push('ctx.scene');
+    if (!ctx || !ctx.camera) missing.push('ctx.camera');
+    if (!ctx || !ctx.player) missing.push('ctx.player');
+    if (!ctx || !ctx.world || typeof ctx.world.groundHeightAt !== 'function') missing.push('ctx.world.groundHeightAt');
+    if (!ctx || !ctx.world || typeof ctx.world.obstaclesNear !== 'function') missing.push('ctx.world.obstaclesNear');
+    if (!ctx || !ctx.actors) missing.push('ctx.actors');
+    if (missing.length) throw new Error('MeleeCombatModule missing dependencies: ' + missing.join(', '));
+  }
+
+  return Object.freeze({
+    version: VERSION,
+    ids: MELEE_IDS,
+    weapons: WEAPONS,
+    metadata: Object.freeze(metadataList()),
+    isWeapon: function (id) { return !!WEAPONS[id]; },
+    weapon: function (id) { return WEAPONS[id] || null; },
+    combatWeaponDefinitions: combatWeaponDefinitions,
+    shopLabels: shopLabels,
+    shopPrices: shopPrices,
+    createWeaponModel: createWeaponModel,
+    create: create
+  });
+});
+
+/*
+SELF-TEST AND ASSUMPTIONS
+
+Python-driven syntax check performed on the exact emitted source:
+  subprocess.run(["node","--check","/mnt/data/melee-module.js"], ...)
+Recorded result: PASS — exit code 0, no stdout, no stderr.
+
+Additional stubbed runtime smoke test: PASS. It instantiated the module, resolved
+a 10-damage jab and 15-damage cross, created an NPC bat fighter, emitted a hit,
+then disposed all scene-owned models and pooled effects.
+
+Assumptions that may not hold after integration:
+1. `ctx.player.y` remains the player's on-foot base height. NPCs without an
+   explicit y value fall back to `ctx.world.groundHeightAt`.
+2. Foot officers remain private to the current combat module, so they must be
+   supplied through `options.getTargets` as shown above.
+3. `ctx.cameraInternals.crashShake` is getter-only in v18. Real micro-shake needs
+   the documented `options.screenShake` hook or a listener for `camera:shake`.
+4. Instanced civilians do not expose individual arm meshes. This module writes
+   `actor._meleePose`; exact crowd-arm swings need the one-line renderer bridge
+   described in the integration guide.
+5. The existing combat inventory accepts multiple ids in slot 5. Direct key 5
+   still selects only one id unless the integrator adds same-slot cycling/wheel UI.
+6. The current combat damage API remains:
+     damageCharacter(target, amount, opts)
+   and the vehicle damage API remains:
+     damage(target, {amount, channel, from, ...})
+7. The current engine's `hurtPlayer` argument remains hearts, not raw HP. This
+   module converts raw melee damage with `damage * 3 / 100`.
+8. `ctx.audio.ensure()` is allowed to create/resume the shared AudioContext after
+   a user gesture. If the gesture gate is closed, attacks remain silent rather
+   than creating a second AudioContext.
+9. Weapon ownership, purchases, save migration, and the actual weapon wheel stay
+   engine-owned. This module supplies metadata and mechanics; it does not write
+   progression state.
+10. No blood assets or particles are created. Person hits use the same kind of
+    short additive neon impact mesh already used by the game's combat feedback.
+11. V18 defines only the $250 bat placeholder. Knife/crowbar prices and all new
+    melee balance values in this module are integration-ready tuning defaults,
+    not values extracted from an existing v18 implementation.
+*/
+</script>
+<script>
 /* ============================================================================
  * COMBAT — weapons, and the police who get out of the car
  * ----------------------------------------------------------------------------
@@ -21661,12 +23875,12 @@ body.shop-open #mobileControls{display:none!important}
     smg:Object.freeze({id:'smg',name:'NEON SMG',icon:'▰',slot:2,range:195,damage:13,headshot:2.15,vehicleDamage:8,interval:.075,auto:true,mag:30,starterReserve:60,reload:1.55,inCar:true,spread:.015,price:1600}),
     shotgun:Object.freeze({id:'shotgun',name:'PUMP SHOTGUN',icon:'═',slot:3,range:105,damage:10,headshot:1.72,vehicleDamage:5,interval:.72,auto:false,mag:6,starterReserve:18,reload:2.05,inCar:false,pellets:7,spread:.055,price:2400}),
     rifle:Object.freeze({id:'rifle',name:'CARBINE',icon:'🎯',slot:4,range:285,damage:20,headshot:2.35,vehicleDamage:13,interval:.105,auto:true,mag:30,starterReserve:60,reload:1.9,inCar:false,spread:.006,price:4200}),
-    melee:Object.freeze({id:'melee',name:'BAT',icon:'🏏',slot:5,range:3.7,damage:30,headshot:1,vehicleDamage:5,interval:.48,auto:false,mag:Infinity,starterReserve:Infinity,reload:0,inCar:false,spread:0,price:250})
+    ...MeleeCombatModule.combatWeaponDefinitions()
   });
   // One visible slot convention: pistol is the only free weapon; every other
   // entry is skipped by cycling until Ammu-Nation has sold it to the player.
-  const CYCLE=[null,'pistol','smg','shotgun','rifle','melee'];
-  const BY_SLOT={'1':'pistol','2':'smg','3':'shotgun','4':'rifle','5':'melee'};
+  const CYCLE=[null,'pistol','smg','shotgun','rifle','fists','bat','knife','crowbar'];
+  const BY_SLOT={'1':'pistol','2':'smg','3':'shotgun','4':'rifle','5':'fists'};
 
   const PED_HP=85;
   const OFFICER_HP=88;
@@ -21693,12 +23907,12 @@ body.shop-open #mobileControls{display:none!important}
   const OFFICER_WALK = 4.6;
   const FOOT_POLICE_TUNING=Object.freeze({tackleRadius:4.6,onFootArrestRadius:2.35,onFootArrestHoldSeconds:1.1});
 
-  let ctxRef = null;
+  let ctxRef=null,melee=null;
 
   /* ---- player weapon state ------------------------------------------------ */
   const inv={
-    equipped:'pistol',owned:{pistol:true,smg:false,shotgun:false,rifle:false,melee:false},armour:0,
-    ammo:{pistol:{mag:12,reserve:36},smg:{mag:0,reserve:0},shotgun:{mag:0,reserve:0},rifle:{mag:0,reserve:0},melee:{mag:Infinity,reserve:Infinity}},
+    equipped:'pistol',owned:{pistol:true,smg:false,shotgun:false,rifle:false,fists:true,bat:false,knife:false,crowbar:false},armour:0,
+    ammo:{pistol:{mag:12,reserve:36},smg:{mag:0,reserve:0},shotgun:{mag:0,reserve:0},rifle:{mag:0,reserve:0},fists:{mag:Infinity,reserve:Infinity},bat:{mag:Infinity,reserve:Infinity},knife:{mag:Infinity,reserve:Infinity},crowbar:{mag:Infinity,reserve:Infinity}},
     cd:0,reloadTimer:0,reloadTotal:0,fireHeld:false,taughtControls:false,warnedInCar:false,wantedCd:0,copWantedCd:0,armedFightWantedCd:0
   };
 
@@ -21744,14 +23958,10 @@ body.shop-open #mobileControls{display:none!important}
   function markCombatDirty(){combatDirty=true;combatSaveClock=Math.min(combatSaveClock,.35);}
   function persistCombat(force){if(!ctxRef)return;combatSaveClock-=force?999:0;if(!combatDirty&&!force)return;const save=GameSystems.api('save');if(save){save.set(SAVE_COMBAT,serialisableInventory());if(force&&save.flush)save.flush();}combatDirty=false;combatSaveClock=.55;}
   function loadCombat(){
-    const save=GameSystems.api('save'),data=save&&save.get(SAVE_COMBAT,null);inv.owned={pistol:true,smg:false,shotgun:false,rifle:false,melee:false};
-    inv.ammo={pistol:{mag:12,reserve:36},smg:{mag:0,reserve:0},shotgun:{mag:0,reserve:0},rifle:{mag:0,reserve:0},melee:{mag:Infinity,reserve:Infinity}};inv.armour=0;inv.equipped='pistol';
-    if(data&&typeof data==='object'){
-      for(const id of Object.keys(WEAPONS))if(id!=='pistol')inv.owned[id]=!!(data.owned&&data.owned[id]);
-      if(data.ammo)for(const id of Object.keys(WEAPONS)){const d=data.ammo[id],a=inv.ammo[id];if(!d||!a)continue;a.mag=d.mag==='inf'?Infinity:clamp(+d.mag||0,0,WEAPONS[id].mag===Infinity?99999:WEAPONS[id].mag);a.reserve=d.reserve==='inf'?Infinity:Math.max(0,+d.reserve||0);}
-      inv.armour=clamp(+data.armour||0,0,100);if(data.equipped&&inv.owned[data.equipped])inv.equipped=data.equipped;
-    }
-    inv.owned.pistol=true;if(inv.ammo.pistol.mag<=0&&inv.ammo.pistol.reserve<=0)inv.ammo.pistol.reserve=12;
+    const save=GameSystems.api('save'),data=save&&save.get(SAVE_COMBAT,null);inv.owned={pistol:true,smg:false,shotgun:false,rifle:false,fists:true,bat:false,knife:false,crowbar:false};
+    inv.ammo={pistol:{mag:12,reserve:36},smg:{mag:0,reserve:0},shotgun:{mag:0,reserve:0},rifle:{mag:0,reserve:0},fists:{mag:Infinity,reserve:Infinity},bat:{mag:Infinity,reserve:Infinity},knife:{mag:Infinity,reserve:Infinity},crowbar:{mag:Infinity,reserve:Infinity}};inv.armour=0;inv.equipped='pistol';
+    if(data&&typeof data==='object'){if(data.owned&&data.owned.melee)data.owned.bat=true;for(const id of Object.keys(WEAPONS))if(id!=='pistol'&&id!=='fists')inv.owned[id]=!!(data.owned&&data.owned[id]);if(data.ammo)for(const id of Object.keys(WEAPONS)){const d=data.ammo[id],a=inv.ammo[id];if(!d||!a)continue;a.mag=d.mag==='inf'?Infinity:clamp(+d.mag||0,0,WEAPONS[id].mag===Infinity?99999:WEAPONS[id].mag);a.reserve=d.reserve==='inf'?Infinity:Math.max(0,+d.reserve||0);}inv.armour=clamp(+data.armour||0,0,100);if(data.equipped==='melee')data.equipped='bat';if(data.equipped&&inv.owned[data.equipped])inv.equipped=data.equipped;}
+    inv.owned.pistol=true;inv.owned.fists=true;if(inv.ammo.pistol.mag<=0&&inv.ammo.pistol.reserve<=0)inv.ammo.pistol.reserve=12;
   }
   function roleForPed(p){
     if(p._combatRole)return p._combatRole;const district=p._district||'general',n=(++combatSerial*1103515245+12345)>>>0,u=(n%1000)/1000;let role='civilian';
@@ -21759,8 +23969,8 @@ body.shop-open #mobileControls{display:none!important}
     p._combatRole=role;return role;
   }
   function ensurePedCharacter(p){
-    if(p._charV16)return p._charV16;const role=roleForPed(p),base=CHARACTER_ROLES[role],variance=.92+((combatSerial*37)%17)/100,maxHp=Math.round(base.maxHp*variance),armed=base.armed||(role==='civilian'&&((combatSerial*13)%100)<4),weapon=role==='guard'?'rifle':role==='criminal'&&combatSerial%3===0?'smg':'pistol';
-    const c=p._charV16={role,maxHp,hp:maxHp,maxArmour:base.armour,armour:base.armour,armed,weapon,hostile:false,playerStarted:false,hitReact:0,shotCd:Math.random()*1.2,aim:0,dead:false};p._maxHp=maxHp;p._bHp=maxHp;p._armed=armed;p._weaponId=weapon;return c;
+    if(p._charV16)return p._charV16;const role=roleForPed(p),base=CHARACTER_ROLES[role],variance=.92+((combatSerial*37)%17)/100,maxHp=Math.round(base.maxHp*variance),armed=base.armed||(role==='civilian'&&((combatSerial*13)%100)<4),brawler=role==='civilian'&&!armed&&((combatSerial*29)%100)<10,weapon=role==='guard'?'rifle':role==='criminal'&&combatSerial%3===0?'smg':'pistol';
+    const c=p._charV16={role,maxHp,hp:maxHp,maxArmour:base.armour,armour:base.armour,armed,brawler,weapon,hostile:false,playerStarted:false,hitReact:0,shotCd:Math.random()*1.2,aim:0,dead:false};p._maxHp=maxHp;p._bHp=maxHp;p._armed=armed;p._brawler=brawler;p._weaponId=weapon;return c;
   }
   function ensureOfficerCharacter(of,ctx){
     if(of._charV16)return of._charV16;const level=ctx&&ctx.stats?ctx.stats.wanted:1,base=CHARACTER_ROLES.police,maxHp=base.maxHp+level*6,armour=base.armour+level*7;return of._charV16={role:'police',maxHp,hp:maxHp,maxArmour:armour,armour,armed:true,weapon:level>=4?'rifle':'pistol',hostile:true,hitReact:0,dead:false};
@@ -21768,9 +23978,9 @@ body.shop-open #mobileControls{display:none!important}
   function characterSnapshot(target,kind){const c=kind==='officer'?ensureOfficerCharacter(target,ctxRef):ensurePedCharacter(target);return{role:c.role,maxHp:c.maxHp,hp:c.hp,armour:c.armour,armed:c.armed,weapon:c.weapon,dead:!!c.dead};}
   function damageCharacter(ctx,target,amount,opts){
     opts=opts||{};const kind=opts.kind||'ped',isOfficer=kind==='officer',c=isOfficer?ensureOfficerCharacter(target,ctx):ensurePedCharacter(target);if(!c||c.dead||target.dead||target.down||target._removed)return{applied:0,killed:false,dead:true};
-    const critical=!!opts.critical,raw=Math.max(0,+amount||0)*(critical?(opts.headshotMultiplier||2.2):1),armourShare=critical?.28:.68,absorbed=Math.min(c.armour,raw*armourShare);c.armour-=absorbed;const healthDamage=Math.min(c.hp,raw-absorbed);c.hp-=healthDamage;c.hitReact=.24;c.lastHitFrom=opts.from||'unknown';target._bHp=c.hp;target._hitReact=.24;if(!isOfficer){target._aiState='hit';target._aiTimer=.22;target.face=Math.atan2((opts.fromX===undefined?ctx.player.x:opts.fromX)-target.x,(opts.fromZ===undefined?ctx.player.z:opts.fromZ)-target.z);if(c.armed&&opts.from==='player'){c.hostile=true;c.playerStarted=true;c.aim=0;c.shotCd=.35+Math.random()*.35;if(inv.armedFightWantedCd<=0){inv.armedFightWantedCd=8;const crime=GameSystems.api('crime'),ev=crime&&crime.report('armed-assault',{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:1,witnessRadius:120});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,120,'gunfire',ev);ctx.fx.toast('ARMED VICTIM RETURNING FIRE','#ff6b6b');}}}
+    const critical=!!opts.critical,raw=Math.max(0,+amount||0)*(critical?(opts.headshotMultiplier||2.2):1),armourShare=critical?.28:.68,absorbed=Math.min(c.armour,raw*armourShare);c.armour-=absorbed;const healthDamage=Math.min(c.hp,raw-absorbed);c.hp-=healthDamage;c.hitReact=.24;c.lastHitFrom=opts.from||'unknown';target._bHp=c.hp;target._hitReact=.24;if(!isOfficer){target._aiState='hit';target._aiTimer=.22;target.face=Math.atan2((opts.fromX===undefined?ctx.player.x:opts.fromX)-target.x,(opts.fromZ===undefined?ctx.player.z:opts.fromZ)-target.z);if((c.armed||c.brawler)&&opts.from==='player'){c.hostile=true;c.playerStarted=true;c.aim=0;c.shotCd=.35+Math.random()*.35;if(inv.armedFightWantedCd<=0){inv.armedFightWantedCd=8;const crime=GameSystems.api('crime'),ev=crime&&crime.report('armed-assault',{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:1,witnessRadius:120});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,120,'gunfire',ev);ctx.fx.toast('ARMED VICTIM RETURNING FIRE','#ff6b6b');}}}
     const applied=absorbed+healthDamage;if(opts.from==='player'&&opts.source==='weapon'&&applied>0)GameSystems.events.emit('damage:dealt',{amount:applied,x:opts.x===undefined?target.x:opts.x,y:opts.y===undefined?(target.y||0)+3:opts.y,z:opts.z===undefined?target.z:opts.z,kind:'person',critical,target,source:'weapon'});
-    let killed=false;if(c.hp<=0){c.dead=true;killed=true;if(isOfficer)downOfficer(ctx,target,opts.dirX||0,opts.dirZ||1);else ctx.actors.killCivilian(target,opts.dirX||0,opts.dirZ||1,critical?62:44);}
+    let killed=false;if(c.hp<=0){c.dead=true;killed=true;if(isOfficer)downOfficer(ctx,target,opts.dirX||0,opts.dirZ||1);else ctx.actors.killCivilian(target,opts.dirX||0,opts.dirZ||1,critical?62:44);if(opts.from==='player'&&opts.source==='weapon'){const crime=GameSystems.api('crime'),type=isOfficer?'kill-police':'kill-pedestrian',ev=crime&&crime.report(type,{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:isOfficer?3:2,priority:true,immediate:true,witnessRadius:180});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,180,'homicide',ev);}}
     return{applied,absorbed,healthDamage,killed,hp:c.hp,armour:c.armour,maxHp:c.maxHp};
   }
   function absorbPlayerDamage(amount,meta){const incoming=Math.max(0,+amount||0);if(incoming<=0)return 0;const share=meta&&meta.headshot?.35:.65,absorbed=Math.min(inv.armour,incoming*share);inv.armour-=absorbed;if(absorbed>0){markCombatDirty();paintWeaponUI();}return incoming-absorbed;}
@@ -21787,7 +23997,7 @@ body.shop-open #mobileControls{display:none!important}
   }
   function updateArmedPeds(dt,ctx){
     const admin=GameSystems.api('admin');if(admin&&admin.invisible&&admin.invisible()){for(const p of ctx.actors.peds){const c=p._charV16;if(c){c.hostile=false;c.playerStarted=false;}}return;}
-    const px=ctx.player.x,pz=ctx.player.z;for(const p of ctx.actors.peds){if(p.dead||p._knocked)continue;const c=ensurePedCharacter(p);c.hitReact=Math.max(0,c.hitReact-dt);if(!c.armed||!c.hostile||c.dead)continue;const d=dist2d(p.x,p.z,px,pz);if(d>175){c.hostile=false;p._aiState='flee';p._aiTimer=2;continue;}p._aiState=c.hitReact>0?'hit':'combat';p._aiTimer=999;p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.hitReact>0)continue;
+    const px=ctx.player.x,pz=ctx.player.z;for(const p of ctx.actors.peds){if(p.dead||p._knocked)continue;const c=ensurePedCharacter(p);c.hitReact=Math.max(0,c.hitReact-dt);if(c.brawler&&c.hostile&&!c.dead){const d=dist2d(p.x,p.z,px,pz),fighter=melee&&(melee.getNpc(p)||melee.createNpc(p,{kind:'ped',weaponId:'fists'}));p._aiState=c.hitReact>0?'hit':'combat';p._aiTimer=999;p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.hitReact<=0&&d>2.7){const ux=(px-p.x)/(d||1),uz=(pz-p.z)/(d||1);ctx.actors.moveCircleWorld(p,ux*4.2,uz*4.2,dt,1.05,ctx.actors.DYNAMIC_MASK.PED);}if(c.hitReact<=0&&d<3.5&&fighter)fighter.attack({target:ctx.player,targetKind:'player'});continue;}if(!c.armed||!c.hostile||c.dead)continue;const d=dist2d(p.x,p.z,px,pz);if(d>175){c.hostile=false;p._aiState='flee';p._aiTimer=2;continue;}p._aiState=c.hitReact>0?'hit':'combat';p._aiTimer=999;p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.hitReact>0)continue;
       if(d>52&&c.role==='criminal'){const ux=(px-p.x)/(d||1),uz=(pz-p.z)/(d||1),mv=ctx.actors.moveCircleWorld(p,ux*3.8,uz*3.8,dt,1.05,ctx.actors.DYNAMIC_MASK.PED);p.face=p.heading=Math.atan2(mv.vx||ux,mv.vz||uz);}
       c.shotCd-=dt;c.aim=Math.min(1,c.aim+dt*(c.role==='guard'?1.6:1.15));if(c.shotCd<=0&&c.aim>.55&&d<(CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian).range){armedNpcShoot(ctx,p,c,d);c.shotCd=(CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian).interval*(.82+Math.random()*.42);}
     }
@@ -21998,14 +24208,14 @@ body.shop-open #mobileControls{display:none!important}
       if (!inv.warnedInCar) { inv.warnedInCar = true; ctx.fx.toast('The ' + w.name + ' is no use from the driver\'s seat', '#9ab'); }
       return false;
     }
-    const ammo = inv.ammo[w.id];
-    if (ammo.mag <= 0) { startReload(ctx); return false; }
+    if(melee&&melee.isWeapon(w.id)){const fired=melee.player.attack({weaponId:w.id});if(fired){inv.cd=w.interval;paintWeaponUI();}return fired;}const ammo=inv.ammo[w.id];
+    if(ammo.mag<=0){if(ammo.reserve<=0&&inv.owned.fists){equip(ctx,'fists');const fired=melee&&melee.player.attack({weaponId:'fists'});if(fired)inv.cd=WEAPONS.fists.interval;paintWeaponUI();return!!fired;}startReload(ctx);return false;}
 
     inv.cd=w.interval;if(ammo.mag!==Infinity){ammo.mag--;markCombatDirty();}
-    if(w.id!=='melee'){const crime=GameSystems.api('crime'),ev=crime&&crime.report('gunfire',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:1,witnessRadius:w.id==='rifle'?205:w.id==='shotgun'?185:155});inv.lastCrimeEvent=ev&&ev.id||null;if(ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(ctx.player.x,ctx.player.z,w.id==='rifle'?205:w.id==='shotgun'?185:155,'gunfire',ev);provokeArmedPeds(ctx,ctx.player.x,ctx.player.z,w.id==='rifle'?125:105,true);}
+    if(!(melee&&melee.isWeapon(w.id))){const crime=GameSystems.api('crime'),ev=crime&&crime.report('gunfire',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:1,witnessRadius:w.id==='rifle'?205:w.id==='shotgun'?185:155});inv.lastCrimeEvent=ev&&ev.id||null;if(ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(ctx.player.x,ctx.player.z,w.id==='rifle'?205:w.id==='shotgun'?185:155,'gunfire',ev);provokeArmedPeds(ctx,ctx.player.x,ctx.player.z,w.id==='rifle'?125:105,true);}
     const count=w.pellets||1;let shot=null,anyHit=false,anyHead=false;for(let i=0;i<count;i++){const r=fireRay(ctx,w,i,count);if(!shot||r&&r.hit)shot=r||shot;if(r&&r.hit)anyHit=true;if(r&&r.headshot)anyHead=true;}
     recoilKick=Math.min(1.5,recoilKick+(w.id==='shotgun'?.95:w.id==='rifle'?.30:w.id==='smg'?.18:w.id==='pistol'?.48:.18));crosshairBloom=Math.min(1.5,crosshairBloom+(w.id==='shotgun'?.72:w.id==='rifle'?.22:w.id==='smg'?.15:w.id==='pistol'?.38:.14));
-    if(mouseLookActive()&&w.id!=='melee')aimPitch=clamp(aimPitch+(w.id==='shotgun'?.028:w.id==='rifle'?.006:w.id==='smg'?.004:.012)*(Math.random()*.45+.75),-.72,.72);
+    if(mouseLookActive()&&!(melee&&melee.isWeapon(w.id)))aimPitch=clamp(aimPitch+(w.id==='shotgun'?.028:w.id==='rifle'?.006:w.id==='smg'?.004:.012)*(Math.random()*.45+.75),-.72,.72);
     if(anyHit){hitMarkerTimer=.16;if(anyHead)headshotTimer=.24;}if(ammo.mag===0)startReload(ctx);paintWeaponUI();return true;
   }
 
@@ -22055,7 +24265,7 @@ body.shop-open #mobileControls{display:none!important}
     if(hit&&first)ctx.audio.beep(headshot?880:620,.025,'sine',headshot?.07:.035);if(first&&inv.wantedCd<=0&&witnessesNear(ctx,o.x,o.z)){inv.wantedCd=5;const crime=GameSystems.api('crime'),ev=crime&&crime.coerce(inv.lastCrimeEvent);if(ev){const cop=ctx.actors.cops.find(c=>dist2d(c.x,c.z,o.x,o.z)<WITNESS_R);crime.witness(ev,cop||{id:'police',x:o.x,z:o.z});}}return{hit:!!hit,headshot,kind};
   }
 
-  function raiseWantedForCop(ctx){if(inv.copWantedCd>0)return;inv.copWantedCd=3;const crime=GameSystems.api('crime');if(crime)crime.report('assault-police',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:2,immediate:true});}
+  function raiseWantedForCop(ctx){if(inv.copWantedCd>0)return;inv.copWantedCd=3;const crime=GameSystems.api('crime');if(crime)crime.report('assault-police',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:2,priority:true,immediate:true});}
 
   function startReload(ctx) {
     const w = inv.equipped && WEAPONS[inv.equipped];
@@ -22111,14 +24321,14 @@ body.shop-open #mobileControls{display:none!important}
       addPart(ctx,g,new T.BoxGeometry(.38,.34,1.35),0x2c3440,view,0,.03,.02);addPart(ctx,g,new T.CylinderGeometry(.10,.10,2.2,8),0x141922,view,0,.09,1.72,Math.PI/2);addPart(ctx,g,new T.BoxGeometry(.46,.34,.78),0x754529,view,0,-.04,1.03);addPart(ctx,g,new T.BoxGeometry(.40,.48,1.18),0x6a3d25,view,0,-.06,-1.05);addPart(ctx,g,new T.BoxGeometry(.06,.08,.16),0xffd23f,view,0,.30,.28);
     }else if(id==='rifle'){
       addPart(ctx,g,new T.BoxGeometry(.42,.42,1.38),0x2b3441,view,0,.04,.05);addPart(ctx,g,new T.BoxGeometry(.18,.18,1.35),0x151a22,view,0,.10,1.34);addPart(ctx,g,new T.CylinderGeometry(.10,.10,.58,8),0x10141b,view,0,.10,2.27,Math.PI/2);addPart(ctx,g,new T.BoxGeometry(.28,.72,.42),0x202733,view,0,-.43,.02,-.22);addPart(ctx,g,new T.BoxGeometry(.25,.23,.62),0x384455,view,0,.33,.02);addPart(ctx,g,new T.BoxGeometry(.10,.12,.34),0xff2d9b,view,0,.52,.02);addPart(ctx,g,new T.BoxGeometry(.30,.32,.74),0x1a202a,view,0,-.03,-.98);
-    }else{addPart(ctx,g,new T.CylinderGeometry(.16,.22,2.8,10),0x7b4a25,view,0,0,.85,Math.PI/2);addPart(ctx,g,new T.CylinderGeometry(.24,.24,.22,10),0x20242c,view,0,0,2.27,Math.PI/2);}
+    }else return g;
     const scale=view?(id==='rifle'?.82:id==='shotgun'?.84:id==='smg'?.92:id==='pistol'?1.05:.9):(id==='rifle'?.82:id==='shotgun'?.84:id==='smg'?.86:id==='pistol'?.82:.9);g.scale.setScalar(scale);g.userData.weaponId=id;return g;
   }
 
   function disposeWeapon(g){if(!g)return;if(g.parent)g.parent.remove(g);g.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});}
   function rebuildWeaponModels(ctx){
     disposeWeapon(worldWeapon);disposeWeapon(viewWeapon);worldWeapon=viewWeapon=null;
-    if(!inv.equipped)return;
+    if(!inv.equipped)return;if(melee&&melee.isWeapon(inv.equipped)){melee.player.equip(inv.equipped);return;}
     worldWeapon=createWeaponModel(ctx,inv.equipped,false);viewWeapon=createWeaponModel(ctx,inv.equipped,true);
     const hand=ctx.player.footMesh&&ctx.player.footMesh.userData.armR;if(hand)hand.add(worldWeapon);else ctx.scene.add(worldWeapon);ctx.scene.add(viewWeapon);worldWeapon.visible=false;viewWeapon.visible=false;equipKick=1;
   }
@@ -22532,7 +24742,7 @@ body.shop-open #mobileControls{display:none!important}
     requires: ['vdamage'],
 
     init(ctx) {
-      ctxRef=ctx;loadCombat();buildWeaponUI(ctx);installCombatInput(ctx);rebuildWeaponModels(ctx);
+      ctxRef=ctx;loadCombat();melee=MeleeCombatModule.create(ctx,{getPlayerWeapon:()=>MeleeCombatModule.isWeapon(inv.equipped)?inv.equipped:null,isFirstPerson:()=>firstPersonActive(),getTargets:()=>[...ctx.actors.peds,...officers.map(of=>({target:of,kind:'officer',radius:1.45})),...ctx.actors.traffic.map(v=>({target:v,kind:'traffic',radius:3.5})),...ctx.actors.cops.map(v=>({target:v,kind:'copVehicle',radius:3.5}))],damageCharacter:(target,amount,opts)=>damageCharacter(ctx,target,amount,Object.assign({source:'weapon'},opts)),knockdown:(target,dx,dz,impact)=>ctx.actors.knockCivilian(target,dx,dz,impact),screenShake:(amount,duration,meta)=>ctx.events.emit('camera:shake',{amount,duration,meta}),onHit:hit=>{hitMarkerTimer=.16;if(hit.kind==='officer'||hit.kind==='copVehicle')raiseWantedForCop(ctx);},onCrime:c=>{const crime=GameSystems.api('crime'),police=c.targetKind==='officer'||c.targetKind==='copVehicle',ev=crime&&crime.report(police?'assault-police':'melee-assault',{perpetrator:'player',actor:ctx.player,x:c.x,z:c.z,severity:police?2:1,priority:police,immediate:police,witnessRadius:115});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(c.x,c.z,115,'assault',ev);}});buildWeaponUI(ctx);installCombatInput(ctx);rebuildWeaponModels(ctx);
       paintWeaponUI();
       ctx.events.on('vehicle:stage', d => onVehicleStage(ctx, d));
       ctx.events.on('player:died', () => {
@@ -22546,7 +24756,7 @@ body.shop-open #mobileControls{display:none!important}
       window.addEventListener('blur', () => { inv.fireHeld = false;aimHeld=false; });
     },
 
-    worldChanged(w, ctx) { clearFootPolice(ctx); clearFx(); },
+    worldChanged(w,ctx){clearFootPolice(ctx);clearFx();if(melee){melee.cancelAll();melee.clearEffects();}},
 
     update(dt, ctx) {
       inv.cd = Math.max(0, inv.cd - dt);
@@ -22564,7 +24774,7 @@ body.shop-open #mobileControls{display:none!important}
       if (w && w.auto && inv.fireHeld) tryFire(ctx);
       if(!ctx.player.onFoot){aimHeld=false;if(forcedFirstPerson)setForcedFirstPerson(false);}
       updateFootPolice(dt,ctx);updateDetachedOfficers(dt,ctx);updateArmedPeds(dt,ctx);
-      updateFx(dt);updateWeaponPresentation(dt,ctx);
+      updateFx(dt);updateWeaponPresentation(dt,ctx);if(melee)melee.update(dt);
     },
 
     onKey(k, ev, ctx) {
@@ -22583,6 +24793,7 @@ body.shop-open #mobileControls{display:none!important}
     },
 
     api: {
+      melee(){return melee;},createMeleeNpc(actor,opts){return melee&&melee.createNpc(actor,opts);},removeMeleeNpc(actor){return melee&&melee.removeNpc(actor);},refillAll(){for(const id of Object.keys(WEAPONS)){const w=WEAPONS[id],a=inv.ammo[id];if(!a||!inv.owned[id])continue;if(w.mag===Infinity){a.mag=Infinity;a.reserve=Infinity;}else{a.mag=w.mag;a.reserve=999;}}inv.armour=100;markCombatDirty();paintWeaponUI();return true;},
       equip(id){return equip(ctxRef,id&&WEAPONS[id]?id:null);},
       equipped(){return inv.equipped;},
       catalogue(){return Object.values(WEAPONS).map(w=>({id:w.id,name:w.name,slot:w.slot,price:w.price,damage:w.damage,headshot:w.headshot,mag:w.mag===Infinity?'inf':w.mag,owned:!!inv.owned[w.id],ammo:inv.ammo[w.id]?{mag:inv.ammo[w.id].mag===Infinity?'inf':inv.ammo[w.id].mag,reserve:inv.ammo[w.id].reserve===Infinity?'inf':inv.ammo[w.id].reserve}:null}));},
@@ -22618,7 +24829,7 @@ body.shop-open #mobileControls{display:none!important}
       }
     },
 
-    dispose(){persistCombat(true);if(ctxRef)clearFootPolice(ctxRef);clearFx();removeCombatInput();disposeWeapon(worldWeapon);disposeWeapon(viewWeapon);worldWeapon=viewWeapon=null;}
+    dispose(){persistCombat(true);if(ctxRef)clearFootPolice(ctxRef);clearFx();removeCombatInput();disposeWeapon(worldWeapon);disposeWeapon(viewWeapon);worldWeapon=viewWeapon=null;if(melee){melee.dispose();melee=null;}}
   });
 })();
 
@@ -22630,11 +24841,11 @@ body.shop-open #mobileControls{display:none!important}
 (function(){
   'use strict';if(!window.GameSystems)return;
   const STORES=Object.freeze([
-    Object.freeze({id:'ammu-downtown',name:'AMMU-NATION · DOWNTOWN',x:-760,z:430,accent:0xff3b6b,stock:['ammo:pistol','weapon:melee','weapon:smg','ammo:smg','armour:25']}),
-    Object.freeze({id:'ammu-strip',name:'AMMU-NATION · THE STRIP',x:2260,z:330,accent:0xffd23f,stock:['ammo:pistol','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','armour:50']}),
-    Object.freeze({id:'ammu-crown',name:'AMMU-NATION · CROWN',x:-4680,z:-860,accent:0x20e3ff,stock:['weapon:smg','ammo:smg','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','armour:50']})
+    Object.freeze({id:'ammu-downtown',name:'AMMU-NATION · DOWNTOWN',x:-760,z:430,accent:0xff3b6b,stock:['ammo:pistol','weapon:bat','weapon:knife','weapon:smg','ammo:smg','armour:25']}),
+    Object.freeze({id:'ammu-strip',name:'AMMU-NATION · THE STRIP',x:2260,z:330,accent:0xffd23f,stock:['ammo:pistol','weapon:crowbar','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','armour:50']}),
+    Object.freeze({id:'ammu-crown',name:'AMMU-NATION · CROWN',x:-4680,z:-860,accent:0x20e3ff,stock:['weapon:knife','weapon:crowbar','weapon:smg','ammo:smg','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','armour:50']})
   ]);
-  const WEAPON_LABELS={pistol:'PISTOL',smg:'NEON SMG',shotgun:'PUMP SHOTGUN',rifle:'CARBINE',melee:'BAT'},WEAPON_PRICES={smg:1600,shotgun:2400,rifle:4200,melee:250},AMMO={pistol:{amount:24,cost:120},smg:{amount:60,cost:360},shotgun:{amount:18,cost:270},rifle:{amount:60,cost:540}};
+  const WEAPON_LABELS=Object.assign({pistol:'PISTOL',smg:'NEON SMG',shotgun:'PUMP SHOTGUN',rifle:'CARBINE'},MeleeCombatModule.shopLabels()),WEAPON_PRICES=Object.assign({smg:1600,shotgun:2400,rifle:4200},MeleeCombatModule.shopPrices()),AMMO={pistol:{amount:24,cost:120},smg:{amount:60,cost:360},shotgun:{amount:18,cost:270},rifle:{amount:60,cost:540}};
   let ctx=null,combat=null,prog=null,nav=null,interact=null,root=null,panel=null,open=null,selection=0,markers=[];
   const money=n=>'$'+Math.max(0,Math.round(n||0)).toLocaleString();
   function product(key){const[a,id]=key.split(':');if(a==='weapon')return{key,type:a,id,label:WEAPON_LABELS[id],cost:WEAPON_PRICES[id]||0};if(a==='ammo')return{key,type:a,id,label:(WEAPON_LABELS[id]||id)+' AMMO · +'+AMMO[id].amount,cost:AMMO[id].cost};const amount=+id||25;return{key,type:'armour',id:amount,label:'BODY ARMOUR · +'+amount,cost:amount>=50?650:350};}
@@ -24247,7 +26458,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
     const penetration=r-d+.02;a.x+=nX*penetration;a.z+=nZ*penetration;const vn=vel.x*nX+vel.z*nZ;if(vn<0){const impact=-vn;vel.x-=nX*vn*1.08;vel.z-=nZ*vn*1.08;return impact;}return 0;
   }
   function collideVehicles(a,vel){
-    if(a.y>8.5)return 0;let maxImpact=0;const groups=[ctx.actors.traffic,ctx.actors.cops];for(let gi=0;gi<groups.length;gi++)for(const t of groups[gi]){if(!t||t.dead||t._bDead)continue;const dx=t.x-a.x,dz=t.z-a.z,d=Math.hypot(dx,dz),rr=a.style.collisionRadius+3.6;if(d>=rr)continue;const nx=d>1e-4?dx/d:1,nz=d>1e-4?dz/d:0,tvx=t._physVx===undefined?(Math.sin(t.heading||0)*(t.spd||0)):t._physVx,tvz=t._physVz===undefined?(Math.cos(t.heading||0)*(t.spd||0)):t._physVz,closing=Math.max(0,(vel.x-tvx)*nx+(vel.z-tvz)*nz),energy=Math.max(10,closing);a.x-=nx*(rr-d+.1)*.48;a.z-=nz*(rr-d+.1)*.48;vel.x-=nx*closing*.32;vel.z-=nz*closing*.32;maxImpact=Math.max(maxImpact,energy);const crime=GameSystems.api('crime'),ev=crime&&crime.report('aircraft-vehicle-collision',{perpetrator:'player',actor:a,x:t.x,z:t.z,severity:energy>42?2:1,witnessRadius:150});if(energy>34&&ctx.actors.launchVehicle)ctx.actors.launchVehicle(t,gi===1,energy,nx,nz);else if(ctx.actors.shoveTraffic)ctx.actors.shoveTraffic(t,nx,nz,energy,{causedByPlayer:true,event:ev});if(ctx.actors.alertPedestrians&&ev)ctx.actors.alertPedestrians(t.x,t.z,150,'collision',ev);}return maxImpact;
+    if(a.y>8.5)return 0;let maxImpact=0;const groups=[ctx.actors.traffic,ctx.actors.cops];for(let gi=0;gi<groups.length;gi++)for(const t of groups[gi]){if(!t||t.dead||t._bDead)continue;const dx=t.x-a.x,dz=t.z-a.z,d=Math.hypot(dx,dz),rr=a.style.collisionRadius+3.6;if(d>=rr)continue;const nx=d>1e-4?dx/d:1,nz=d>1e-4?dz/d:0,tvx=t._physVx===undefined?(Math.sin(t.heading||0)*(t.spd||0)):t._physVx,tvz=t._physVz===undefined?(Math.cos(t.heading||0)*(t.spd||0)):t._physVz,closing=Math.max(0,(vel.x-tvx)*nx+(vel.z-tvz)*nz),energy=Math.max(10,closing);a.x-=nx*(rr-d+.1)*.48;a.z-=nz*(rr-d+.1)*.48;vel.x-=nx*closing*.32;vel.z-=nz*closing*.32;maxImpact=Math.max(maxImpact,energy);const crime=GameSystems.api('crime'),ev=crime&&crime.report('aircraft-vehicle-collision',{perpetrator:'player',actor:a,x:t.x,z:t.z,severity:energy>42?2:1,witnessRadius:150});if(energy*1.6>=250&&ctx.actors.launchVehicle)ctx.actors.launchVehicle(t,gi===1,energy,nx,nz);else if(ctx.actors.shoveTraffic)ctx.actors.shoveTraffic(t,nx,nz,energy,{causedByPlayer:true,event:ev});if(ctx.actors.alertPedestrians&&ev)ctx.actors.alertPedestrians(t.x,t.z,150,'collision',ev);}return maxImpact;
   }
   function moveHorizontal(a,vel,dt){
     const distance=Math.hypot(vel.x,vel.z)*dt,steps=clamp(Math.ceil(distance/PHYS.step),1,PHYS.maxSteps),sdt=dt/steps;let impact=0;
@@ -24302,6 +26513,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   function removeFire(a){if(a.fire&&a.fire.parent)a.fire.parent.remove(a.fire);a.fire=null;}
   function forceLeave(a,reason){if(current!==a)return;const c=ctx.world.clampToBounds(a.x,a.z),h=a.heading;ctx.player.leaveAircraft(a,c.x,c.z,h);current=null;document.body.classList.remove('aircraft-active');if(hud)hud.root.classList.remove('on');helpTimer=0;updateAudio(null);for(const l of ctx.lights.headlights)l.visible=true;if(reason)ctx.fx.toast(reason,'#ff6b6b');}
   function ignite(a){if(!a||a.dead||a.burning)return false;forceLeave(a,'Emergency ejection');a.burning=true;a.parked=false;a.solid=false;a.vx=a.vy=a.vz=a.speed=0;a.burnFuse=PHYS.burnMin+Math.random()*(PHYS.burnMax-PHYS.burnMin);createFire(a);GameSystems.events.emit('aircraft:burning',{id:a.spawn.id,aircraftId:a.style.id});return true;}
+  function crashPlane(a,reason){if(!a||a.dead)return false;const occupied=current===a;if(occupied)forceLeave(a,reason||'PLANE CRASH');removeFire(a);a.dead=true;a.burning=false;a.parked=false;a.solid=false;a.respawnTimer=PHYS.respawn;a.mesh.visible=false;ctx.fx.explosionAt(a.x,a.z,true,a.y);ctx.fx.flash(.75);ctx.audio.playExplosion&&ctx.audio.playExplosion();GameSystems.events.emit('aircraft:destroyed',{id:a.spawn.id,aircraftId:a.style.id,x:a.x,z:a.z,crash:true});if(occupied)ctx.engine.hurtPlayer(4,{source:'plane-crash'});return true;}
   function explode(a){removeFire(a);a.dead=true;a.burning=false;a.parked=false;a.solid=false;a.respawnTimer=PHYS.respawn;a.mesh.visible=false;ctx.fx.explosionAt(a.x,a.z,true,a.y);GameSystems.events.emit('aircraft:destroyed',{id:a.spawn.id,aircraftId:a.style.id,x:a.x,z:a.z});}
   function respawn(a,occupied){removeFire(a);a.dead=false;a.burning=false;a.hitPoints=100;a.parked=!occupied;a.solid=!occupied;a.x=a.homeX;a.z=a.homeZ;a.y=a.homeY;a.heading=a.homeHeading;a.pitch=a.roll=0;a.vx=a.vy=a.vz=a.speed=0;a.respawnTimer=0;a.grounded=true;a.agl=0;a.mesh.visible=true;sync(a,0);GameSystems.events.emit('aircraft:respawned',{id:a.spawn.id,aircraftId:a.style.id});}
   function damage(a,result){let source=Math.max(result.impact||0,(result.touchdown||0)*.6);if(result.water)source=Math.max(source,65);if(source<=PHYS.impactDamage&&result.touchdown<=PHYS.touchdownDamage)return;const amount=source*PHYS.damageScale;a.hitPoints-=amount;ctx.fx.flash(.16);ctx.audio.playCrash&&ctx.audio.playCrash();ctx.fx.toast('AIRFRAME '+Math.max(0,Math.round(a.hitPoints))+'%','#ff6b6b');GameSystems.events.emit('aircraft:damaged',{id:a.spawn.id,aircraftId:a.style.id,damage:amount,hp:a.hitPoints});if(a.hitPoints<=0){ctx.engine.hurtPlayer(1.65);ignite(a);}}
@@ -24310,7 +26522,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   function enterNearest(){if(current||!ctx.player.onFoot)return false;const a=nearest(ctx.player.x,ctx.player.z);if(!a)return false;if(!ctx.player.beginAircraft(a))return false;current=a;a.parked=false;a.solid=false;document.body.classList.add('aircraft-active');hud.root.classList.add('on');helpTimer=9;for(const l of ctx.lights.headlights)l.visible=false;ensureAudio();updateAudio(a);ctx.fx.toast((a.kind==='plane'?'✈️ ':'🚁 ')+'Entered '+a.style.name,'#20e3ff');ctx.fx.banner(a.style.name,a.kind==='plane'?'W/S THROTTLE · ARROWS PITCH · A/D ROLL · Q/E YAW':'W/S LIFT · ARROWS MOVE · A/D STRAFE · Q/E YAW','#20e3ff');GameSystems.events.emit('aircraft:entered',{id:a.spawn.id,aircraftId:a.style.id});return true;}
   function exitCurrent(){const a=current;if(!a)return false;const agl=aglOf(a),planar=Math.hypot(a.vx,a.vz);if(agl>PHYS.exitAgl||planar>PHYS.exitSpeed||Math.abs(a.vy)>4){ctx.fx.toast('Too fast or high to exit','#ff3b3b');return false;}a.parked=true;a.solid=true;a.vx=a.vy=a.vz=a.speed=0;a.pitch=a.roll=0;const sideX=Math.cos(a.heading),sideZ=-Math.sin(a.heading),p=ctx.world.clampToBounds(a.x+sideX*(a.style.collisionRadius+2.2),a.z+sideZ*(a.style.collisionRadius+2.2));ctx.player.leaveAircraft(a,p.x,p.z,a.heading);current=null;document.body.classList.remove('aircraft-active');hud.root.classList.remove('on');helpTimer=0;updateAudio(null);for(const l of ctx.lights.headlights)l.visible=true;ctx.fx.toast('On foot beside '+a.style.name,'#20e3ff');GameSystems.events.emit('aircraft:exited',{id:a.spawn.id,aircraftId:a.style.id});return true;}
   function aglOf(a){return Math.max(0,a.y-supportHeight(a,a.x,a.z));}
-  function updatePlayer(dt){if(!current||current.dead||current.burning)return null;const a=current,result=a.kind==='plane'?planePhysics(a,controlsFor(a),dt):heliPhysics(a,controlsFor(a),dt);damage(a,result);sync(a,dt);updateAudio(current);return result;}
+  function updatePlayer(dt){if(!current||current.dead||current.burning)return null;const a=current,result=a.kind==='plane'?planePhysics(a,controlsFor(a),dt):heliPhysics(a,controlsFor(a),dt),planar=Math.hypot(a.vx,a.vz),hardPlaneCrash=a.kind==='plane'&&((result.impact||0)>24||(result.touchdown||0)>24||(result.water&&planar>18));if(hardPlaneCrash){crashPlane(a,'CATASTROPHIC IMPACT');return result;}damage(a,result);sync(a,dt);updateAudio(current);return result;}
   function updateCamera(dt){if(!current)return false;const a=current,T=ctx.THREE,fx=Math.sin(a.heading),fz=Math.cos(a.heading),speed=Math.hypot(a.vx,a.vz),mode=ctx.engine.camMode;
     if(mode===1){tmpDesired.x=a.x+fx*(a.kind==='plane'?2.2:1.3);tmpDesired.y=a.y+(a.kind==='plane'?3.0:3.3);tmpDesired.z=a.z+fz*(a.kind==='plane'?2.2:1.3);tmpTarget.x=a.x+fx*70;tmpTarget.y=a.y+3+Math.sin(a.pitch)*35;tmpTarget.z=a.z+fz*70;}
     else{const back=a.kind==='plane'?34+speed*.10:27+speed*.08,side=mode===2?16:0,rightX=Math.cos(a.heading),rightZ=-Math.sin(a.heading);tmpDesired.x=a.x-fx*back+rightX*side;tmpDesired.y=a.y+(a.kind==='plane'?13:11)+Math.abs(a.roll)*4+(mode===3?18:0);tmpDesired.z=a.z-fz*back+rightZ*side;tmpTarget.x=a.x+fx*(18+speed*.08);tmpTarget.y=a.y+3+Math.sin(a.pitch)*10;tmpTarget.z=a.z+fz*(18+speed*.08);const gy=ctx.world.groundHeightAt(tmpDesired.x,tmpDesired.z,tmpDesired.y);if(tmpDesired.y<gy+4)tmpDesired.y=gy+4;}
@@ -24501,7 +26713,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   function robRegister(e,shot){
     if(!e||e.kind!=='shop'||!registerAvailable(e))return false;e.till.opened=true;e.till.mesh.rotation.z=.46;e.till.mesh.material.emissive.setHex(0xff3b3b);e.till.mesh.material.emissiveIntensity=1.5;
     const amount=Math.round(lerp(e.def.min,e.def.max,Math.random()));prog.credit(amount);robbedState[e.def.id]={at:now(),amount};save.set('progression.robbedShops',Object.assign({},robbedState));save.flush();
-    const crime=GameSystems.api('crime'),ev=crime&&crime.report('robbery',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:e.def.armed?2:1,witnessRadius:100});if(ev)ctx.actors.alertPedestrians(ctx.player.x,ctx.player.z,100,'robbery',ev);
+    const crime=GameSystems.api('crime'),ev=crime&&crime.report('robbery',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:e.def.armed?2:1,priority:true,witnessRadius:100});if(ev)ctx.actors.alertPedestrians(ctx.player.x,ctx.player.z,100,'robbery',ev);
     const p=e.shopkeeper;if(p&&!p.dead){if(e.def.armed){p._charV16.hostile=true;p._charV16.playerStarted=true;p._charV16.aim=0;p._charV16.shotCd=.15;p._aiState='combat';p._aiTimer=999;}else{p._aiState='handsup';p._aiTimer=8;}}
     spawnShelfBurst(e.till.x,e.stage.y+1.3,e.till.z,e.def.accent,8);ctx.fx.banner('REGISTER EMPTIED',money(amount)+(shot?' · SHOT OPEN':''),'#ffd23f');ctx.fx.toast('WITNESSED ROBBERY','#ff6b6b');ctx.audio.playCrash();holdT=0;hideHold();return true;
   }
@@ -24592,7 +26804,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 
 /* -------------------------- attributed crime ledger ----------------------- */
 (function(){
- let ctx=null,serial=0,neverWanted=false,lastHeatAt=-1e9;const live=new Map(),logs=[];const MAX_LOG=180,MAX_AGE=9000,ESCALATION_GAP=[0,10,13,16,19,22];
+ let ctx=null,serial=0,neverWanted=false,lastHeatAt=-1e9;const live=new Map(),logs=[],lastPriorityByType=new Map();const MAX_LOG=180,MAX_AGE=12000,ESCALATION_GAP=[0,4,6,8,10,12],PRIORITY_REPEAT_MS=Object.freeze({'ram-police':4200,'assault-police':2600,'kill-pedestrian':800,'kill-police':800,'vehicular-homicide':800,'robbery':4500});
  function actorLabel(a){if(!a)return'none';if(a===ctx.player||a===ctx.carState||a===ctx.player.carMesh)return'player';return a._debugId||a.id||a.vehicleKind||a._combatRole||a.kind||a.constructor&&a.constructor.name||'actor';}
  function resolve(o){
    if(o&&o.admin)return'admin';if(o&&o.perpetrator)return o.perpetrator;
@@ -24609,11 +26821,13 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
  function heat(n,event,witness,reason){
    n=Math.max(0,n|0);if(!n)return false;if(neverWanted){ctx.engine.setWanted(0);pushLog({report:true,crime:event&&event.type||'heat',eventId:event&&event.id,perpetrator:event&&event.perpetrator||'unknown',witness:actorLabel(witness),accepted:false,reason:'never-wanted'});return false;}
    if(!event||!(event.perpetrator==='player'||event.perpetrator==='player-caused')){pushLog({report:true,crime:event&&event.type||'legacy-heat',eventId:event&&event.id,perpetrator:event&&event.perpetrator||'missing',witness:actorLabel(witness),accepted:false,reason:reason||'not-player'});return false;}
-   const current=ctx.stats.wanted|0,now=performance.now(),gap=(ESCALATION_GAP[current]||0)*1000;if(current>0&&now-lastHeatAt<gap){pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:false,requestedHeat:n,reason:'escalation-cooldown',remaining:+((gap-(now-lastHeatAt))/1000).toFixed(1)});return false;}
-   const applied=Math.min(1,5-current);if(applied<=0)return false;ctx.engine.setWanted(current+applied);ctx.stats._decay=0;lastHeatAt=now;pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:true,heat:applied,requestedHeat:n,reason:reason||'reported'});return true;
+   const current=ctx.stats.wanted|0,now=performance.now(),priority=!!event.priority,gap=(ESCALATION_GAP[current]||0)*1000,repeat=PRIORITY_REPEAT_MS[event.type]||900;
+   if(priority){const last=lastPriorityByType.get(event.type)||-1e9;if(now-last<repeat){pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:false,requestedHeat:n,reason:'priority-repeat-guard'});return false;}lastPriorityByType.set(event.type,now);}
+   else if(current>0&&now-lastHeatAt<gap){pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:false,requestedHeat:n,reason:'escalation-cooldown',remaining:+((gap-(now-lastHeatAt))/1000).toFixed(1)});return false;}
+   const applied=Math.min(priority?n:1,5-current);if(applied<=0)return false;ctx.engine.setWanted(current+applied);ctx.stats._decay=0;lastHeatAt=now;pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:true,heat:applied,requestedHeat:n,priority,reason:reason||'reported'});return true;
  }
  function report(type,o){
-   o=o||{};const perpetrator=resolve(o),id='crime-'+(++serial),e={id,type:String(type||'crime'),perpetrator,actor:o.actor||null,causeEventId:o.causeEventId||null,x:Number.isFinite(o.x)?o.x:ctx.player.x,y:Number.isFinite(o.y)?o.y:ctx.player.y,z:Number.isFinite(o.z)?o.z:ctx.player.z,at:performance.now(),severity:clamp(o.severity==null?1:+o.severity,1,3),witnessRadius:clamp(o.witnessRadius==null?115:+o.witnessRadius,30,260),reported:false,source:o.source||''};
+   o=o||{};const perpetrator=resolve(o),id='crime-'+(++serial),e={id,type:String(type||'crime'),perpetrator,actor:o.actor||null,causeEventId:o.causeEventId||null,x:Number.isFinite(o.x)?o.x:ctx.player.x,y:Number.isFinite(o.y)?o.y:ctx.player.y,z:Number.isFinite(o.z)?o.z:ctx.player.z,at:performance.now(),severity:clamp(o.severity==null?1:+o.severity,1,3),witnessRadius:clamp(o.witnessRadius==null?115:+o.witnessRadius,30,260),reported:false,priority:!!o.priority,source:o.source||''};
    live.set(id,e);pushLog({crime:e.type,eventId:id,perpetrator,witness:'none',accepted:perpetrator==='player'||perpetrator==='player-caused',reason:'created'});GameSystems.events.emit('crime:event',e);
    if(o.immediate&&(perpetrator==='player'||perpetrator==='player-caused')){e.reported=heat(e.severity,e,o.witness||{id:'direct-police'},'immediate');}
    return e;
@@ -24667,7 +26881,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
  function spawnAir(id){mark();const api=GameSystems.api('aircraft');return !!(api&&api.spawnAt&&api.spawnAt(id,ctx.player.x+18,ctx.player.z+18,ctx.player.y,ctx.player.heading));}
  function ensure(){if(root)return;const st=document.createElement('style');st.textContent='#adminV20{position:absolute;inset:0;z-index:140;display:none;align-items:center;justify-content:center;background:rgba(1,3,8,.86);pointer-events:auto}#adminV20.on{display:flex}#adminV20 .box{width:min(920px,95vw);max-height:90vh;overflow:auto;padding:22px;border:1px solid #20e3ff;border-radius:16px;background:#09101a;color:#eaf5ff;font:800 12px/1.35 system-ui}#adminV20 h2{color:#20e3ff;letter-spacing:2px}#adminV20 h3{margin:17px 0 7px;color:#ffd23f}#adminV20 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:7px}#adminV20 button{min-height:39px;padding:6px;border:1px solid #40516b;border-radius:8px;background:#121c2b;color:#fff;font-weight:850;cursor:pointer}#adminV20 button.on{border-color:#3bff8b;color:#3bff8b}';document.head.appendChild(st);root=document.createElement('div');root.id='adminV20';ctx.dom.ui.appendChild(root);root.addEventListener('click',e=>{if(e.target===root)closePanel();});}
  function button(label,fn,on){const b=document.createElement('button');b.textContent=label;if(on)b.classList.add('on');b.onclick=fn;return b;}
- function render(){ensure();const box=document.createElement('section');box.className='box';box.innerHTML='<h2>ADMIN TEST PANEL</h2><p>Admin actions are marked in the save metadata and never create crime events.</p>';const toggles=document.createElement('div');toggles.className='grid';toggles.append(button('REMOVE WANTED STARS',()=>{ctx.engine.setWanted(0);mark();render();}),button('NEVER WANTED · '+(never?'ON':'OFF'),()=>{never=!never;GameSystems.api('crime').setNeverWanted(never);mark();render();},never),button('INVISIBLE · '+(invisible?'ON':'OFF'),()=>{invisible=!invisible;if(invisible)ctx.engine.setWanted(0);mark();render();},invisible),button('INVINCIBLE · '+(invincible?'ON':'OFF'),()=>{invincible=!invincible;mark();render();},invincible),button('GET $10,000',()=>{prog.credit(10000);mark();render();}),button('CLOSE',closePanel));box.appendChild(toggles);
+ function render(){ensure();const box=document.createElement('section');box.className='box';box.innerHTML='<h2>ADMIN TEST PANEL</h2><p>Admin actions are marked in the save metadata and never create crime events.</p>';const toggles=document.createElement('div');toggles.className='grid';toggles.append(button('REMOVE WANTED STARS',()=>{ctx.engine.setWanted(0);mark();render();}),button('NEVER WANTED · '+(never?'ON':'OFF'),()=>{never=!never;GameSystems.api('crime').setNeverWanted(never);mark();render();},never),button('INVISIBLE · '+(invisible?'ON':'OFF'),()=>{invisible=!invisible;if(invisible)ctx.engine.setWanted(0);mark();render();},invisible),button('INVINCIBLE · '+(invincible?'ON':'OFF'),()=>{invincible=!invincible;mark();render();},invincible),button('GET $10,000',()=>{prog.credit(10000);mark();render();}),button('REFILL GUNS + ARMOUR',()=>{const combat=GameSystems.api('combat');if(combat&&combat.refillAll){combat.refillAll();ctx.fx.toast('Weapons and armour refilled','#3bff8b');mark();}render();}),button('CLOSE',closePanel));box.appendChild(toggles);
    const addSection=(title,items)=>{const h=document.createElement('h3');h.textContent=title;box.appendChild(h);const g=document.createElement('div');g.className='grid';for(const it of items)g.appendChild(button(it[0],it[1]));box.appendChild(g);};
    const locations=PRESETS.map(p=>[p[0],()=>teleport(p[1],p[2],0)]),fac=GameSystems.api('facilities'),ints=GameSystems.api('interiors');if(fac)for(const f of fac.list())locations.push([f.name,()=>teleport(f.x,f.z,0)]);if(ints&&ints.debug)for(const e of ints.debug().entries)locations.push([e.id.toUpperCase(),()=>teleport(e.x,e.z,0)]);addSection('FAST TRAVEL',locations);
    const road=prog.catalogue().map(v=>[v.displayName,()=>spawnRoad(v.id)]);addSection('SPAWN ROAD VEHICLE',road);const air=GameSystems.api('aircraft');if(air)addSection('SPAWN AIRCRAFT',air.definitions().map(a=>[a.name,()=>spawnAir(a.id)]));
@@ -24710,8 +26924,8 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 (function(){let ctx=null,root=null,canvas=null,text=null,open=false,tick=0;
  function ensure(){if(root)return;const st=document.createElement('style');st.textContent='#carInfoV22{position:absolute;right:18px;top:126px;z-index:125;width:min(390px,calc(100vw - 36px));display:none;pointer-events:auto;border:1px solid rgba(32,227,255,.75);border-radius:15px;background:linear-gradient(145deg,rgba(5,11,20,.96),rgba(13,21,34,.94));box-shadow:0 16px 60px #000;color:#eaf5ff;padding:15px;font:800 11px/1.45 system-ui}#carInfoV22.on{display:block}#carInfoV22 h2{margin:0 0 7px;color:#20e3ff;letter-spacing:2px;font-size:17px}#carInfoV22 .meta{color:#9eb0c8;white-space:pre-line;margin-bottom:8px}#carInfoV22 canvas{width:100%;height:230px}#carInfoV22 button{float:right;background:none;border:1px solid #40516b;color:#fff;border-radius:7px;cursor:pointer}';document.head.appendChild(st);root=document.createElement('div');root.id='carInfoV22';root.innerHTML='<button>×</button><h2>CURRENT VEHICLE</h2><div class="meta"></div><canvas width="700" height="430"></canvas>';ctx.dom.ui.appendChild(root);root.querySelector('button').onclick=close;text=root.querySelector('.meta');canvas=root.querySelector('canvas');}
- function stats(){const t=ctx.vehicles.tune,p=GameSystems.api('progression'),up=GameSystems.api('vehicleUpgrades'),id=p&&p.currentVehicle?p.currentVehicle():ctx.vehicles.currentKey,entry=p&&p.entry?p.entry(id):null,preset=p&&p.presetOf?p.presetOf(id):'stock',protect=up&&up.state?up.state(id):{armor:0,proofTires:false},pt=ctx.engine.powertrain?ctx.engine.powertrain():{},ga=t.gearAccel||[0,60];return{id,name:entry&&entry.displayName||t.name,preset,installed:t.installedHardware||[],ecu:t.extremeTune?'EXTREME':t.hardwareStage?('STAGE '+t.hardwareStage):'FACTORY',protection:protect,values:[clamp(t.power/1.8,0,1),clamp((ga[1]||60)*t.power/180,0,1),clamp(t.topSpeed/1.05,0,1),clamp(t.steer/1.2,0,1),clamp(t.grip/1.9,0,1),clamp((t.grip*.55+t.steer*.35),0,1),clamp(((pt.engineCondition||100)+(pt.transmissionCondition||100))/200*.65+(protect.armor||0)*.12,0,1)]};}
- function draw(){if(!open||!canvas)return;const d=stats(),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height,cx=w*.5,cy=h*.51,R=Math.min(w,h)*.36,labels=['POWER','ACCEL','TOP SPEED','STEER','GRIP','BRAKING','DURABILITY'];g.clearRect(0,0,w,h);g.lineWidth=2;g.font='800 20px system-ui';g.textAlign='center';for(let ring=1;ring<=4;ring++){g.strokeStyle='rgba(70,102,135,'+(.12+ring*.035)+')';g.beginPath();for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length,x=cx+Math.cos(a)*R*ring/4,y=cy+Math.sin(a)*R*ring/4;i?g.lineTo(x,y):g.moveTo(x,y);}g.closePath();g.stroke();}g.fillStyle='rgba(32,227,255,.18)';g.strokeStyle='#20e3ff';g.shadowColor='#20e3ff';g.shadowBlur=12;g.beginPath();for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length,x=cx+Math.cos(a)*R*d.values[i],y=cy+Math.sin(a)*R*d.values[i];i?g.lineTo(x,y):g.moveTo(x,y);}g.closePath();g.fill();g.stroke();g.shadowBlur=0;for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length;g.fillStyle='#cdd9e9';g.fillText(labels[i],cx+Math.cos(a)*(R+42),cy+Math.sin(a)*(R+28)+7);}text.textContent=d.name+' · '+d.preset.toUpperCase()+'\nECU '+d.ecu+' · HARDWARE '+(d.installed.length?d.installed.join(', '):'STOCK')+'\nARMOUR TIER '+(d.protection.armor||0)+' · PUNCTURE-PROOF '+(d.protection.proofTires?'YES':'NO');}
+ function stats(){const t=ctx.vehicles.tune,p=GameSystems.api('progression'),up=GameSystems.api('vehicleUpgrades'),id=p&&p.currentVehicle?p.currentVehicle():ctx.vehicles.currentKey,entry=p&&p.entry?p.entry(id):null,preset=p&&p.presetOf?p.presetOf(id):'stock',protect=up&&up.state?up.state(id):{armor:0,proofTires:false},pt=ctx.engine.powertrain?ctx.engine.powertrain():{},ga=t.gearAccel||[0,60];return{id,name:entry&&entry.displayName||t.name,preset,installed:t.installedHardware||[],ecu:t.extremeTune?'EXTREME':t.hardwareStage?('STAGE '+t.hardwareStage):'FACTORY',protection:protect,nitrousInstalled:!!pt.nitrousInstalled,forcedInduction:pt.forcedInduction||'na',values:[clamp(t.power/1.8,0,1),clamp((ga[1]||60)*t.power/180,0,1),clamp(t.topSpeed/1.05,0,1),clamp(t.steer/1.2,0,1),clamp(t.grip/1.9,0,1),clamp((t.grip*.55+t.steer*.35),0,1),clamp(((pt.engineCondition||100)+(pt.transmissionCondition||100))/200*.65+(protect.armor||0)*.12,0,1)]};}
+ function draw(){if(!open||!canvas)return;const d=stats(),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height,cx=w*.5,cy=h*.51,R=Math.min(w,h)*.36,labels=['POWER','ACCEL','TOP SPEED','STEER','GRIP','BRAKING','DURABILITY'];g.clearRect(0,0,w,h);g.lineWidth=2;g.font='800 20px system-ui';g.textAlign='center';for(let ring=1;ring<=4;ring++){g.strokeStyle='rgba(70,102,135,'+(.12+ring*.035)+')';g.beginPath();for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length,x=cx+Math.cos(a)*R*ring/4,y=cy+Math.sin(a)*R*ring/4;i?g.lineTo(x,y):g.moveTo(x,y);}g.closePath();g.stroke();}g.fillStyle='rgba(32,227,255,.18)';g.strokeStyle='#20e3ff';g.shadowColor='#20e3ff';g.shadowBlur=12;g.beginPath();for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length,x=cx+Math.cos(a)*R*d.values[i],y=cy+Math.sin(a)*R*d.values[i];i?g.lineTo(x,y):g.moveTo(x,y);}g.closePath();g.fill();g.stroke();g.shadowBlur=0;for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length;g.fillStyle='#cdd9e9';g.fillText(labels[i],cx+Math.cos(a)*(R+42),cy+Math.sin(a)*(R+28)+7);}text.textContent=d.name+' · '+d.preset.toUpperCase()+'\nECU '+d.ecu+' · HARDWARE '+(d.installed.length?d.installed.join(', '):'STOCK')+'\nNITRO '+(d.nitrousInstalled?'INSTALLED':'NOT INSTALLED')+' · TURBO '+(d.forcedInduction==='turbo'?'INSTALLED':d.forcedInduction==='supercharger'?'SUPERCHARGED':'NATURALLY ASPIRATED')+'\nARMOUR TIER '+(d.protection.armor||0)+' · PUNCTURE-PROOF '+(d.protection.proofTires?'YES':'NO');}
  function openPanel(){if(ctx.player.onFoot||ctx.player.inAircraft)return false;ensure();open=true;root.classList.add('on');draw();return true;}function close(){open=false;if(root)root.classList.remove('on');}
  GameSystems.register({id:'carInfo',order:108,alwaysUpdate:true,init(c){ctx=c;ensure();},onKey(k){if(k==='i'&&!ctx.player.onFoot&&!ctx.player.inAircraft){open?close():openPanel();return true;}if(open&&k==='escape'){close();return true;}return open;},update(dt){if(open&&(ctx.player.onFoot||ctx.player.inAircraft)){close();return;}if(open&&(tick-=dt)<=0){tick=.2;draw();}},api:{open:openPanel,close,toggle(){return open?close():openPanel();},get open(){return open;}}});
 })();
@@ -25411,7 +27625,7 @@ window.NEON_HANDEDNESS=Object.freeze({
   if(!(free.heading>yaw))errors.push('free A did not turn toward screen-left');
   if(!(H.mouseYawDelta(12)<0))errors.push('mouse-right did not produce look-right yaw');
   if(!(H.aircraftYaw(true,false)>0&&H.aircraftYaw(false,true)<0))errors.push('helicopter Q/E yaw sign invalid');
-  const ok=errors.length===0;window.__HANDEDNESS_SELF_TEST__=Object.freeze({ok,details:errors.slice()});
+  const ok=errors.length===0;window.__HANDEDNESS_SELF_TEST__=Object.freeze({ok,details:errors.slice()});window.__handednessSelfTest=ok;
   if(!ok)console.error('HANDEDNESS SELF-TEST FAILED: '+errors.join('; '));else console.info('[handedness] self-test passed');
 })();
 
@@ -26130,7 +28344,7 @@ function updatePedCrowd(px,pz){
     let armL=-sw*.8,armR=sw*.8,armLz=.10,armRz=-.10,legL=sw,legR=-sw,crouch=1,rootDrop=0,phone=false;
     if(state==='phone'||state==='call'){armR=-1.72;armRz=-.24;armL=-.15;lean=.02;phone=true;}
     else if(state==='shop'){armL=-.38;armR=-.38;lean=.12;}
-    else if(state==='combat'){const longGun=p._weaponId==='rifle'||p._weaponId==='smg';armR=longGun?-1.42:-1.52;armL=longGun?-1.12:-.42;armLz=longGun?.27:.06;armRz=longGun?-.12:-.08;legL=legR=0;lean=.08;}
+    else if(state==='combat'){const mp=p._meleePose;if(mp){if(mp.armLX!=null)armL=mp.armLX;if(mp.armRX!=null)armR=mp.armRX;if(mp.armLZ!=null)armLz=mp.armLZ;if(mp.armRZ!=null)armRz=mp.armRZ;legL=legR=0;lean=.08;}else{const longGun=p._weaponId==='rifle'||p._weaponId==='smg';armR=longGun?-1.42:-1.52;armL=longGun?-1.12:-.42;armLz=longGun?.27:.06;armRz=longGun?-.12:-.08;legL=legR=0;lean=.08;}}
     else if(state==='hit'){armL=-.65;armR=-1.05;armLz=.32;armRz=-.28;legL=legR=0;lean=.28;}
     else if(state==='handsup'){armL=-2.55;armR=-2.55;armLz=.42;armRz=-.42;legL=legR=0;lean=-.10;}
     else if(state==='cower'){armL=-2.05;armR=-2.05;armLz=.25;armRz=-.25;legL=legR=0;crouch=.72;rootDrop=.18;lean=.28;}
@@ -26258,6 +28472,7 @@ function updatePedestrianDirector(dt){
   if(mounted){pedSidewalkCrimeCd=2.3;alertPedestrians(playerX,playerZ,150,'traffic-danger',null);}
 }
 function updateGenericTraffic(t,dt){
+  if(t._driverExited){t.spd=0;t._physVx=lerp(t._physVx||0,0,clamp(dt*8,0,1));t._physVz=lerp(t._physVz||0,0,clamp(dt*8,0,1));t.y=WORLD_groundHeightAt(t.x,t.z,t.y);if(t.mesh){t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.set(0,t.heading,0);}return;}if(t._driverExitT>0){t._driverExitT-=dt;t.cruise=Math.min(t.cruise,8);if(t._driverExitT<=0&&t.spd<4.5){trafficDriverExit(t,t._driverExitReason);return;}if(t._driverExitT<=0)t._driverExitT=.18;}
   if(TRAFFIC_airportExcluded(t.x,t.z)){t._panicT=Math.max(t._panicT||0,2);t.heading=angleDiff(Math.atan2(t.x<3000?-1:1,1),0);t.cruise=Math.max(t.cruise,34);t._avoidBias=(t.x<3000?-1:1)*.7;}
   let controlCap=Number.isFinite(t._trafficCap)?t._trafficCap:Infinity;const panic=t._panicT>0;if(panic){t._panicT=Math.max(0,t._panicT-dt);t.cruise=Math.max(t.cruise,48);t._avoidBias=Math.sin(performance.now()*.008+(t.x+t.z)*.01)*.72;if(Math.random()<dt*.7)beep(90+Math.random()*35,.08,'square',.035);controlCap=Infinity;}
   if(t._reverseT>0){t._reverseT=Math.max(0,t._reverseT-dt);controlCap=8;t.spd=Math.max(t.spd,5.5);if(t._reverseT<=0)t._blockPhase='reroute';}
@@ -26271,7 +28486,7 @@ function updateGenericTraffic(t,dt){
   if(ahead||detourTarget){
     let tx,tz,roadHeading=t.heading,width=36;
     if(detourTarget){tx=detourTarget.x;tz=detourTarget.z;roadHeading=Math.atan2(tx-t.x,tz-t.z);}
-    else{const lane=ahead.width*.24,nx=Math.cos(ahead.heading),nz=-Math.sin(ahead.heading);if(t.laneSign===undefined)t.laneSign=Math.sign((t.x-ahead.x)*nx+(t.z-ahead.z)*nz)||1;if(t._homeLaneSign===undefined)t._homeLaneSign=Math.sign(t.laneSign)||1;const bias=t._avoidBias||0;tx=ahead.x+nx*lane*(t.laneSign+bias);tz=ahead.z+nz*lane*(t.laneSign+bias);roadHeading=ahead.heading;width=ahead.width;}
+    else{const lane=ahead.width*.24,nx=Math.cos(ahead.heading),nz=-Math.sin(ahead.heading),dot=Math.cos(t.heading-ahead.heading);if(dot>.28)t._roadTravelSign=1;else if(dot<-.28)t._roadTravelSign=-1;const rightSign=t._roadTravelSign||1;if(t.laneSign===undefined)t.laneSign=rightSign;if(t._homeLaneSign===undefined)t._homeLaneSign=rightSign;if(!t._ot&&!t._pullOut&&!t._detour&&t._reverseT<=0){t._homeLaneSign=rightSign;t.laneSign=lerp(t.laneSign,rightSign,clamp(dt*3.2,0,1));}const bias=t._avoidBias||0;tx=ahead.x+nx*lane*(t.laneSign+bias);tz=ahead.z+nz*lane*(t.laneSign+bias);roadHeading=ahead.heading+(rightSign<0?Math.PI:0);width=ahead.width;}
     let err=Math.atan2(tx-t.x,tz-t.z)-t.heading;err=Math.atan2(Math.sin(err),Math.cos(err));t.heading+=clamp(err,-1.55*dt,1.55*dt);
     const signalCap=panic?Infinity:(window.TrafficSignals?window.TrafficSignals.speedCap(t.x,t.z,t.heading,t.spd):Infinity),turn=Math.abs(err)>.2,want=Math.min(turn?Math.min(detourTarget?22:18,t.cruise):t.cruise,signalCap,controlCap);
     t.spd+=clamp(want-t.spd,-40*dt,16*dt);
@@ -26281,7 +28496,7 @@ function updateGenericTraffic(t,dt){
   t._physVx=lerp(t._physVx===undefined?targetVx:t._physVx,targetVx,clamp(follow*dt,0,1));t._physVz=lerp(t._physVz===undefined?targetVz:t._physVz,targetVz,clamp(follow*dt,0,1));
   if(offRoad){const drag=Math.max(0,1-(1.15+clamp((roadGrip?roadGrip.d-roadGrip.width*.5:35)/45,0,1)*1.8)*dt);t._physVx*=drag;t._physVz*=drag;t.spd=Math.min(t.spd,Math.hypot(t._physVx,t._physVz));t.heading+=Math.sin((t._offPhase=(t._offPhase||0)+dt*5.2))*.12*dt;}
   const mv=moveAICircleWorld(t,t._physVx,t._physVz,dt,3.65,DYN_TRAFFIC);t._physVx=mv.vx;t._physVz=mv.vz;t.spd=Math.min(t.spd,Math.hypot(mv.vx,mv.vz));
-  if(mv.hit){t.spd*=.72;t._wallBlocked=(t._wallBlocked||0)+dt;if(!reverse){const fx=Math.sin(t.heading),fz=Math.cos(t.heading),cross=fx*mv.nz-fz*mv.nx;t.heading+=(cross>=0?-1:1)*(.34+Math.min(.42,t._wallBlocked*.22));}}else t._wallBlocked=Math.max(0,(t._wallBlocked||0)-dt*2);
+  if(mv.hit){if(Math.hypot(t._physVx||0,t._physVz||0)>15)scheduleTrafficDriverExit(t,.35+Math.random()*.8,'crash');t.spd*=.72;t._wallBlocked=(t._wallBlocked||0)+dt;if(!reverse){const fx=Math.sin(t.heading),fz=Math.cos(t.heading),cross=fx*mv.nz-fz*mv.nx;t.heading+=(cross>=0?-1:1)*(.34+Math.min(.42,t._wallBlocked*.22));}}else t._wallBlocked=Math.max(0,(t._wallBlocked||0)-dt*2);
   const here=WORLD_nearestRoad(t.x,t.z);t.y=here?here.y:WORLD_groundHeightAt(t.x,t.z,t.y);t.pitch=here?here.pitch*(Math.cos(t.heading-here.heading)>=0?1:-1):0;t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.set(-t.pitch,t.heading,0);
 }
 function spawnRegionalTrafficNear(px=playerX,pz=playerZ){
@@ -26295,6 +28510,11 @@ function PED_pointVisible(x,y,z,pad){const v=PED_visibilityScratch.set(x,y,z).pr
 function spawnRegionalPedNear(px=playerX,pz=playerZ){
   for(let attempt=0;attempt<18;attempt++){const a=rand(0,Math.PI*2),d=rand(260,820),near=WORLD_nearestRoad(px+Math.cos(a)*d,pz+Math.sin(a)*d);if(!near)continue;const side=Math.random()<.5?-1:1,off=near.width*.5+rand(7,17),nx=Math.cos(near.heading),nz=-Math.sin(near.heading),x=near.x+nx*off*side,z=near.z+nz*off*side,y=WORLD_groundHeightAt(x,z,near.y);if(!WORLD_inBounds(x,z)||isOnWater(x,z,y)||PED_pointVisible(x,y+3,z,1.18))continue;const p=pedLook({regional:true,x,z,y,heading:near.heading+(Math.random()<.5?0:Math.PI),spd:rand(2.05,4.75),turnTimer:rand(2,8),dead:false,persistUntil:0});p._side=side;p.face=p.heading;p._spawnFade=0;p._despawnFade=0;pedAIProfile(p);p.spd*=p._ai.pace;choosePedDestination(p,true);peds.push(p);return p;}return null;
 }
+function trafficDriverExit(t,reason){
+  if(!t||t._patrol||t._driverExited||t.dead)return false;t._driverExited=true;t._driverExitT=0;t._panicT=0;t.cruise=0;t.spd=0;t._physVx=t._physVz=0;t.persistUntil=Math.max(t.persistUntil||0,performance.now()+18000);const side=(t._collisionId||0)&1?1:-1,rx=Math.cos(t.heading),rz=-Math.sin(t.heading),x=t.x+rx*side*4.3,z=t.z+rz*side*4.3,y=WORLD_groundHeightAt(x,z,t.y||0),p=pedLook({regional:true,x,z,y,heading:t.heading+side*Math.PI*.5,spd:rand(3.1,4.8),turnTimer:rand(2,6),dead:false,persistUntil:performance.now()+16000});p._side=side;p.face=p.heading;p._spawnFade=.25;p._despawnFade=0;p._formerDriver=true;pedAIProfile(p);p.spd*=p._ai.pace;const away=t.heading+Math.PI+(Math.random()-.5)*1.3;p._aiState='flee';p._aiTimer=rand(4,7);p._dangerX=t.x;p._dangerZ=t.z;p._destX=x+Math.sin(away)*rand(75,125);p._destZ=z+Math.cos(away)*rand(75,125);peds.push(p);addActorToGrid(p,DYN_PED);return p;
+}
+function scheduleTrafficDriverExit(t,delay,reason){if(!t||t._patrol||t._driverExited)return false;t._driverExitT=Math.min(t._driverExitT===undefined?Infinity:t._driverExitT,Math.max(.05,delay||.5));t._driverExitReason=reason||'panic';return true;}
+
 const _pedSepScratch=[];
 function updateRegionalPed(p,dt){
   if(p._knocked)return;const ai=pedAIProfile(p);p._aiTimer-=dt;p.turnTimer-=dt;
@@ -26394,13 +28614,13 @@ function manageRegionalPopulation(px,pz,dt){
 // units per second / world units, and all durations are seconds.
 const POLICE_TUNING_BY_WANTED_LEVEL=Object.freeze([
   Object.freeze({level:0,stars:0,desiredPatrolCount:0,pursuitCruiseSpeed:0,sightRange:0,directChaseEnterRange:0,directChaseExitRange:9,formationRadius:0,velocityLeadSeconds:0,patrolSpawnInterval:Infinity,roadblockInterval:Infinity,roadblockCarCount:0,aggression:0,spawnDistanceBand:[0,0],despawnRange:300,evadeSeconds:0,footOfficers:0,pitStrength:0,heavyUnits:0}),
-  Object.freeze({level:1,stars:1,desiredPatrolCount:1,pursuitCruiseSpeed:36,sightRange:110,directChaseEnterRange:28,directChaseExitRange:40,formationRadius:0,velocityLeadSeconds:.10,patrolSpawnInterval:9.5,roadblockInterval:Infinity,roadblockCarCount:0,aggression:.42,spawnDistanceBand:[340,520],despawnRange:470,evadeSeconds:7,footOfficers:0,pitStrength:0,heavyUnits:0}),
-  Object.freeze({level:2,stars:2,desiredPatrolCount:2,pursuitCruiseSpeed:42,sightRange:150,directChaseEnterRange:34,directChaseExitRange:47,formationRadius:4,velocityLeadSeconds:.18,patrolSpawnInterval:7.0,roadblockInterval:Infinity,roadblockCarCount:0,aggression:.55,spawnDistanceBand:[360,550],despawnRange:520,evadeSeconds:9,footOfficers:1,pitStrength:0,heavyUnits:0}),
-  Object.freeze({level:3,stars:3,desiredPatrolCount:3,pursuitCruiseSpeed:49,sightRange:210,directChaseEnterRange:43,directChaseExitRange:57,formationRadius:7,velocityLeadSeconds:.34,patrolSpawnInterval:4.5,roadblockInterval:42,roadblockCarCount:2,aggression:.72,spawnDistanceBand:[390,590],despawnRange:590,evadeSeconds:12,footOfficers:2,pitStrength:.18,heavyUnits:0}),
-  Object.freeze({level:4,stars:4,desiredPatrolCount:4,pursuitCruiseSpeed:54,sightRange:270,directChaseEnterRange:52,directChaseExitRange:66,formationRadius:10,velocityLeadSeconds:.50,patrolSpawnInterval:3.0,roadblockInterval:30,roadblockCarCount:3,aggression:.90,spawnDistanceBand:[420,640],despawnRange:660,evadeSeconds:15,footOfficers:3,pitStrength:.40,heavyUnits:0}),
-  Object.freeze({level:5,stars:5,desiredPatrolCount:5,pursuitCruiseSpeed:59,sightRange:330,directChaseEnterRange:62,directChaseExitRange:76,formationRadius:14,velocityLeadSeconds:.68,patrolSpawnInterval:2.1,roadblockInterval:22,roadblockCarCount:4,aggression:1.04,spawnDistanceBand:[450,720],despawnRange:740,evadeSeconds:18,footOfficers:4,pitStrength:.65,heavyUnits:1})
+  Object.freeze({level:1,stars:1,desiredPatrolCount:2,pursuitCruiseSpeed:39,sightRange:145,directChaseEnterRange:32,directChaseExitRange:45,formationRadius:2,velocityLeadSeconds:.14,patrolSpawnInterval:6.0,roadblockInterval:Infinity,roadblockCarCount:0,aggression:.48,spawnDistanceBand:[320,500],despawnRange:520,evadeSeconds:14,footOfficers:0,pitStrength:0,heavyUnits:0}),
+  Object.freeze({level:2,stars:2,desiredPatrolCount:3,pursuitCruiseSpeed:45,sightRange:185,directChaseEnterRange:38,directChaseExitRange:52,formationRadius:5,velocityLeadSeconds:.24,patrolSpawnInterval:4.5,roadblockInterval:Infinity,roadblockCarCount:0,aggression:.60,spawnDistanceBand:[340,540],despawnRange:570,evadeSeconds:19,footOfficers:1,pitStrength:.05,heavyUnits:0}),
+  Object.freeze({level:3,stars:3,desiredPatrolCount:4,pursuitCruiseSpeed:50,sightRange:235,directChaseEnterRange:46,directChaseExitRange:60,formationRadius:8,velocityLeadSeconds:.38,patrolSpawnInterval:3.3,roadblockInterval:38,roadblockCarCount:2,aggression:.76,spawnDistanceBand:[370,590],despawnRange:630,evadeSeconds:25,footOfficers:2,pitStrength:.22,heavyUnits:0}),
+  Object.freeze({level:4,stars:4,desiredPatrolCount:5,pursuitCruiseSpeed:55,sightRange:295,directChaseEnterRange:55,directChaseExitRange:69,formationRadius:11,velocityLeadSeconds:.54,patrolSpawnInterval:2.3,roadblockInterval:28,roadblockCarCount:3,aggression:.92,spawnDistanceBand:[400,650],despawnRange:700,evadeSeconds:32,footOfficers:3,pitStrength:.43,heavyUnits:0}),
+  Object.freeze({level:5,stars:5,desiredPatrolCount:6,pursuitCruiseSpeed:60,sightRange:355,directChaseEnterRange:64,directChaseExitRange:79,formationRadius:15,velocityLeadSeconds:.72,patrolSpawnInterval:1.7,roadblockInterval:20,roadblockCarCount:4,aggression:1.06,spawnDistanceBand:[430,720],despawnRange:780,evadeSeconds:40,footOfficers:4,pitStrength:.68,heavyUnits:1})
 ]);
-const POLICE_GLOBAL_TUNING=Object.freeze({targetMemorySeconds:4.5,roadblockLifetimeSeconds:28,roadblockDespawnRange:480,sirenFlashIntervalMs:280,roadblockCandidateDistanceBand:[380,620],roadblockMinimumForwardDot:.74,roadblockCarSpacing:10.5,spawnRevealDelay:1.1,retireTimeout:8,arrestRadius:6.2,arrestHoldSeconds:3.2,tackleRadius:4.2,onFootArrestRadius:2.25,onFootArrestHoldSeconds:2.6});
+const POLICE_GLOBAL_TUNING=Object.freeze({targetMemorySeconds:7.5,roadblockLifetimeSeconds:28,roadblockDespawnRange:480,sirenFlashIntervalMs:280,roadblockCandidateDistanceBand:[380,620],roadblockMinimumForwardDot:.74,roadblockCarSpacing:10.5,spawnRevealDelay:1.1,retireTimeout:8,arrestRadius:6.2,arrestHoldSeconds:3.2,tackleRadius:4.2,onFootArrestRadius:2.25,onFootArrestHoldSeconds:2.6});
 const cops=[],policeRoadblocks=[];
 const policeDirector={level:0,previousLevel:0,seen:false,lastSeenX:0,lastSeenZ:0,lastSeenAt:0,sightClock:0,unseenT:0,evadeT:0,spawnT:0,roadblockT:0,arrestT:0,statusT:0,evadedT:0,serial:0};
 const _policeCamDir=new THREE.Vector3(),_policeSpawnTmp=new THREE.Vector3();
@@ -26755,7 +28975,7 @@ function explosionAt(x,z,big=false,baseY=0){
   // trees → toppled
   for(const tr of trees){ if(!tr.fallen&&dist2(x,z,tr.x,tr.z)<EXPLODE_R){ tr.fallen=true; const a=Math.atan2(tr.z-z,tr.x-x); tr.ax=Math.cos(a+Math.PI/2); tr.az=Math.sin(a+Math.PI/2); } }
 }
-function igniteTraffic(t){ if(t.burning||t.dead) return; t.burning=true; t.spd=0;
+function igniteTraffic(t){ if(t.burning||t.dead) return;trafficDriverExit(t,'wreck');t.burning=true;t.spd=0;
   const fire=makeFire(); t.mesh.add(fire); t.mesh.rotation.z=rand(-.3,.3);
   burners.push({mesh:t.mesh, fire, fuse:rand(3,5), x:t.x, z:t.z, t}); }
 function igniteVehicle(){
@@ -27710,7 +29930,7 @@ function update(dt){
   updatePedestrianDirector(dt);
   for(const p of peds){if(p.dead||!p.regional)continue;updateRegionalPed(p,dt);if(p._knocked)continue;
     const dp=dist2(p.x,p.z,PX,PZ),hit=Math.abs(carState.speed);
-    if(!onFoot&&!playerAircraft&&dp<5&&hit>7){const combat=window.GameSystems&&GameSystems.api('combat'),damage=Math.max(1,(hit-7)*1.08),r=combat&&combat.damageCharacter?combat.damageCharacter(p,damage,{kind:'ped',from:'player',source:'vehicle',critical:hit>34,dirX:carState.vx,dirZ:carState.vz,x:p.x,y:(p.y||0)+2,z:p.z}):null;if(!r&&hit>24)killCivilian(p);else if(!r||!r.killed)knockCivilian(p,carState.vx,carState.vz,hit);const killed=!!((r&&r.killed)||p.dead);if(!p._playerCrimeUntil||performance.now()>p._playerCrimeUntil){p._playerCrimeUntil=performance.now()+900;const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report(killed?'vehicular-homicide':'hit-pedestrian',{perpetrator:'player',actor:carState,x:p.x,z:p.z,severity:killed?2:1,witnessRadius:killed?155:125});if(ev)alertPedestrians(p.x,p.z,killed?155:125,'collision',ev);}}}
+    if(!onFoot&&!playerAircraft&&dp<5&&hit>7){const combat=window.GameSystems&&GameSystems.api('combat'),damage=Math.max(1,(hit-7)*1.08),r=combat&&combat.damageCharacter?combat.damageCharacter(p,damage,{kind:'ped',from:'player',source:'vehicle',critical:hit>34,dirX:carState.vx,dirZ:carState.vz,x:p.x,y:(p.y||0)+2,z:p.z}):null;if(!r&&hit>24)killCivilian(p);else if(!r||!r.killed)knockCivilian(p,carState.vx,carState.vz,hit);const killed=!!((r&&r.killed)||p.dead);if(!p._playerCrimeUntil||performance.now()>p._playerCrimeUntil){p._playerCrimeUntil=performance.now()+900;const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report(killed?'vehicular-homicide':'hit-pedestrian',{perpetrator:'player',actor:carState,x:p.x,z:p.z,severity:killed?2:1,priority:killed,immediate:killed,witnessRadius:killed?155:125});if(ev)alertPedestrians(p.x,p.z,killed?155:125,'collision',ev);}}}
   // One pass over the whole list writing instance transforms — no pedestrian
   // owns a mesh any more, so this IS how the crowd gets drawn.
   updatePedCrowd(PX,PZ);
@@ -28131,7 +30351,7 @@ const BLAST_G=92;
 //   BASH..BLAST  : a real shunt — it takes damage in proportion to the closing
 //                  speed and burns only once it has taken enough of them.
 //   above BLAST  : the full launch, which now needs ~72mph of closing speed.
-const TRAFFIC_BASH_SPEED=14, TRAFFIC_BLAST_SPEED=45;
+const TRAFFIC_BASH_SPEED=14,TRAFFIC_BLAST_SPEED=156.25; // 250 displayed-speed units
 // A bumped car keeps the push as a velocity that bleeds off, so it slides out of
 // the way and the lane AI steers it back afterwards, rather than standing there
 // like a bollard.
@@ -28143,7 +30363,7 @@ function updateShovedTraffic(dt){
   for(const t of traffic){if(!t.shoveX&&!t.shoveZ)continue;if(t.dead){t.shoveX=0;t.shoveZ=0;continue;}const mv=moveAICircleWorld(t,t.shoveX||0,t.shoveZ||0,dt,3.65,DYN_TRAFFIC),speed=Math.hypot(mv.vx,mv.vz),decay=Math.exp(-(1.15+Math.min(2.7,18/(speed+4)))*dt);t.shoveX=mv.vx*decay;t.shoveZ=mv.vz*decay;if(t._impactHeading!==undefined){const d=angleDiff(t._impactHeading,t.heading);t.heading+=d*clamp(dt*(1.2+speed*.025),0,.22);t._impactBlend=Math.max(0,(t._impactBlend||0)-dt*.75);}if(Math.abs(t.shoveX)+Math.abs(t.shoveZ)<.32){t.shoveX=0;t.shoveZ=0;}t.y=WORLD_groundHeightAt(t.x,t.z,t.y===undefined?0:t.y);if(t.mesh){t.mesh.position.set(t.x,t.y,t.z);t.mesh.rotation.y=t.heading;}}
 }
 function superBlastVehicle(obj,isCop=false,impactEnergy=60,nx=0,nz=0){
-  if(!obj||!obj.mesh||obj._superBlasted)return;obj._superBlasted=true;obj.dead=true;obj.burning=false;const ti=traffic.indexOf(obj);if(ti>=0)traffic.splice(ti,1);if(isCop){const ci=cops.indexOf(obj);if(ci>=0)cops.splice(ci,1);}const mesh=obj.mesh,dx=nx||obj.x-carState.x,dz=nz||obj.z-carState.z,len=Math.hypot(dx,dz)||1,e=clamp(impactEnergy,42,115),y=mesh.position.y;mesh.visible=true;
+  if(!obj||!obj.mesh||obj._superBlasted)return;if(!isCop&&!obj._patrol)trafficDriverExit(obj,'extreme-impact');obj._superBlasted=true;obj.dead=true;obj.burning=false;const ti=traffic.indexOf(obj);if(ti>=0)traffic.splice(ti,1);if(isCop){const ci=cops.indexOf(obj);if(ci>=0)cops.splice(ci,1);}const mesh=obj.mesh,dx=nx||obj.x-carState.x,dz=nz||obj.z-carState.z,len=Math.hypot(dx,dz)||1,e=clamp(impactEnergy,42,115),y=mesh.position.y;mesh.visible=true;
   blasted.push({obj,mesh,isCop,x:obj.x,y,z:obj.z,vx:dx/len*(28+e*.85)+carState.vx*.58,vz:dz/len*(28+e*.85)+carState.vz*.58,vy:18+e*.47,sx:rand(4,8)*(Math.random()<.5?-1:1),sy:rand(2,5),sz:rand(6,11)*(Math.random()<.5?-1:1),bounces:0,grounded:false,t:0,impactEnergy:e,startedHp:obj._bHp===undefined?obj.hp:obj._bHp,midairFire:false});boom(obj.x,obj.z,0xffd23f,12,2);playCrash();panicTrafficAt&&panicTrafficAt(obj.x,obj.z,145,obj);
 }
 function updateBlastedVehicles(dt){
@@ -28585,10 +30805,11 @@ function updateDrive(dt){
         let dx=a.x-cx,dz=a.z-cz,d=Math.hypot(dx,dz)||1,nx=dx/d,nz=dz/d;if(d>=bodyR+e.r)continue;
         actorVelocity(e.mask,a,otherVel);const playerToward=vel.x*nx+vel.z*nz,otherToward=otherVel.x*nx+otherVel.z*nz,closing=playerToward-otherToward;
         if(e.mask===DYN_PED){
-          if(closing>7){const dealt=Math.max(1,(closing-7)*1.15),combat=window.GameSystems&&GameSystems.api('combat'),r=combat&&combat.damageCharacter?combat.damageCharacter(a,dealt,{kind:'ped',from:'player',source:'vehicle',critical:closing>38,dirX:vel.x-otherVel.x,dirZ:vel.z-otherVel.z,x:a.x,y:(a.y||0)+3,z:a.z}):null;if(!r&&closing>24)killCivilian(a,vel.x-otherVel.x,vel.z-otherVel.z,Math.min(110,closing));else if(!r||!r.killed)knockCivilian(a,vel.x-otherVel.x,vel.z-otherVel.z,closing);const killed=!!((r&&r.killed)||a.dead);if(!a._playerCrimeUntil||performance.now()>a._playerCrimeUntil){a._playerCrimeUntil=performance.now()+900;const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report(killed?'vehicular-homicide':'hit-pedestrian',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:killed?2:1,witnessRadius:killed?155:125});if(ev)alertPedestrians(a.x,a.z,killed?155:125,'collision',ev);}continue;}
+          if(closing>7){const dealt=Math.max(1,(closing-7)*1.15),combat=window.GameSystems&&GameSystems.api('combat'),r=combat&&combat.damageCharacter?combat.damageCharacter(a,dealt,{kind:'ped',from:'player',source:'vehicle',critical:closing>38,dirX:vel.x-otherVel.x,dirZ:vel.z-otherVel.z,x:a.x,y:(a.y||0)+3,z:a.z}):null;if(!r&&closing>24)killCivilian(a,vel.x-otherVel.x,vel.z-otherVel.z,Math.min(110,closing));else if(!r||!r.killed)knockCivilian(a,vel.x-otherVel.x,vel.z-otherVel.z,closing);const killed=!!((r&&r.killed)||a.dead);if(!a._playerCrimeUntil||performance.now()>a._playerCrimeUntil){a._playerCrimeUntil=performance.now()+900;const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report(killed?'vehicular-homicide':'hit-pedestrian',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:killed?2:1,priority:killed,immediate:killed,witnessRadius:killed?155:125});if(ev)alertPedestrians(a.x,a.z,killed?155:125,'collision',ev);}continue;}
           contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.015,.08);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}continue;
         }
         if(e.mask===DYN_TRAFFIC){
+          if(a._patrol&&playerToward>8&&playerToward>Math.max(0,-otherToward)*1.12){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,priority:true,immediate:true});}else if(!a._patrol&&closing>18)scheduleTrafficDriverExit(a,.3+Math.random()*1.4,'collision');
           if(playerToward>TRAFFIC_BASH_SPEED&&closing>=TRAFFIC_BLAST_SPEED){const vd=window.GameSystems&&GameSystems.api('vdamage'),crime=window.GameSystems&&GameSystems.api('crime'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1500),.55,1.65),damage=(closing-TRAFFIC_BASH_SPEED)*1.05*massRatio,r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(crime)crime.markCaused(a,null,8);superBlastVehicle(a,false,closing,nx,nz);continue;}
           contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.055,.16);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}
           if(!hitActors.has(a)&&playerToward>0&&closing>TRAFFIC_BASH_SPEED){hitActors.add(a);const force=clamp((closing-TRAFFIC_BASH_SPEED)/(TRAFFIC_BLAST_SPEED-TRAFFIC_BASH_SPEED),0,1.5),massRatio=clamp((vehicleTune.mass||1400)/(a.mass||1500),.55,1.65),damage=Math.max(0,(closing-TRAFFIC_BASH_SPEED)*.42*massRatio*(.35+force*.65)),vd=window.GameSystems&&GameSystems.api('vdamage');if(vd)vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z});else a.hp-=damage;boom(a.x,a.z,0xffaa30,6,2);playCrash();if((vd&&vd.integrity(a)<=0)||(!vd&&a.hp<=0)){igniteTraffic(a);doFlash(.2);const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report('vehicle-destruction',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:1,witnessRadius:145});if(ev)alertPedestrians(a.x,a.z,145,'collision',ev);}}
@@ -28597,7 +30818,7 @@ function updateDrive(dt){
         if(e.mask===DYN_COP){
           const copToward=-otherToward,playerInitiated=playerToward>9&&playerToward>copToward*1.15;
           if(a._roadblock&&ramRoadblockCar(a,closing,nx,nz,vel))continue;
-          if(playerInitiated){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,immediate:true});const vd=window.GameSystems&&GameSystems.api('vdamage'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1900),.5,1.5),damage=Math.max(1,(closing-8)*.82*massRatio),r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(closing>=TRAFFIC_BLAST_SPEED){if(crime)crime.markCaused(a,null,8);superBlastVehicle(a,true,closing,nx,nz);continue;}}
+          if(playerInitiated){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,priority:true,immediate:true});const vd=window.GameSystems&&GameSystems.api('vdamage'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1900),.5,1.5),damage=Math.max(1,(closing-8)*.82*massRatio),r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(closing>=TRAFFIC_BLAST_SPEED){if(crime)crime.markCaused(a,null,8);superBlastVehicle(a,true,closing,nx,nz);continue;}}
           if(copToward>5&&(a.ramCd||0)<=0){if(policeRamPlayer(a,nx,nz,vel))return;continue;}
         }
         contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.05,.17);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}
@@ -29240,6 +31461,7 @@ function showVehicleStage(){
   const keep=(pg&&pg.currentVehicle&&pg.currentVehicle())||vehicleTuneKey||'streetDrift';
   selectPlayerVehicle(VEHICLE_TUNES[keep]?keep:'streetDrift');resetCar();begin();
 }
+function qaStartGame(mapIndex=0,vehicleIndex=0){const map=MAP_CARDS[clamp(mapIndex|0,0,Math.max(0,MAP_CARDS.length-1))]||MAP_CARDS[0],id=map&&map.id||'neon';if(currentMapId!==id&&!activateWorld(id))return false;const pg=window.GameSystems&&GameSystems.api('progression'),catalogue=pg&&pg.catalogue?pg.catalogue():Object.keys(VEHICLE_TUNES).map(id=>({id})),entry=catalogue[clamp(vehicleIndex|0,0,Math.max(0,catalogue.length-1))]||catalogue[0],vehicleId=entry&&entry.id||'streetDrift';selectPlayerVehicle(VEHICLE_TUNES[vehicleId]?vehicleId:'streetDrift');resetCar();begin();return started&&!carSelectionOpen;}
 function chooseMap(id){
   pendingMapId=id;
   if(id===currentMapId){ showVehicleStage(); return; }
@@ -29311,7 +31533,7 @@ if(window.GameSystems){
       activate:activateWorld
     },
 
-    actors:{traffic,peds,cops,policeRoadblocks,makeCar,makeCharacter,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,panicTrafficFromGunfire(t,event){if(!t||t.dead)return false;t._panicT=Math.max(t._panicT||0,7+Math.random()*4);t.cruise=Math.max(t.cruise||20,52+Math.random()*16);t._avoidBias=Math.random()<.5?-1:1;panicTrafficAt(t.x,t.z,145,t);beep(105,.11,'square',.05);return true;},launchVehicle(t,isCop,energy,nx,nz){if(!t)return false;superBlastVehicle(t,!!isCop,energy,nx,nz);return true;},killCivilian,knockCivilian,alertPedestrians,
+    actors:{traffic,peds,cops,policeRoadblocks,makeCar,makeCharacter,CAR_STYLES,trafficColors,spawnCop,shoveTraffic,panicTrafficFromGunfire(t,event){if(!t||t.dead)return false;scheduleTrafficDriverExit(t,2.8+Math.random()*3.4,'gunfire');t._panicT=Math.max(t._panicT||0,7+Math.random()*4);t.cruise=Math.max(t.cruise||20,52+Math.random()*16);t._avoidBias=Math.random()<.5?-1:1;panicTrafficAt(t.x,t.z,145,t);beep(105,.11,'square',.05);return true;},launchVehicle(t,isCop,energy,nx,nz){if(!t)return false;if((+energy||0)*1.6<250){shoveTraffic(t,nx||0,nz||0,energy||0,{causedByPlayer:true});return false;}superBlastVehicle(t,!!isCop,energy,nx,nz);return true;},killCivilian,knockCivilian,alertPedestrians,
             igniteTraffic,removeTrafficObject,removePedObject,clearTrafficZone,extraCollidables,
             queryDynamic:queryDynamicActors,rebuildCollisionGrid:rebuildDynamicCollisionGrid,moveCircleWorld:moveAICircleWorld,
             DYNAMIC_MASK:{TRAFFIC:DYN_TRAFFIC,PED:DYN_PED,COP:DYN_COP,EXTRA:DYN_EXTRA,PARKED:DYN_PARKED,VEHICLE:DYN_VEHICLE},
@@ -29387,6 +31609,8 @@ if(window.GameSystems){
      path and therefore creates no crime or wanted side effect. */
   window.__QA={
     bootReady:false,
+    /** Complete map/vehicle selection through the real select/reset/begin flow. */
+    startGame(mapIndex=0,vehicleIndex=0){return qaStartGame(mapIndex,vehicleIndex);},
     /** Read only live engine state; no simulation shortcut. */
     getState(){const combat=GameSystems.api('combat'),mode=playerAircraft?(playerAircraft.kind==='heli'?'helicopter':'plane'):onFoot?(combat&&combat.aiming&&combat.aiming()?'on-foot-aim':combat&&combat.isFirstPerson&&combat.isFirstPerson()?'on-foot-first-person':'on-foot'):'vehicle',cameraYaw=onFoot&&combat&&combat.mouseLookActive&&combat.mouseLookActive()&&combat.cameraYaw?combat.cameraYaw():PLAYER_heading();return{mode,playerX:PLAYER_x(),playerZ:PLAYER_z(),playerHeading:PLAYER_heading(),cameraYaw,vehicleSpeed:gameCtx.player.speed,wantedStars:stats.wanted,hp:playerHealth};},
     /** Hold a synthetic key through the real window keydown/keyup listeners. */
