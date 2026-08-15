@@ -21545,7 +21545,7 @@ body.shop-open #mobileControls{display:none!important}
 <script>
 /*
 ===============================================================================
-MELEE COMBAT MODULE — integration guide for destroy-and-kill-neon-city-v18.html
+MELEE COMBAT MODULE — ALREADY INTEGRATED as of v27 · historical integration notes
 ===============================================================================
 
 PURPOSE
@@ -23795,7 +23795,7 @@ Assumptions that may not hold after integration:
 <script>
 /*
 ===============================================================================
-HEAVY ORDNANCE MODULE — integration guide for destroy-and-kill-neon-city-v26.html
+HEAVY ORDNANCE MODULE — ALREADY INTEGRATED as of v27 · historical integration notes
 ===============================================================================
 
 PURPOSE
@@ -24316,6 +24316,58 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
     };
   }
   function militaryAircraftDefinitions() { return MILITARY_AIRCRAFT.slice(); }
+  function contractProbe() {
+    const numeric = fields => {
+      const values = {}, missing = [];
+      for (const key of Object.keys(fields)) {
+        const value = fields[key], ok = Number.isFinite(value);
+        values[key] = ok ? value : null;
+        if (!ok) missing.push(key);
+      }
+      return { ok: missing.length === 0, values, missing };
+    };
+    const rpgCore = numeric({
+      mag:BALANCE.rpg.mag,starterReserve:BALANCE.rpg.starterReserve,reload:BALANCE.rpg.reload,interval:BALANCE.rpg.interval,
+      range:BALANCE.rpg.range,directCharacterDamage:BALANCE.rpg.directCharacterDamage,directVehicleDamage:BALANCE.rpg.directVehicleDamage,
+      blastDamage:BALANCE.rpg.blastDamage,blastRadius:BALANCE.rpg.blastRadius,blastImpulse:BALANCE.rpg.blastImpulse,
+      speed:BALANCE.rpg.speed,gravity:BALANCE.rpg.gravity,drag:BALANCE.rpg.drag,life:BALANCE.rpg.life
+    });
+    const backblastTrace = numeric({
+      damage:BALANCE.rpg.backblastDamage,range:BALANCE.rpg.backblastRange,radius:BALANCE.rpg.backblastRadius
+    });
+    const rpg = { ok:rpgCore.ok && backblastTrace.ok, values:rpgCore.values, missing:rpgCore.missing, backblastTrace };
+    const minigun = numeric({
+      mag:BALANCE.minigun.mag,starterReserve:BALANCE.minigun.starterReserve,reload:BALANCE.minigun.reload,interval:BALANCE.minigun.interval,
+      range:BALANCE.minigun.range,characterDamage:BALANCE.minigun.characterDamage,vehicleDamage:BALANCE.minigun.vehicleDamage,
+      spread:BALANCE.minigun.spread,spinUp:BALANCE.minigun.spinUp,spinDown:BALANCE.minigun.spinDown,fireThreshold:BALANCE.minigun.fireThreshold
+    });
+    const aircraft = {};
+    for (const craft of MILITARY_AIRCRAFT) {
+      const loadout = LOADOUTS[craft.ordnanceLoadout], mounts = [];
+      if (loadout) for (const mount of loadout.mounts) {
+        const spec = mount.type === 'minigunTurret' ? BALANCE.mountedMinigun : BALANCE.rocketPod;
+        const fields = mount.type === 'minigunTurret' ? {
+          ammo:mount.ammo == null ? spec.ammo : mount.ammo,interval:mount.interval == null ? spec.interval : mount.interval,
+          range:spec.range,characterDamage:spec.characterDamage,vehicleDamage:spec.vehicleDamage,spread:mount.spread == null ? spec.spread : mount.spread,
+          spinUp:spec.spinUp,spinDown:spec.spinDown,fireThreshold:spec.fireThreshold
+        } : {
+          ammo:mount.ammo == null ? spec.ammo : mount.ammo,cooldown:mount.cooldown == null ? spec.cooldown : mount.cooldown,
+          speed:spec.speed,gravity:spec.gravity,drag:spec.drag,life:spec.life,directCharacterDamage:spec.directCharacterDamage,
+          directVehicleDamage:spec.directVehicleDamage,blastDamage:spec.blastDamage,blastRadius:spec.blastRadius,blastImpulse:spec.blastImpulse,
+          softLockRange:mount.softLockRange == null ? spec.softLockRange : mount.softLockRange,
+          softLockConeDegrees:mount.softLockConeDegrees == null ? spec.softLockConeDegrees : mount.softLockConeDegrees,
+          softLockTurnRate:mount.softLockTurnRate == null ? spec.softLockTurnRate : mount.softLockTurnRate
+        };
+        const result = numeric(fields);
+        mounts.push({ id:mount.id, type:mount.type, group:mount.group || null, ok:result.ok, values:result.values, missing:result.missing });
+      }
+      aircraft[craft.id] = { ok:!!loadout && mounts.length > 0 && mounts.every(m => m.ok), loadout:craft.ordnanceLoadout, mounts };
+    }
+    return {
+      ok:rpg.ok && minigun.ok && Object.keys(aircraft).every(id => aircraft[id].ok),
+      rpg,minigun,aircraft
+    };
+  }
 
   function makeMaterial(ctx, color, view, metalness, roughness) {
     if (view) return new ctx.THREE.MeshBasicMaterial({ color: color, depthTest: false, depthWrite: false });
@@ -25073,16 +25125,27 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
       const bx = x - dx * 2.2, by = y - dy * 2.2, bz = z - dz * 2.2;
       for (let i = 0; i < 12; i++) spawnSmoke(bx, by, bz, -dx * rand(5, 15) + rand(-2, 2), -dy * rand(4, 12) + rand(-1, 2), -dz * rand(5, 15) + rand(-2, 2), rand(.28, .58), rand(.35, .8), i % 2 === 0);
       spawnFlash(bx, by, bz, 1.6, 0xff9e36); spawnSparks(bx, by, bz, 6, 0xffc066, 7);
-      const backRange = BALANCE.rpg.backBlastRange, backRadius = BALANCE.rpg.backBlastRadius;
+      const backRange = BALANCE.rpg.backblastRange, backRadius = BALANCE.rpg.backblastRadius;
       traceRay(owner, ownerKind, bx, by, bz, -dx, -dy, -dz, backRange, backRadius);
-      if (rayHit.hit && rayHit.target) applyDamage(rayHit.target, rayHit.kind, BALANCE.rpg.backBlastDamage, BALANCE.rpg.backBlastDamage * .25, { kind: rayHit.kind, from: ownerIsPlayer(owner, ownerKind) ? 'player-weapon' : ownerKind, source: 'ordnance-backblast', weaponId: 'rpg', x: rayHit.x, y: rayHit.y, z: rayHit.z, dirX: -dx, dirZ: -dz });
+      if (rayHit.hit && rayHit.target) applyDamage(rayHit.target, rayHit.kind, BALANCE.rpg.backblastDamage, BALANCE.rpg.backblastDamage * .25, { kind: rayHit.kind, from: ownerIsPlayer(owner, ownerKind) ? 'player-weapon' : ownerKind, source: 'ordnance-backblast', weaponId: 'rpg', x: rayHit.x, y: rayHit.y, z: rayHit.z, dirX: -dx, dirZ: -dz });
       event('ordnance:backblast', { owner: owner, ownerKind: ownerKind, x: bx, y: by, z: bz, dx: -dx, dy: -dy, dz: -dz });
+    }
+
+    function probeBackblastTrace() {
+      playerAim(aimScratch, false);
+      normalize3(tmpPointA, aimScratch.dx, aimScratch.dy, aimScratch.dz);
+      const fx=tmpPointA.x,fy=tmpPointA.y,fz=tmpPointA.z,x=aimScratch.x+fx*2.0,y=aimScratch.y+fy*2.0-.08,z=aimScratch.z+fz*2.0,
+        bx=x-fx*2.2,by=y-fy*2.2,bz=z-fz*2.2,range=BALANCE.rpg.backblastRange,radius=BALANCE.rpg.backblastRadius,damage=BALANCE.rpg.backblastDamage;
+      const hit=traceRay(ctx.player,'playerWeapon',bx,by,bz,-fx,-fy,-fz,range,radius);
+      return {ok:Number.isFinite(range)&&Number.isFinite(radius)&&Number.isFinite(damage)&&Number.isFinite(hit.t),
+        range,radius,damage,origin:{x:bx,y:by,z:bz},direction:{x:-fx,y:-fy,z:-fz},
+        hit:{hit:!!hit.hit,t:Number.isFinite(hit.t)?hit.t:null,kind:hit.kind||null,target:!!hit.target,obstacle:!!hit.obstacle}};
     }
 
     /* ---- player heavy weapons --------------------------------------------- */
     const localAmmo = {
-      rpg: { mag: BALANCE.rpg.mag, reserve: BALANCE.rpg.reserve },
-      minigun: { mag: BALANCE.minigun.mag, reserve: BALANCE.minigun.reserve }
+      rpg: { mag: BALANCE.rpg.mag, reserve: BALANCE.rpg.starterReserve },
+      minigun: { mag: BALANCE.minigun.mag, reserve: BALANCE.minigun.starterReserve }
     };
     const playerState = {
       weaponId: null, trigger: false, reloadTimer: 0, reloadTotal: 0, cooldown: 0,
@@ -25259,7 +25322,7 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
     function findSoftLock(mount, origin, forward, explicitTarget) {
       if (explicitTarget && actorAlive(explicitTarget, mount.config.targetKind)) return explicitTarget;
       if (!mount.config.softLock) return null;
-      const range = mount.config.lockRange || BALANCE.rocketPod.lockRange, cone = Math.cos((mount.config.lockConeDegrees || BALANCE.rocketPod.lockConeDegrees) * Math.PI / 180);
+      const range = mount.config.softLockRange == null ? BALANCE.rocketPod.softLockRange : mount.config.softLockRange, cone = Math.cos((mount.config.softLockConeDegrees == null ? BALANCE.rocketPod.softLockConeDegrees : mount.config.softLockConeDegrees) * Math.PI / 180);
       lockCandidates.length = 0; ctx.actors.queryDynamic(origin.x + forward.x * range * .45, origin.z + forward.z * range * .45, range * .62, ALL_DYNAMIC, lockCandidates);
       let best = null, bestScore = Infinity; actorSeen.clear();
       for (let i = 0; i < lockCandidates.length; i++) {
@@ -25481,6 +25544,8 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
       createMount: createMount,
       attachLoadout: attachLoadout,
       createPilot: createPilot,
+      contractProbe: contractProbe,
+      probeBackblastTrace: probeBackblastTrace,
       createWeaponModel: function (id, view) { return createWeaponModel(ctx, id, !!view); },
       createMountModel: function (type, view) { return createMountModel(ctx, type, !!view); },
       update: update,
@@ -25514,6 +25579,7 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
     shopPrices: shopPrices,
     ammoProducts: ammoProducts,
     militaryAircraftDefinitions: militaryAircraftDefinitions,
+    contractProbe: contractProbe,
     createWeaponModel: createWeaponModel,
     createMountModel: createMountModel,
     create: create
@@ -26568,6 +26634,7 @@ Assumptions that may not hold after integration:
       provoke(x,z,radius){return provokeArmedPeds(ctxRef,x,z,radius||100,true);},
       postRoadblock(rb){return postRoadblock(rb);},clearRoadblockPosts(rb){clearRoadblockPosts(rb);},releaseCopOccupants(cop,force){releaseCopOccupants(cop,force!==false);},
       fire(){return tryFire(ctxRef);},
+      ordnanceDebug(){return ordnance?{contracts:ordnance.contractProbe(),backblastTrace:ordnance.probeBackblastTrace()}:null;},
       isFirstPerson(){return firstPersonActive();},mouseLookActive(){return mouseLookActive();},aiming(){return aimHeld;},heading(){return mouseLookActive()?aimYaw:(ctxRef?ctxRef.player.heading:0);},pitch(){return mouseLookActive()?aimPitch:0;},
       turn(yaw,pitch){aimYaw+=Number(yaw)||0;aimPitch=clamp(aimPitch+(Number(pitch)||0),-.72,.72);return{yaw:aimYaw,pitch:aimPitch};},
       cameraYaw(){return aimYaw;},
@@ -31457,7 +31524,7 @@ let carSelectionOpen=true,playerSirenOn=false,playerSirenAudioT=0,policeSirenAud
 function closeTopOverlayV25(){
   const candidates=[],push=(el,open,close)=>{if(open&&el)candidates.push({el,close,z:parseInt(getComputedStyle(el).zIndex)||0,order:[...document.querySelectorAll('body *')].indexOf(el)});},api=id=>window.GameSystems&&GameSystems.api(id);
   const phone=api('pausephone'),admin=api('admin'),info=api('carInfo'),ammu=api('ammu'),fac=api('facilities'),shop=api('bodyshop'),help=api('help');
-  push(document.getElementById('fullmap'),showFullMap,()=>toggleFullMap(false));push(document.getElementById('gamePhone'),phone&&phone.phoneOpen,()=>phone.closePhone());push(document.getElementById('gamePause'),phone&&phone.pauseOpen,()=>phone.closePause());push(document.getElementById('carInfoV22'),info&&info.open,()=>info.close());push(document.getElementById('adminV20'),admin&&admin.isOpen,()=>admin.close());push(document.getElementById('ammuV16'),ammu&&ammu.isOpen,()=>ammu.close());push(document.getElementById('facilityV11'),fac&&fac.isOpen,()=>fac.close());push(document.getElementById('shopRoot'),shop&&shop.panelOpen,()=>shop.closePanel(false));push(document.getElementById('helpRoot'),help&&help.open,()=>help.close());push(wheelPanel,wheelSetupOpen,closeWheelSetup);
+  push(document.getElementById('fullmap'),showFullMap,()=>toggleFullMap(false));push(document.getElementById('gamePhone'),phone&&phone.phoneOpen,()=>phone.closePhone());push(document.getElementById('gamePause'),phone&&phone.pauseOpen,()=>phone.closePause());push(document.getElementById('carInfoV22'),info&&info.open,()=>info.close());push(document.getElementById('adminV20'),admin&&admin.isOpen,()=>admin.close());push(document.getElementById('ammuV16'),ammu&&ammu.isOpen,()=>ammu.close());push(document.getElementById('facilityV11'),fac&&fac.isOpen,()=>fac.close());push(document.getElementById('shopRoot'),shop&&shop.panelOpen,()=>shop.closePanel(false));push(document.getElementById('helpRoot'),help&&help.isOpen,()=>help.close());push(wheelPanel,wheelSetupOpen,closeWheelSetup);
   if(!candidates.length)return false;candidates.sort((a,b)=>b.z-a.z||b.order-a.order);candidates[0].close();return true;
 }
 addEventListener('keydown',e=>{ const k=e.key.toLowerCase();if(k==='escape'&&closeTopOverlayV25()){e.preventDefault();e.stopImmediatePropagation();return;}
@@ -33176,6 +33243,10 @@ window.GAME_DEBUG={
   bust(reason){return bustPlayer(reason||'DEBUG ARREST');},
   smashProps(radius=35,mph=80){const d=GameSystems.api('destructibles');return d&&d.breakAt?d.breakAt(playerX,playerZ,radius,mph):0;},
   destructibles(){const d=GameSystems.api('destructibles');return d?{count:d.count(),stats:d.stats(),debris:d.debrisLive(),effects:d.activeEffects(),near:d.listNear(playerX,playerZ,120)}:null;},
+  ordnanceContracts(){const c=GameSystems.api('combat'),live=c&&c.ordnanceDebug?c.ordnanceDebug():null;return live?live.contracts:HeavyOrdnanceModule.contractProbe();},
+  rpgProbe(){const c=GameSystems.api('combat'),live=c&&c.ordnanceDebug?c.ordnanceDebug():null,q=live?live.contracts:HeavyOrdnanceModule.contractProbe();return{contract:q.rpg,backblastTrace:live?live.backblastTrace:null};},
+  minigunProbe(){return HeavyOrdnanceModule.contractProbe().minigun;},
+  militaryMountProbe(){return HeavyOrdnanceModule.contractProbe().aircraft;},
   aircraft(){const api=GameSystems.api('aircraft');if(!api)return null;const a=api.current();return{current:a?{id:a.id,aircraftId:a.style.id,kind:a.kind,x:+a.x.toFixed(1),y:+a.y.toFixed(1),z:+a.z.toFixed(1),speed:+Math.hypot(a.vx||0,a.vz||0).toFixed(1),agl:+api.agl(a).toFixed(1),hp:+a.hitPoints.toFixed(1),grounded:!!a.grounded,burning:!!a.burning}:null,spawns:api.spawns()};},
   enterAircraft(){const a=GameSystems.api('aircraft');return !!(a&&a.enterNearest());},
   exitAircraft(){const a=GameSystems.api('aircraft');return !!(a&&a.exitCurrent());},
