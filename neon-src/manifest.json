@@ -1,0 +1,1113 @@
+{
+  "format": 1,
+  "kind": "game-source-tree",
+  "source": {
+    "file": "game/v46.html",
+    "charCount": 4100774,
+    "byteCount": 4105362,
+    "sha256": "c137b195938e5d88337bb8bcda7a9960c1127550cd02b621a3249716bee2e681"
+  },
+  "origin": {
+    "manifest": "modules/manifest.json",
+    "manifestSha256": "1d43f93b06e0aad295ee54082001709e253287b84e46c4b1b2a503becacb10a1"
+  },
+  "template": {
+    "file": "index.html",
+    "charCount": 67019,
+    "byteCount": 67107,
+    "sha256": "99608289f01c4659bcf4d255aa1545d2af440bafa4467e8111893f14908ed6fc"
+  },
+  "modules": [
+    {
+      "order": 1,
+      "file": "core/error-handler.js",
+      "from": "01-add-event-listener/module.js",
+      "slug": "add-event-listener",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 434,
+      "byteCount": 436,
+      "sha256": "3a73996116bd2299765d8e81b757dc7eb9922cc04ae3309337ca515f32063880",
+      "placeholder": "/*__GAME_MODULE_01_3a73996116bd2299__*/"
+    },
+    {
+      "order": 2,
+      "file": "core/three.js",
+      "from": "02-exports/module.js",
+      "slug": "exports",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 603455,
+      "byteCount": 603455,
+      "sha256": "b8db8b92b297245504ce1513bb0ecc823d1484c44db307c9896058d1b7059ab7",
+      "placeholder": "/*__GAME_MODULE_02_b8db8b92b2972455__*/"
+    },
+    {
+      "order": 3,
+      "file": "core/gltf-loader.js",
+      "from": "03-gltfloader/module.js",
+      "slug": "gltfloader",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 100181,
+      "byteCount": 100183,
+      "sha256": "8ded7d5401dc741e9e2943bb1007d4ac69a91c382e19aa019c9b6443a159b8d7",
+      "placeholder": "/*__GAME_MODULE_03_8ded7d5401dc741e__*/"
+    },
+    {
+      "order": 4,
+      "file": "input/ffb-moza.js",
+      "from": "04-real-force-feedback-self-centring-spring-over-web-hid-us/module.js",
+      "slug": "real-force-feedback-self-centring-spring-over-web-hid-us",
+      "banner": "REAL FORCE FEEDBACK — self-centring spring over WebHID / USB PID",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 10319,
+      "byteCount": 10333,
+      "sha256": "5460312cc715f3647fc566c7c048bc74fc06c322186bae406e34a0f7a7dc0c8d",
+      "placeholder": "/*__GAME_MODULE_04_5460312cc715f364__*/"
+    },
+    {
+      "order": 5,
+      "file": "world/world-api.js",
+      "from": "05-world-api-registry-contract/module.js",
+      "slug": "world-api-registry-contract",
+      "banner": "WORLD API — registry + contract",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 4255,
+      "byteCount": 4263,
+      "sha256": "c924950e074b25d2372b08357982e6d0edea2fd031155c4d3f98f79ebe01eb95",
+      "placeholder": "/*__GAME_MODULE_05_c924950e074b25d2__*/"
+    },
+    {
+      "order": 6,
+      "file": "world/sea.js",
+      "from": "06-sea-one-shared-driveable-drowning-ocean-for-every-map/module.js",
+      "slug": "sea-one-shared-driveable-drowning-ocean-for-every-map",
+      "banner": "SEA — one shared, driveable, drowning ocean for every map",
+      "registryIds": [
+        "coast"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 73741,
+      "byteCount": 73813,
+      "sha256": "86911c59912e82635d875c76fa677c4b19bd48a2c841bc712934c34f3ca47094",
+      "placeholder": "/*__GAME_MODULE_06_86911c59912e8263__*/"
+    },
+    {
+      "order": 7,
+      "file": "world/neon/neon-core.js",
+      "from": "07-neon-city-core-world-systems/module.js",
+      "slug": "neon-city-core-world-systems",
+      "banner": "NEON CITY — core world systems",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 40848,
+      "byteCount": 40904,
+      "sha256": "bdc2309eb5df15cb7a11b5a2b03c233a82bb9e2da5a0dff25f4d21410c8ae8c7",
+      "placeholder": "/*__GAME_MODULE_07_bdc2309eb5df15cb__*/"
+    },
+    {
+      "order": 8,
+      "file": "world/neon/district-downtown.js",
+      "from": "08-neon-city-district-01-neon-downtown/module.js",
+      "slug": "neon-city-district-01-neon-downtown",
+      "banner": "NEON CITY — District 01: NEON DOWNTOWN",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 11500,
+      "byteCount": 11522,
+      "sha256": "6eecb297b6ce335cc00842430b52e20a81fc32392844bf4564f48824a808dc6c",
+      "placeholder": "/*__GAME_MODULE_08_6eecb297b6ce335c__*/"
+    },
+    {
+      "order": 9,
+      "file": "world/neon/district-docks.js",
+      "from": "09-neon-city-district-02-freight-docks/module.js",
+      "slug": "neon-city-district-02-freight-docks",
+      "banner": "NEON CITY — District 02: FREIGHT DOCKS",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 45810,
+      "byteCount": 45862,
+      "sha256": "f2c9be8de9b8e7a49f9114479485fdf8ae991a7f6f46ba2886269e453fa5423e",
+      "placeholder": "/*__GAME_MODULE_09_f2c9be8de9b8e7a4__*/"
+    },
+    {
+      "order": 10,
+      "file": "world/neon/district-hills.js",
+      "from": "10-neon-city-district-03-hillside/module.js",
+      "slug": "neon-city-district-03-hillside",
+      "banner": "NEON CITY — District 03: HILLSIDE",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 40833,
+      "byteCount": 40879,
+      "sha256": "f886b260f02a301d47cb8f3a02994f8573ee0cc4ecff51c43b6f89acbe0a8dc7",
+      "placeholder": "/*__GAME_MODULE_10_f886b260f02a301d__*/"
+    },
+    {
+      "order": 11,
+      "file": "world/neon/district-strip.js",
+      "from": "11-neon-city-district-04-retail-strip/module.js",
+      "slug": "neon-city-district-04-retail-strip",
+      "banner": "NEON CITY — District 04: RETAIL STRIP",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 60492,
+      "byteCount": 60568,
+      "sha256": "66c384b913b4607e403e2f7b026ae459256747b7e4e62af54cf02ba1433e5292",
+      "placeholder": "/*__GAME_MODULE_11_66c384b913b4607e__*/"
+    },
+    {
+      "order": 12,
+      "file": "world/neon/district-quarry.js",
+      "from": "12-neon-city-district-quarry-construction-stunt-zone/module.js",
+      "slug": "neon-city-district-quarry-construction-stunt-zone",
+      "banner": "NEON CITY — District: QUARRY / CONSTRUCTION STUNT ZONE",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 39644,
+      "byteCount": 39756,
+      "sha256": "258e8e90d7401a7758da7016608f00a610a1dfd8572cd5f4de525597bff5c87e",
+      "placeholder": "/*__GAME_MODULE_12_258e8e90d7401a77__*/"
+    },
+    {
+      "order": 13,
+      "file": "world/neon/district-links.js",
+      "from": "13-neon-city-district-06-links-the-rim-freeway/module.js",
+      "slug": "neon-city-district-06-links-the-rim-freeway",
+      "banner": "NEON CITY — District 06: LINKS & THE RIM FREEWAY",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 68980,
+      "byteCount": 69094,
+      "sha256": "44255e2b59792b06f1b7cddadaab111ba76ddbb52492d99dd974663524181f21",
+      "placeholder": "/*__GAME_MODULE_13_44255e2b59792b06__*/"
+    },
+    {
+      "order": 14,
+      "file": "world/neon/district-expansion.js",
+      "from": "14-neon-city-v6-map-expansion/module.js",
+      "slug": "neon-city-v6-map-expansion",
+      "banner": "NEON CITY — v6 MAP EXPANSION",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 26170,
+      "byteCount": 26184,
+      "sha256": "83d3d3378eaa39e8a9bc03287598e5fb16b6efa1efbc64e9f0ecc6ed60c13b1c",
+      "placeholder": "/*__GAME_MODULE_14_83d3d3378eaa39e8__*/"
+    },
+    {
+      "order": 15,
+      "file": "world/neon/district-signals.js",
+      "from": "15-neon-city-destructible-traffic-signals/module.js",
+      "slug": "neon-city-destructible-traffic-signals",
+      "banner": "NEON CITY — DESTRUCTIBLE TRAFFIC SIGNALS",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 9068,
+      "byteCount": 9072,
+      "sha256": "b1d4247ac23a197053ebecbd2600295b64fb8ccb98c03fcf89ac73130a952a9b",
+      "placeholder": "/*__GAME_MODULE_15_b1d4247ac23a1970__*/"
+    },
+    {
+      "order": 16,
+      "file": "world/neon/district-services.js",
+      "from": "16-neon-city-district-08-roadside-services/module.js",
+      "slug": "neon-city-district-08-roadside-services",
+      "banner": "NEON CITY — District 08: ROADSIDE SERVICES",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 23474,
+      "byteCount": 23524,
+      "sha256": "d567ecfce43200c411018099f31504809d0d096af80f19ea303fb1c3e31e2064",
+      "placeholder": "/*__GAME_MODULE_16_d567ecfce43200c4__*/"
+    },
+    {
+      "order": 17,
+      "file": "game/registry.js",
+      "from": "17-game-systems-the-expansion-seam/module.js",
+      "slug": "game-systems-the-expansion-seam",
+      "banner": "GAME SYSTEMS — the expansion seam",
+      "registryIds": [
+        "radio"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 8134,
+      "byteCount": 8150,
+      "sha256": "52b7ff4bed54e23b84847a6a75f75337583c722b3e4fc17e2b858ce512e1e69a",
+      "placeholder": "/*__GAME_MODULE_17_52b7ff4bed54e23b__*/"
+    },
+    {
+      "order": 18,
+      "file": "game/bugreport.js",
+      "from": "18-bug-reporter-v42-local-only-playtest-capture/module.js",
+      "slug": "bug-reporter-v42-local-only-playtest-capture",
+      "banner": "BUG REPORTER v42 — local-only playtest capture",
+      "registryIds": [
+        "bugreport"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 20810,
+      "byteCount": 20820,
+      "sha256": "8bb776d888c1969742ecfbdc9f46b30474450357f577406f29a9727c5f40059a",
+      "placeholder": "/*__GAME_MODULE_18_8bb776d888c19697__*/"
+    },
+    {
+      "order": 19,
+      "file": "game/vehicle-catalogue.js",
+      "from": "19-vehicle-catalogue-the-cars-what-they-cost-and-how-you-ea/module.js",
+      "slug": "vehicle-catalogue-the-cars-what-they-cost-and-how-you-ea",
+      "banner": "VEHICLE CATALOGUE — the cars, what they cost, and how you earn them",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 23257,
+      "byteCount": 23306,
+      "sha256": "0e0b44017fa4fb71888f5695629cbe94f29ee6a86176f335b421a3ab732bee14",
+      "placeholder": "/*__GAME_MODULE_19_0e0b44017fa4fb71__*/"
+    },
+    {
+      "order": 20,
+      "file": "game/body-shops.js",
+      "from": "20-body-shops-where-the-cars-get-painted-tuned-and-bought/module.js",
+      "slug": "body-shops-where-the-cars-get-painted-tuned-and-bought",
+      "banner": "BODY SHOPS — where the cars get painted, tuned and bought",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 3136,
+      "byteCount": 3162,
+      "sha256": "013082fc14b6286106ba6c2121063ddab86357e577aaa27a8f3ddf43a15069d1",
+      "placeholder": "/*__GAME_MODULE_20_013082fc14b62861__*/"
+    },
+    {
+      "order": 21,
+      "file": "game/street-races.js",
+      "from": "21-street-races-authored-content-for-src-game-events-js/module.js",
+      "slug": "street-races-authored-content-for-src-game-events-js",
+      "banner": "STREET RACES — authored content for src/game/events.js",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 13799,
+      "byteCount": 13814,
+      "sha256": "259d70cb46f09cc1087bfa48c7f175cf97a0ea458bac39356ff2c9197f98ea09",
+      "placeholder": "/*__GAME_MODULE_21_259d70cb46f09cc1__*/"
+    },
+    {
+      "order": 22,
+      "file": "game/drift-zones.js",
+      "from": "22-drift-zones-authored-content-for-src-game-events-js/module.js",
+      "slug": "drift-zones-authored-content-for-src-game-events-js",
+      "banner": "DRIFT ZONES — authored content for src/game/events.js",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 3964,
+      "byteCount": 3986,
+      "sha256": "2d0de40f0a87f57a3ce5e4e4505a3f56e24de763d7bfcd55ac54d07031c02faf",
+      "placeholder": "/*__GAME_MODULE_22_2d0de40f0a87f57a__*/"
+    },
+    {
+      "order": 23,
+      "file": "game/coin-routes.js",
+      "from": "23-coin-routes-authored-content-for-src-game-events-js/module.js",
+      "slug": "coin-routes-authored-content-for-src-game-events-js",
+      "banner": "COIN ROUTES — authored content for src/game/events.js",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 5264,
+      "byteCount": 5286,
+      "sha256": "7346aa97207ff1d0fd53295372a33fa7f929d2dc458b0aaeed573080a6d9aa3e",
+      "placeholder": "/*__GAME_MODULE_23_7346aa97207ff1d0__*/"
+    },
+    {
+      "order": 24,
+      "file": "game/radio-stations.js",
+      "from": "24-radio-stations-the-dial-data-radio-stations-js/module.js",
+      "slug": "radio-stations-the-dial-data-radio-stations-js",
+      "banner": "RADIO STATIONS — the dial (data/radioStations.js)",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 25859,
+      "byteCount": 25908,
+      "sha256": "d19de27b2954b660ca3dcb5cb0fd7f2feddaf38265d9b3935f2602bd93d3e1f3",
+      "placeholder": "/*__GAME_MODULE_24_d19de27b2954b660__*/"
+    },
+    {
+      "order": 25,
+      "file": "game/traffic-personalities.js",
+      "from": "25-traffic-personalities-data-for-src-game-traffic-ai-js/module.js",
+      "slug": "traffic-personalities-data-for-src-game-traffic-ai-js",
+      "banner": "TRAFFIC PERSONALITIES — data for src/game/traffic-ai.js",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 3851,
+      "byteCount": 3868,
+      "sha256": "b292c708a359c4a4205cd26e720082946cbf03be473ffc1ddb30960a7be21afe",
+      "placeholder": "/*__GAME_MODULE_25_b292c708a359c4a4__*/"
+    },
+    {
+      "order": 26,
+      "file": "game/save.js",
+      "from": "26-save-the-versioned-persistence-core-system-id-save-order/module.js",
+      "slug": "save-the-versioned-persistence-core-system-id-save-order",
+      "banner": "SAVE — the versioned persistence core (system id: 'save', order 10)",
+      "registryIds": [
+        "save"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 13758,
+      "byteCount": 13796,
+      "sha256": "848304be6100b630aaa1da3e3c0351f1d719bf478ea0c57d2a8df9162a137cb2",
+      "placeholder": "/*__GAME_MODULE_26_848304be6100b630__*/"
+    },
+    {
+      "order": 27,
+      "file": "game/help.js",
+      "from": "27-help-the-in-game-controls-panel-system-id-help-order-90/module.js",
+      "slug": "help-the-in-game-controls-panel-system-id-help-order-90",
+      "banner": "HELP — the in-game controls panel (system id: 'help', order 90)",
+      "registryIds": [
+        "help"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 14570,
+      "byteCount": 14642,
+      "sha256": "bfe5da6b47c8d50c3b42b6e1bdf1e05cd60eab09166cbd7195ccec76079daa0b",
+      "placeholder": "/*__GAME_MODULE_27_bfe5da6b47c8d50c__*/"
+    },
+    {
+      "order": 28,
+      "file": "game/interact.js",
+      "from": "28-interact-the-one-consistent-interaction-layer/module.js",
+      "slug": "interact-the-one-consistent-interaction-layer",
+      "banner": "INTERACT — the one consistent interaction layer",
+      "registryIds": [
+        "interact"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 4769,
+      "byteCount": 4789,
+      "sha256": "01ce438d9de63a97c8789a56c5d86b981bb13b9a15f45fb15aa0b358f8cecb3a",
+      "placeholder": "/*__GAME_MODULE_28_01ce438d9de63a97__*/"
+    },
+    {
+      "order": 29,
+      "file": "game/roadgraph.js",
+      "from": "29-road-graph-routing-game-systems-id-roadgraph/module.js",
+      "slug": "road-graph-routing-game-systems-id-roadgraph",
+      "banner": "ROAD GRAPH + ROUTING  —  GameSystems id:'roadgraph'",
+      "registryIds": [
+        "roadgraph"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 32226,
+      "byteCount": 32270,
+      "sha256": "406b79a6d241016d99d4dbfa3bc2c4c5b1235fe0d704b4abd89d7cfa6ac7c80f",
+      "placeholder": "/*__GAME_MODULE_29_406b79a6d241016d__*/"
+    },
+    {
+      "order": 30,
+      "file": "game/progression.js",
+      "from": "30-progression-the-wallet-the-garage-the-unlocks-system-id/module.js",
+      "slug": "progression-the-wallet-the-garage-the-unlocks-system-id",
+      "banner": "PROGRESSION — the wallet, the garage, the unlocks (system id 'progression')",
+      "registryIds": [
+        "progression"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 49985,
+      "byteCount": 50080,
+      "sha256": "e0436a6fcd47811ddecbe68cfe38bd46e32808203fb72b999119005fb66c27b4",
+      "placeholder": "/*__GAME_MODULE_30_e0436a6fcd47811d__*/"
+    },
+    {
+      "order": 31,
+      "file": "game/nav.js",
+      "from": "31-navigation-game-systems-id-nav-requires-roadgraph/module.js",
+      "slug": "navigation-game-systems-id-nav-requires-roadgraph",
+      "banner": "NAVIGATION  —  GameSystems id:'nav'   (requires roadgraph)",
+      "registryIds": [
+        "nav"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 38986,
+      "byteCount": 39046,
+      "sha256": "d74cd31e68971fa4d2e6133b235563c4b7347a87ad95eac767ce3ed64d37dc3a",
+      "placeholder": "/*__GAME_MODULE_31_d74cd31e68971fa4__*/"
+    },
+    {
+      "order": 32,
+      "file": "game/events.js",
+      "from": "32-events-coin-routes-drift-zones-and-street-races-game-sys/module.js",
+      "slug": "events-coin-routes-drift-zones-and-street-races-game-sys",
+      "banner": "EVENTS — coin routes, drift zones and street races    GameSystems id:'events'",
+      "registryIds": [
+        "events"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 90052,
+      "byteCount": 90232,
+      "sha256": "667fd54f532505c9e9824c543f27486abaaf373c00fb0320a070e0a4d25aafbf",
+      "placeholder": "/*__GAME_MODULE_32_667fd54f532505c9__*/"
+    },
+    {
+      "order": 33,
+      "file": "game/bodyshop.js",
+      "from": "33-body-shop-the-drive-in-garage-system-id-bodyshop-order-5/module.js",
+      "slug": "body-shop-the-drive-in-garage-system-id-bodyshop-order-5",
+      "banner": "BODY SHOP — the drive-in garage (system id 'bodyshop', order 52)",
+      "registryIds": [
+        "bodyshop"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 39034,
+      "byteCount": 39111,
+      "sha256": "fe4e5dd6ef67f3a21deefc57b5e68b90d8c3cbfc9c7fd10b1a9e88719f17498e",
+      "placeholder": "/*__GAME_MODULE_33_fe4e5dd6ef67f3a2__*/"
+    },
+    {
+      "order": 34,
+      "file": "game/daynight.js",
+      "from": "34-day-night-the-sky-clock-system-id-daynight-order-40/module.js",
+      "slug": "day-night-the-sky-clock-system-id-daynight-order-40",
+      "banner": "DAY / NIGHT — the sky clock (system id: 'daynight', order 40)",
+      "registryIds": [
+        "daynight"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 28117,
+      "byteCount": 28182,
+      "sha256": "92ac7ce9e5f1d24040b2fad4f014f9460f47679c1e27fbdd9fc1f4eb41b3f531",
+      "placeholder": "/*__GAME_MODULE_34_92ac7ce9e5f1d240__*/"
+    },
+    {
+      "order": 35,
+      "file": "game/radio.js",
+      "from": "35-radio-the-dial-the-mixer-and-the-gesture-gate-system-id/module.js",
+      "slug": "radio-the-dial-the-mixer-and-the-gesture-gate-system-id",
+      "banner": "RADIO — the dial, the mixer and the gesture gate (system id: 'radio', order 50)",
+      "registryIds": [
+        "radio"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 26847,
+      "byteCount": 26939,
+      "sha256": "db5baaefd063865bff2d0fba9f9c81d5902d3604fdf065751ed3e4563542dd5c",
+      "placeholder": "/*__GAME_MODULE_35_db5baaefd063865b__*/"
+    },
+    {
+      "order": 36,
+      "file": "game/traffic-ai.js",
+      "from": "36-traffic-personalities-overtaking-police-patrols-id-traff/module.js",
+      "slug": "traffic-personalities-overtaking-police-patrols-id-traff",
+      "banner": "TRAFFIC PERSONALITIES · OVERTAKING · POLICE PATROLS  —  id:'traffic'",
+      "registryIds": [
+        "traffic"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 41846,
+      "byteCount": 41883,
+      "sha256": "4c78679ea3b8160af63ccfcdd26baaf563e620a5a6b7d5668dba1a64c8ed75e0",
+      "placeholder": "/*__GAME_MODULE_36_4c78679ea3b8160a__*/"
+    },
+    {
+      "order": 37,
+      "file": "game/melee.js",
+      "from": "37-melee-combat-module-already-integrated-as-of-v27-histori/module.js",
+      "slug": "melee-combat-module-already-integrated-as-of-v27-histori",
+      "banner": "MELEE COMBAT MODULE — ALREADY INTEGRATED as of v27 · historical integration notes",
+      "registryIds": [
+        "combat"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 81024,
+      "byteCount": 81040,
+      "sha256": "d8502946586b60fa9328ab7a06887062d09aa3e5ecab068cf417e0da146e83a3",
+      "placeholder": "/*__GAME_MODULE_37_d8502946586b60fa__*/"
+    },
+    {
+      "order": 38,
+      "file": "game/melee-bridge.js",
+      "from": "38-melee-combat-module/module.js",
+      "slug": "melee-combat-module",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 53,
+      "byteCount": 53,
+      "sha256": "a2c55235c67e4b9f81c4beb1bbe4ee404b957b7767e5e53dbe5a774beed2bc7f",
+      "placeholder": "/*__GAME_MODULE_38_a2c55235c67e4b9f__*/"
+    },
+    {
+      "order": 39,
+      "file": "game/ordnance.js",
+      "from": "39-heavy-ordnance-module-already-integrated-as-of-v27-histo/module.js",
+      "slug": "heavy-ordnance-module-already-integrated-as-of-v27-histo",
+      "banner": "HEAVY ORDNANCE MODULE — ALREADY INTEGRATED as of v27 · historical integration notes",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 128821,
+      "byteCount": 128848,
+      "sha256": "3606a318318f93a88df52b2a5d00a76da84da357fbec374f87e629e9cd68c1d4",
+      "placeholder": "/*__GAME_MODULE_39_3606a318318f93a8__*/"
+    },
+    {
+      "order": 40,
+      "file": "game/ordnance-bridge.js",
+      "from": "40-heavy-ordnance-module/module.js",
+      "slug": "heavy-ordnance-module",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 57,
+      "byteCount": 57,
+      "sha256": "29622702d12d93679ddc38927e3c890e8746f4c0730f953b31db696d0268c343",
+      "placeholder": "/*__GAME_MODULE_40_29622702d12d9367__*/"
+    },
+    {
+      "order": 41,
+      "file": "game/combat.js",
+      "from": "41-combat-weapons-and-the-police-who-get-out-of-the-car/module.js",
+      "slug": "combat-weapons-and-the-police-who-get-out-of-the-car",
+      "banner": "COMBAT — weapons, and the police who get out of the car",
+      "registryIds": [
+        "combat"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 129035,
+      "byteCount": 129147,
+      "sha256": "4ae80d17514046bdf054b99cec2b166bd04def76385524df98497eb471b53e5f",
+      "placeholder": "/*__GAME_MODULE_41_4ae80d17514046bd__*/"
+    },
+    {
+      "order": 42,
+      "file": "game/ammu-nation.js",
+      "from": "42-ammu-nation-district-weapon-ammunition-and-armour-stores/module.js",
+      "slug": "ammu-nation-district-weapon-ammunition-and-armour-stores",
+      "banner": "AMMU-NATION — district weapon, ammunition and armour stores",
+      "registryIds": [
+        "ammu"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 9086,
+      "byteCount": 9108,
+      "sha256": "3caeda624c4d7076e35ee2d60bfd715502653e5fb66ff28acf88b14c44524f16",
+      "placeholder": "/*__GAME_MODULE_42_3caeda624c4d7076__*/"
+    },
+    {
+      "order": 43,
+      "file": "game/vehicle-damage.js",
+      "from": "43-vehicle-damage-the-one-place-a-car-can-be-hurt/module.js",
+      "slug": "vehicle-damage-the-one-place-a-car-can-be-hurt",
+      "banner": "VEHICLE DAMAGE — the one place a car can be hurt",
+      "registryIds": [
+        "vdamage"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 21888,
+      "byteCount": 21932,
+      "sha256": "79e56ae86085d1b038fd621bf80f6026c2ae913a62e995d2a3ad425a8d0fca4e",
+      "placeholder": "/*__GAME_MODULE_43_79e56ae86085d1b0__*/"
+    },
+    {
+      "order": 44,
+      "file": "game/damage-numbers.js",
+      "from": "44-floating-damage-numbers-pooled-screen-space-feedback/module.js",
+      "slug": "floating-damage-numbers-pooled-screen-space-feedback",
+      "banner": "FLOATING DAMAGE NUMBERS — pooled screen-space feedback",
+      "registryIds": [
+        "damageNumbers"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 3260,
+      "byteCount": 3262,
+      "sha256": "8f1ec9c57e19c9368d69d91ade73a96353e9e5c028fcdb50009c814c419528bb",
+      "placeholder": "/*__GAME_MODULE_44_8f1ec9c57e19c936__*/"
+    },
+    {
+      "order": 45,
+      "file": "game/destructibles.js",
+      "from": "45-destructible-props-the-roadside-you-can-take-apart/module.js",
+      "slug": "destructible-props-the-roadside-you-can-take-apart",
+      "banner": "DESTRUCTIBLE PROPS — the roadside you can take apart",
+      "registryIds": [
+        "destructibles"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 63445,
+      "byteCount": 63473,
+      "sha256": "039159e786342fde45ecbcb76b4ef8cd9f25dee32916d185279e8fd946298b96",
+      "placeholder": "/*__GAME_MODULE_45_039159e786342fde__*/"
+    },
+    {
+      "order": 46,
+      "file": "game/missions-facilities.js",
+      "from": "46-missions-garages-dealerships-v11-friend-system-port/module.js",
+      "slug": "missions-garages-dealerships-v11-friend-system-port",
+      "banner": "MISSIONS + GARAGES + DEALERSHIPS — v11 friend-system port",
+      "registryIds": [
+        "missions",
+        "facilities"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 37324,
+      "byteCount": 37405,
+      "sha256": "4ebc90e4de8b1993faec26c8d67e0828a4bf69532a69030b89b6c2480dc8b4da",
+      "placeholder": "/*__GAME_MODULE_46_4ebc90e4de8b1993__*/"
+    },
+    {
+      "order": 47,
+      "file": "game/aircraft.js",
+      "from": "47-aircraft-planes-and-helicopters-game-systems-id-aircraft/module.js",
+      "slug": "aircraft-planes-and-helicopters-game-systems-id-aircraft",
+      "banner": "AIRCRAFT — planes and helicopters                         GameSystems id:'aircraft'",
+      "registryIds": [
+        "aircraft"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 37621,
+      "byteCount": 37662,
+      "sha256": "18112a6c0a627fdc521f972f6956aa9a6717da51f87babf76664161d78b1d220",
+      "placeholder": "/*__GAME_MODULE_47_18112a6c0a627fdc__*/"
+    },
+    {
+      "order": 48,
+      "file": "game/ammu-nation-2.js",
+      "from": "48-safe-houses-loot-drops-robbable-indoor-shops-v19/module.js",
+      "slug": "safe-houses-loot-drops-robbable-indoor-shops-v19",
+      "banner": "SAFE HOUSES · LOOT DROPS · ROBBABLE INDOOR SHOPS — v19",
+      "registryIds": [
+        "interiors"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 37536,
+      "byteCount": 37552,
+      "sha256": "81a4386ecdcb0f428e7aa12d948770484f114cf6fac37071e280fbe90d2f10f7",
+      "placeholder": "/*__GAME_MODULE_48_81a4386ecdcb0f42__*/"
+    },
+    {
+      "order": 49,
+      "file": "game/crime-upgrades-admin.js",
+      "from": "49-v20-systems-attributed-crime-ledger-admin-tools-vehicle/module.js",
+      "slug": "v20-systems-attributed-crime-ledger-admin-tools-vehicle",
+      "banner": "v20 SYSTEMS — attributed crime ledger, admin tools, vehicle upgrades,",
+      "registryIds": [
+        "crime",
+        "vehicleUpgrades",
+        "lowHealthFx",
+        "admin",
+        "facilityArchitecture",
+        "ragdolls"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 31926,
+      "byteCount": 31944,
+      "sha256": "51cc15042e994eaa83d1fd0174cdd8a8de2ff4ae5adae63d02126aaa795ca507",
+      "placeholder": "/*__GAME_MODULE_49_51cc15042e994eaa__*/"
+    },
+    {
+      "order": 50,
+      "file": "game/hud.js",
+      "from": "50-v22-stabilization-ui-current-car-information-and-compact/module.js",
+      "slug": "v22-stabilization-ui-current-car-information-and-compact",
+      "banner": "v22 STABILIZATION UI — current-car information and compact score/wanted HUD.",
+      "registryIds": [
+        "carInfo",
+        "scoreHud"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 9667,
+      "byteCount": 9681,
+      "sha256": "e90202cf4348641ee0df964f8908fdf83b36799be6153872318051541d30f80a",
+      "placeholder": "/*__GAME_MODULE_50_e90202cf4348641e__*/"
+    },
+    {
+      "order": 51,
+      "file": "game/camera-orbit.js",
+      "from": "51-camera-chase-framing-obstruction-probes-mouse-touch-orbi/module.js",
+      "slug": "camera-chase-framing-obstruction-probes-mouse-touch-orbi",
+      "banner": "CAMERA — chase framing, obstruction probes, mouse/touch orbit",
+      "registryIds": [
+        "camera"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 28156,
+      "byteCount": 28198,
+      "sha256": "5e536cb9d0a20402fdadb960b8137204cd569962cbac0b57ffde4ca4cf22180e",
+      "placeholder": "/*__GAME_MODULE_51_5e536cb9d0a20402__*/"
+    },
+    {
+      "order": 52,
+      "file": "game/pause-phone.js",
+      "from": "52-pause-menu-phone-replaces-the-accidental-map-car-picker/module.js",
+      "slug": "pause-menu-phone-replaces-the-accidental-map-car-picker",
+      "banner": "PAUSE MENU + PHONE — replaces the accidental map/car picker path.",
+      "registryIds": [
+        "pausephone"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 16051,
+      "byteCount": 16091,
+      "sha256": "be25be73e1aabf67dd164443f04e95284c6ebe699e62ebad451511b7968872fd",
+      "placeholder": "/*__GAME_MODULE_52_be25be73e1aabf67__*/"
+    },
+    {
+      "order": 53,
+      "file": "game/paint-shops.js",
+      "from": "53-paint-shops-v20/module.js",
+      "slug": "paint-shops-v20",
+      "banner": null,
+      "registryIds": [
+        "paintspray"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 7813,
+      "byteCount": 7814,
+      "sha256": "cacdc9f0e98c986ad689f866cdf80b74f52df2a35385cbc6e208c9acc169e2ca",
+      "placeholder": "/*__GAME_MODULE_53_cacdc9f0e98c986a__*/"
+    },
+    {
+      "order": 54,
+      "file": "core/engine.js",
+      "from": "54-start-btn/module.js",
+      "slug": "start-btn",
+      "banner": null,
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 419900,
+      "byteCount": 420334,
+      "sha256": "d9b71b47a0b3027c0928cdfebe7f20200dc58220c4e220c78109424ebda350fb",
+      "placeholder": "/*__GAME_MODULE_54_d9b71b47a0b3027c__*/"
+    },
+    {
+      "order": 55,
+      "file": "world/san-andreas-county-module-stale-duplicate-superseded-at-runtime.js",
+      "from": "55-san-andreas-county-module-stale-duplicate-superseded-at/module.js",
+      "slug": "san-andreas-county-module-stale-duplicate-superseded-at",
+      "banner": "SAN ANDREAS COUNTY MODULE (stale duplicate) — superseded at runtime by the copy at manifest order 64; stubbed during v44 integration to remove double-registration risk.",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 175,
+      "byteCount": 179,
+      "sha256": "6e84a3de12a38048bf7eb0c080a7627842ec0ad22879a4ec8dc219650f2b79ed",
+      "placeholder": "/*__GAME_MODULE_55_6e84a3de12a38048__*/"
+    },
+    {
+      "order": 56,
+      "file": "world/atmosphere.js",
+      "from": "56-sa-vibes-district-atmosphere-horizon-sky-and-pooled-ambi/module.js",
+      "slug": "sa-vibes-district-atmosphere-horizon-sky-and-pooled-ambi",
+      "banner": "SA VIBES — district atmosphere, horizon sky, and pooled ambient beds",
+      "registryIds": [
+        "daynight"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 32730,
+      "byteCount": 32748,
+      "sha256": "735b420edffc243c22aa9618cd5d5a0df75f1689f9a4ff65bf12531820a6cf17",
+      "placeholder": "/*__GAME_MODULE_56_735b420edffc243c__*/"
+    },
+    {
+      "order": 57,
+      "file": "game/bikes.js",
+      "from": "57-bikes-module-integration-guide-for-destroy-and-kill-neon/module.js",
+      "slug": "bikes-module-integration-guide-for-destroy-and-kill-neon",
+      "banner": "BIKES MODULE — integration guide for destroy-and-kill-neon-city-v27.html",
+      "registryIds": [
+        "ragdolls",
+        "bikes"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 71513,
+      "byteCount": 71547,
+      "sha256": "9d01dc70472d9b5b30033b633ad50e02388a93eeaa9aa194eae66a0037f484aa",
+      "placeholder": "/*__GAME_MODULE_57_9d01dc70472d9b5b__*/"
+    },
+    {
+      "order": 58,
+      "file": "game/ambient-events.js",
+      "from": "58-world-event-director-sa-style-ambient-life-for-the-game/module.js",
+      "slug": "world-event-director-sa-style-ambient-life-for-the-game",
+      "banner": "WORLD-EVENT DIRECTOR - SA-style ambient life for the GameSystems seam",
+      "registryIds": [
+        "worldevents"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 50669,
+      "byteCount": 50669,
+      "sha256": "b8128e4b7d6211ac47e8fc9e6c04072de708f70b5a8414dd486cdeae48fe30e8",
+      "placeholder": "/*__GAME_MODULE_58_b8128e4b7d6211ac__*/"
+    },
+    {
+      "order": 59,
+      "file": "game/interiors.js",
+      "from": "59-interiors-content-pack-integration-guide-for-destroy-and/module.js",
+      "slug": "interiors-content-pack-integration-guide-for-destroy-and",
+      "banner": "INTERIORS CONTENT PACK — integration guide for destroy-and-kill-neon-city-v27",
+      "registryIds": [
+        "paintspray",
+        "interiorsContent"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 55289,
+      "byteCount": 55310,
+      "sha256": "291a7d8292aa278fa67987dd38b7195405dd57a08aae34b29decac78c155efe4",
+      "placeholder": "/*__GAME_MODULE_59_291a7d8292aa278f__*/"
+    },
+    {
+      "order": 60,
+      "file": "game/ovmobile.js",
+      "from": "60-ov-mobile-runtime-contextual-touch-controls-steering-sch/module.js",
+      "slug": "ov-mobile-runtime-contextual-touch-controls-steering-sch",
+      "banner": "OV-MOBILE runtime — contextual touch controls, steering schemes, SA HUD.",
+      "registryIds": [
+        "ovmobile"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 9476,
+      "byteCount": 9491,
+      "sha256": "c5aa593ca9d3857ad6a9e10d372581e12d591aaa2bfed595cfdfe48ef9bef846",
+      "placeholder": "/*__GAME_MODULE_60_c5aa593ca9d3857a__*/"
+    },
+    {
+      "order": 61,
+      "file": "game/ov-streetlife-cull.js",
+      "from": "61-ov-streetlife-module-ground-level-city-dressing-for-neon/module.js",
+      "slug": "ov-streetlife-module-ground-level-city-dressing-for-neon",
+      "banner": "OV STREETLIFE MODULE — ground-level city dressing for NEON STATE (v38w)",
+      "registryIds": [
+        "ov-streetlife-cull"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 44597,
+      "byteCount": 44627,
+      "sha256": "df99c8e9bcf42b8b9be14baa3fc42e1cf535248fd01191c2e9971c16e1cee84c",
+      "placeholder": "/*__GAME_MODULE_61_df99c8e9bcf42b8b__*/"
+    },
+    {
+      "order": 62,
+      "file": "game/ammu-nation-3.js",
+      "from": "62-overcity-vertical-routes-module-integration-guide-for/module.js",
+      "slug": "overcity-vertical-routes-module-integration-guide-for",
+      "banner": "OVERCITY VERTICAL ROUTES MODULE — integration guide for",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 40875,
+      "byteCount": 40922,
+      "sha256": "6762fbccf9fef55decdf5684ddd5448d3d6a47b2b5e5a41c182e404dc418efca",
+      "placeholder": "/*__GAME_MODULE_62_6762fbccf9fef55d__*/"
+    },
+    {
+      "order": 63,
+      "file": "game/destructibles-2.js",
+      "from": "63-ov-models-module-mesh-facelift-override-for-neon-state-v/module.js",
+      "slug": "ov-models-module-mesh-facelift-override-for-neon-state-v",
+      "banner": "OV-MODELS MODULE — mesh facelift override for NEON STATE (v38w.html)",
+      "registryIds": [
+        "ovModels"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 31230,
+      "byteCount": 31264,
+      "sha256": "76f4b5221de6dafb32b14e36dcd322499c7519a1412639f7596ed92bfcacee3a",
+      "placeholder": "/*__GAME_MODULE_63_76f4b5221de6dafb__*/"
+    },
+    {
+      "order": 64,
+      "file": "world/county.js",
+      "from": "64-san-andreas-county-map-content-module-integration-guide/module.js",
+      "slug": "san-andreas-county-map-content-module-integration-guide",
+      "banner": "SAN ANDREAS COUNTY MAP CONTENT MODULE — integration guide for",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 95890,
+      "byteCount": 95951,
+      "sha256": "57deeb1f151370f0b95c57e4f3e39932081fd1f9d87bcbd698e416f9463e5417",
+      "placeholder": "/*__GAME_MODULE_64_57deeb1f151370f0__*/"
+    },
+    {
+      "order": 65,
+      "file": "game/ov-dealership-module-meridian-motors-the-test-drive-chauffeur-jo.js",
+      "from": "65-ov-dealership-module-meridian-motors-the-test-drive-chau/module.js",
+      "slug": "ov-dealership-module-meridian-motors-the-test-drive-chau",
+      "banner": "OV DEALERSHIP MODULE — MERIDIAN MOTORS + the TEST DRIVE CHAUFFEUR job",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 154137,
+      "byteCount": 154279,
+      "sha256": "1a9cbd400b26f49a8d31e8900f617627c1cfcedfb3e12c798fcf4c035d298762",
+      "placeholder": "/*__GAME_MODULE_65_1a9cbd400b26f49a__*/"
+    },
+    {
+      "order": 66,
+      "file": "game/ov-worktrucks-module-trucks-vans-and-people-with-jobs-neon-state.js",
+      "from": "66-ov-worktrucks-module-trucks-vans-and-people-with-jobs-ne/module.js",
+      "slug": "ov-worktrucks-module-trucks-vans-and-people-with-jobs-ne",
+      "banner": "OV WORKTRUCKS MODULE — trucks, vans, and people with jobs (NEON STATE, v43g)",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 128669,
+      "byteCount": 128804,
+      "sha256": "7fa9b508443e37b25a915ef2a51b99edde66a7bda643aa43ba8cb99286ecd9b6",
+      "placeholder": "/*__GAME_MODULE_66_7fa9b508443e37b2__*/"
+    },
+    {
+      "order": 67,
+      "file": "game/ov-raceway-module-the-neon-ring-motorsport-facility-for-neon-sta.js",
+      "from": "67-ov-raceway-module-the-neon-ring-motorsport-facility-for/module.js",
+      "slug": "ov-raceway-module-the-neon-ring-motorsport-facility-for",
+      "banner": "OV RACEWAY MODULE — \"THE NEON RING\" motorsport facility for NEON STATE (v43g)",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 93167,
+      "byteCount": 93692,
+      "sha256": "39971edcef4407f50df0289142780e56e6a6e3e055c1e3644556c187fb51a5b7",
+      "placeholder": "/*__GAME_MODULE_67_39971edcef4407f5__*/"
+    },
+    {
+      "order": 68,
+      "file": "game/vortex.js",
+      "from": "68-ov-vortex-module-amphibious-hovercraft-for-neon-state-v4/module.js",
+      "slug": "ov-vortex-module-amphibious-hovercraft-for-neon-state-v4",
+      "banner": "OV VORTEX MODULE — amphibious hovercraft for NEON STATE (v43g)",
+      "registryIds": [
+        "vortex"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 52561,
+      "byteCount": 52670,
+      "sha256": "d62854b1aeae8fcea5ca71f5d9a9d3443d5c6079497634bc95915f3a4e41111b",
+      "placeholder": "/*__GAME_MODULE_68_d62854b1aeae8fce__*/"
+    },
+    {
+      "order": 69,
+      "file": "game/interiors-2.js",
+      "from": "69-ov-shopsrpg-module-js-neon-state-shop-clerks-power-doors/module.js",
+      "slug": "ov-shopsrpg-module-js-neon-state-shop-clerks-power-doors",
+      "banner": "ov-shopsrpg-module.js — NEON STATE · SHOP CLERKS, POWER DOORS & THE STICK-UP",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 86625,
+      "byteCount": 86769,
+      "sha256": "3261b10a91134aa259b383111c602fc7b36339427e2c5e2c67199178a144ff80",
+      "placeholder": "/*__GAME_MODULE_69_3261b10a91134aa2__*/"
+    },
+    {
+      "order": 70,
+      "file": "game/scenes.js",
+      "from": "70-ov-scenes-module-street-encounters-rpg-scenes-for-neon-s/module.js",
+      "slug": "ov-scenes-module-street-encounters-rpg-scenes-for-neon-s",
+      "banner": "OV SCENES MODULE — STREET ENCOUNTERS & RPG SCENES for NEON STATE (v44 seam)",
+      "registryIds": [
+        "scenes"
+      ],
+      "type": "classic",
+      "inline": false,
+      "charCount": 164121,
+      "byteCount": 164416,
+      "sha256": "48119ef1790b6f578b0c8c8536fdccbac0b07a858c9d97d0eee34119e240c969",
+      "placeholder": "/*__GAME_MODULE_70_48119ef1790b6f57__*/"
+    },
+    {
+      "order": 71,
+      "file": "game/ov-barn-finds-module-nine-hidden-legends-nine-little-stories.js",
+      "from": "71-ov-barn-finds-module-nine-hidden-legends-nine-little-sto/module.js",
+      "slug": "ov-barn-finds-module-nine-hidden-legends-nine-little-sto",
+      "banner": "OV BARN FINDS MODULE — nine hidden legends, nine little stories",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 109196,
+      "byteCount": 109417,
+      "sha256": "84c11530c67b9fe92b8ce09cd9c8ab22b475a6659d9ed2c172902e08746587b1",
+      "placeholder": "/*__GAME_MODULE_71_84c11530c67b9fe9__*/"
+    },
+    {
+      "order": 72,
+      "file": "game/ov-vertical-2-module-verticality-pass-2-for-neon-state-v44.js",
+      "from": "72-ov-vertical-2-module-verticality-pass-2-for-neon-state-v/module.js",
+      "slug": "ov-vertical-2-module-verticality-pass-2-for-neon-state-v",
+      "banner": "OV VERTICAL 2 MODULE — VERTICALITY PASS 2 for NEON STATE (v44)",
+      "registryIds": [],
+      "type": "classic",
+      "inline": false,
+      "charCount": 105512,
+      "byteCount": 105589,
+      "sha256": "bb1f0cb147cef7f67c6f56f772b95703d4480deeaa94aee28e863087694e0e44",
+      "placeholder": "/*__GAME_MODULE_72_bb1f0cb147cef7f6__*/"
+    }
+  ]
+}

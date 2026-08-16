@@ -1,0 +1,1 @@
+const HeavyOrdnanceModule=globalThis.HeavyOrdnanceModule;

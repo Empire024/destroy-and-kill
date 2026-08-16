@@ -1,0 +1,1 @@
+const MeleeCombatModule=globalThis.MeleeCombatModule;

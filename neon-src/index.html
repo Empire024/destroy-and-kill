@@ -1,0 +1,772 @@
+﻿<html lang="en"><head>
+<!--
+LOW-POLY ROADSIDE BLOCK CREDITS / DESIGN REFERENCES
+"Gas Station" by Alex Safayan — https://poly.pizza/m/7rUkCX-AIR2 — CC BY
+"Parking Lot" by Alex Safayan — https://poly.pizza/m/4NYtgQKdVMy — CC BY
+"Diner" by Poly by Google — https://poly.pizza/m/dlVBCMiaGw2 — CC BY
+"Town Center" by Quaternius — https://poly.pizza/m/CoERW5nFdE — CC0
+The in-game versions are heavily simplified, procedural adaptations optimized for this single-file Three.js game.
+
+-->
+
+<meta charset="UTF-8">
+<!-- viewport-fit=cover is what makes env(safe-area-inset-*) non-zero on iOS: without it
+     the notch and the home indicator are simply padded away and the landscape controls
+     have nothing to dodge. user-scalable=no stops a double-tap zooming the HUD mid-corner. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="icon" href="data:,">
+<title>NEON STATE</title>
+<style>
+  :root{--neon:#ff2d9b;--cyan:#20e3ff;--gold:#ffd23f;--danger:#ff3b3b;--green:#3bff8b;}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#05060a;overflow:hidden;font-family:"Segoe UI",system-ui,sans-serif;color:#fff}
+  canvas{display:block}
+  .hud{position:absolute;pointer-events:none;text-shadow:0 2px 10px #000,0 0 3px #000;z-index:5}
+  #cash{top:16px;left:20px;font-size:42px;font-weight:950;color:var(--danger);letter-spacing:2px;transform:skew(-4deg);filter:drop-shadow(0 0 12px rgba(255,59,59,.65))}
+  #gaugeCluster{bottom:12px;left:50%;transform:translateX(-50%);display:flex;align-items:flex-end;gap:18px;filter:drop-shadow(0 12px 28px rgba(0,0,0,.9))}
+  .gauge{position:relative;border-radius:50%;background:radial-gradient(circle at 50% 55%,#18202c 0 18%,#090c12 40%,#020307 72%);border:5px solid #495568;box-shadow:inset 0 0 0 4px #080a0f,inset 0 0 35px rgba(32,227,255,.13),0 0 24px rgba(32,227,255,.16);overflow:hidden}
+  .gauge:before{content:"";position:absolute;inset:10px;border-radius:50%;background:repeating-conic-gradient(from 235deg,rgba(255,255,255,.9) 0 1.2deg,transparent 1.2deg 7.8deg);mask:radial-gradient(circle,transparent 0 72%,#000 73% 100%);opacity:.78}
+  .gauge:after{content:"";position:absolute;inset:18px;border-radius:50%;border:1px solid rgba(255,255,255,.1);pointer-events:none}
+  #rpmMeter{width:330px;height:330px}
+  #rpmMeter.limiter{box-shadow:inset 0 0 0 4px #080a0f,inset 0 0 55px rgba(255,59,59,.42),0 0 42px rgba(255,59,59,.72);animation:limiterFlash .085s steps(2,end) infinite}
+  #rpmMeter.limiter #rpmValue{color:#ff3b3b;text-shadow:0 0 18px #ff3b3b}
+  @keyframes limiterFlash{50%{filter:brightness(1.45)}}
+  #boostGauge{width:180px;height:180px;border-width:4px;margin-bottom:8px}
+  #boostGauge.boosting{box-shadow:inset 0 0 0 4px #080a0f,inset 0 0 40px rgba(32,227,255,.32),0 0 34px rgba(32,227,255,.55)}
+  .needle{position:absolute;left:50%;top:50%;width:43%;height:4px;transform-origin:0 50%;transform:rotate(-125deg);border-radius:5px;background:linear-gradient(90deg,#ff3b3b 0 76%,transparent 76%);box-shadow:0 0 10px #ff3b3b;transition:transform .045s linear;z-index:5}
+  #boostNeedle{height:3px;background:linear-gradient(90deg,#20e3ff 0 76%,transparent 76%);box-shadow:0 0 9px #20e3ff}
+  .hub{position:absolute;left:50%;top:50%;width:25px;height:25px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#fff 0 8%,#424c5d 12% 42%,#07090d 46%);border:2px solid #8792a4;z-index:7}
+  #boostGauge .hub{width:17px;height:17px}
+  .rpmNum{position:absolute;transform:translate(-50%,-50%);font-size:20px;font-weight:900;color:#dfe7f4;text-shadow:0 1px 4px #000}
+  .rpmNum.red{color:#ff4b4b;text-shadow:0 0 9px rgba(255,59,59,.8)}
+  .psiNum{position:absolute;transform:translate(-50%,-50%);font-size:12px;font-weight:900;color:#cbd5e6}
+  #rpmReadout{display:none}
+  #rpmValue{font-size:40px;font-weight:950;letter-spacing:-2px;color:#fff;line-height:.95}
+  #clusterGear{position:absolute;left:50%;top:48%;transform:translateX(-50%);font-size:48px;font-weight:950;color:var(--neon);line-height:1;text-shadow:0 0 18px rgba(255,45,155,.8);z-index:8}
+  #driveMode{position:absolute;left:50%;top:35%;transform:translateX(-50%);font-size:16px;font-weight:950;letter-spacing:2px;color:#7f8ca0;z-index:9}
+  #driveMode.manual{color:#ffd23f;text-shadow:0 0 13px rgba(255,210,63,.85)}
+  #shiftPrompt{top:13%;left:50%;transform:translateX(-50%) scale(.88);display:none;min-width:190px;padding:10px 20px;border:2px solid #ffd23f;border-radius:12px;background:rgba(8,9,14,.9);text-align:center;font-size:27px;font-weight:950;letter-spacing:3px;color:#ffd23f;box-shadow:0 0 36px rgba(255,210,63,.48);z-index:8}
+  #shiftPrompt.show{display:block;animation:shiftPromptPulse .24s steps(2,end) infinite}
+  #shiftPrompt.danger{border-color:#ff3b3b;color:#ff3b3b;box-shadow:0 0 44px rgba(255,59,59,.72)}
+  @keyframes shiftPromptPulse{50%{transform:translateX(-50%) scale(1.04);filter:brightness(1.4)}}
+  #clusterGear.shift{color:#fff;transform:translateX(-50%) scale(1.22);text-shadow:0 0 25px #fff}
+  #shiftLights{position:absolute;left:50%;top:8%;transform:translateX(-50%);display:flex;gap:5px;z-index:8}
+  #shiftLights i{display:block;width:28px;height:10px;border-radius:8px;background:#1a2230;box-shadow:inset 0 0 5px #000}
+  #shiftLights i.on{background:#ff3b3b;box-shadow:0 0 15px #ff3b3b}
+  #boostReadout{position:absolute;left:50%;top:62%;transform:translateX(-50%);text-align:center;z-index:8}
+  #boostPsi{font-size:29px;font-weight:950;color:var(--cyan);line-height:1;text-shadow:0 0 12px rgba(32,227,255,.65)}
+  #stars{top:58px;left:20px;font-size:24px;letter-spacing:4px;filter:drop-shadow(0 0 8px var(--gold))}
+  #hpwrap{display:none}
+  #heartHealth{top:94px;left:18px;display:flex;gap:9px;align-items:center;font-weight:950;line-height:1;filter:drop-shadow(0 0 13px rgba(255,59,59,.55))}
+  #healthIcon{color:#ff3b3b;font-size:26px;text-shadow:0 0 12px rgba(255,59,59,.95),0 2px 0 #720d18}
+  #healthBar{width:168px;height:15px;background:rgba(12,8,18,.85);border:1px solid rgba(255,59,59,.55);border-radius:8px;overflow:hidden;box-shadow:inset 0 2px 5px rgba(0,0,0,.6)}
+  #healthBar i{display:block;height:100%;width:100%;background:#3bff8b;border-radius:7px;transition:width .18s ease-out,background .3s}
+  #healthValue{color:#ffdfe4;font-size:17px;min-width:34px;text-shadow:0 0 8px rgba(255,59,59,.7),0 2px 0 #000}
+  #heartHealth.low #healthIcon{animation:heartHit .5s steps(2,end) infinite}
+  #heartHealth.hit{animation:heartHit .16s steps(2,end) 4}
+  @keyframes heartHit{50%{transform:translateX(8px) scale(1.18);filter:brightness(2.2)}}
+  #engineWarning{top:151px;left:20px;display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid rgba(255,146,43,.55);border-radius:8px;background:rgba(14,8,3,.82);color:#ff922b;opacity:0;transform:translateY(-5px) scale(.92);transition:opacity .2s,transform .2s,color .2s,border-color .2s;filter:drop-shadow(0 0 12px rgba(255,146,43,.45))}
+  #engineWarning.show{opacity:1;transform:none}
+  #engineWarning.severe{color:#ff3b3b;border-color:rgba(255,59,59,.8);filter:drop-shadow(0 0 16px rgba(255,59,59,.7));animation:engineWarnPulse .38s steps(2,end) infinite}
+  #engineWarning svg{width:34px;height:34px;fill:currentColor}
+  #engineWarning span{font-size:12px;font-weight:950;letter-spacing:1.4px;line-height:1.05;white-space:pre-line}
+  @keyframes engineWarnPulse{50%{filter:brightness(1.7) drop-shadow(0 0 18px currentColor)}}
+  #hp{height:100%;width:100%;background:#3bff8b;border-radius:6px;transition:width .15s}
+  #speed{top:10px;right:24px;text-align:right;transform:skew(-5deg)}
+  #speed .mph{font-size:82px;font-weight:950;color:var(--cyan);line-height:.86;letter-spacing:-6px;filter:drop-shadow(0 0 16px rgba(32,227,255,.6))}
+  #speed.violent .mph{color:#fff;text-shadow:3px 0 #ff2d9b,-3px 0 #20e3ff;animation:speedRattle .09s infinite alternate}
+  @keyframes speedRattle{from{transform:translate(-1px,1px) scale(1.02)}to{transform:translate(2px,-1px) scale(1.07)}}
+  @keyframes pulse{50%{opacity:.4}}
+  #map{position:absolute;bottom:20px;right:20px;z-index:5;border:2px solid rgba(32,227,255,.5);border-radius:8px;
+    background:rgba(6,8,16,.82);box-shadow:0 6px 30px rgba(0,0,0,.6)}
+  #fullmap{position:absolute;inset:0;z-index:220;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;isolation:isolate;pointer-events:auto;
+    background:rgba(4,6,12,.88);backdrop-filter:blur(3px)}
+  #fullmapcv{border:2px solid rgba(32,227,255,.55);border-radius:10px;box-shadow:0 10px 50px rgba(0,0,0,.7);
+    width:min(92vw,1200px);height:auto;aspect-ratio:3/2}
+  #prompt{bottom:66px;left:50%;transform:translateX(-50%);z-index:6;display:none;text-align:center;font-size:15px;line-height:1.5;
+    background:rgba(6,8,16,.85);border:1px solid rgba(255,210,63,.55);padding:9px 22px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+  #prompt b{color:#20e3ff}
+  #prompt .key{display:inline-block;background:#ffd23f;color:#05060a;font-weight:800;border-radius:5px;padding:1px 8px;margin:0 2px;letter-spacing:1px}
+  #toasts{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;
+    align-items:center;gap:6px;pointer-events:none}
+  .toast{background:rgba(6,8,16,.85);border-left:3px solid var(--cyan);padding:7px 16px;border-radius:5px;font-size:14px;
+    font-weight:600;text-shadow:0 1px 4px #000;animation:tin .3s ease,tout .4s ease 2.6s forwards;white-space:nowrap}
+  @keyframes tin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @keyframes tout{to{opacity:0;transform:translateY(-8px)}}
+  #banner{position:absolute;top:32%;left:50%;transform:translate(-50%,-50%) scale(.8);z-index:7;text-align:center;
+    opacity:0;pointer-events:none;transition:opacity .3s,transform .3s}
+  #banner.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #banner .bt{font-size:56px;font-weight:900;letter-spacing:3px;filter:drop-shadow(0 4px 20px rgba(0,0,0,.7))}
+  #banner .bs{font-size:20px;color:#dbe;margin-top:4px;letter-spacing:2px}
+  #flash{position:absolute;inset:0;background:var(--danger);opacity:0;pointer-events:none;transition:opacity .1s;z-index:4}
+  /* WASTED creeps in over the wreck rather than snapping on: the vignette leads,
+     then the word swells out of it. Both are slower than the 3.2s death sequence
+     is long, so the last thing you watch is the fireball, not the caption. */
+  #wasted{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(0,0,0,.15),rgba(0,0,0,.78));opacity:0;pointer-events:none;transition:opacity 2.1s ease-in}
+  #wasted.show{opacity:1}
+  #wasted .w{font-family:Impact,Haettenschweiler,"Arial Narrow Bold","Franklin Gothic Bold",sans-serif;
+    font-size:150px;font-weight:900;letter-spacing:4px;color:#d81f1f;text-transform:uppercase;
+    text-shadow:0 5px 24px rgba(0,0,0,.8),0 0 8px rgba(0,0,0,.6);
+    opacity:0;transform:scaleY(1.12) scale(.74);filter:blur(9px);
+    transition:opacity 1.9s ease-in,transform 2.4s cubic-bezier(.13,.85,.28,1),filter 1.7s ease-in}
+  #wasted.show .w{opacity:1;transform:scaleY(1.12) scale(1);filter:blur(0)}
+  #busted{position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(15,31,54,.2),rgba(0,0,0,.82));opacity:0;pointer-events:none;transition:opacity 1.25s ease-in}
+  #busted.show{opacity:1}
+  #busted .b{font-family:Impact,Haettenschweiler,"Arial Narrow Bold",sans-serif;font-size:142px;font-weight:900;letter-spacing:5px;color:#4e91ff;
+    text-shadow:0 5px 25px #000,0 0 22px rgba(43,107,255,.68);opacity:0;transform:scale(.72);filter:blur(8px);transition:opacity 1.1s,transform 1.6s cubic-bezier(.13,.85,.28,1),filter 1s}
+  #busted.show .b{opacity:1;transform:scale(1);filter:blur(0)}
+  #busted .bs{margin-top:5px;color:#d8e8ff;font:800 15px/1.5 system-ui,sans-serif;letter-spacing:3px;text-align:center;text-shadow:0 2px 8px #000}
+  #wantedState{top:126px;left:20px;font:900 11px/1.2 system-ui,sans-serif;letter-spacing:1.4px;color:#ffb24a;opacity:0;transition:opacity .2s;color:#ffd23f}
+  #wantedState.show{opacity:1}#wantedState.seen{color:#ff5d67}#wantedState.evading{color:#ffd23f}#wantedState.evaded{color:#3bff8b}
+  /* black & white game behind the WASTED overlay — desaturates gradually, so the
+     fireball still burns orange for the first second of the death sequence */
+  canvas{transition:filter 1.8s ease-in}
+  canvas.bw{filter:grayscale(1) contrast(1.08) brightness(.95)}
+  /* Instruments on a car that no longer exists read as a bug. The whole HUD dims
+     away over the death sequence and comes straight back on the respawn. */
+  body.dying #gaugeCluster,body.dying #map,body.dying #stars,body.dying #heartHealth,
+  body.dying #driftBonus,body.dying #engineWarning,body.dying #shiftLights,body.dying #mobileControls{
+    opacity:0;transition:opacity 1.4s ease-in;pointer-events:none}
+  #vig{position:absolute;inset:0;pointer-events:none;z-index:3;box-shadow:inset 0 0 240px rgba(0,0,0,.75)}
+  #overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(255,45,155,.22),rgba(5,6,10,.94));text-align:center;transition:opacity .6s}
+  #overlay h1{font-size:84px;font-weight:900;letter-spacing:3px;line-height:.95;
+    background:linear-gradient(100deg,var(--neon),var(--gold) 45%,var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 6px 30px rgba(255,45,155,.55))}
+  #overlay .sub{font-size:20px;color:#dbe;margin-top:6px;letter-spacing:8px}
+  #overlay p{margin-top:20px;color:#9ab;font-size:14.5px;max-width:560px;line-height:1.65}
+  #overlay .go{margin-top:30px;padding:16px 54px;border:2px solid var(--cyan);border-radius:50px;color:var(--cyan);
+    font-size:20px;font-weight:800;letter-spacing:3px;pointer-events:auto;cursor:pointer;background:rgba(32,227,255,.07);transition:.2s}
+  #overlay .go:hover{background:var(--cyan);color:#05060a;box-shadow:0 0 40px rgba(32,227,255,.6)}
+  #vehicleSelect{display:grid;grid-template-columns:repeat(4,minmax(185px,235px));gap:16px;margin-top:28px;pointer-events:auto}
+  /* Nitrous charge, tucked under the boost gauge. It drains at 34%/s while
+     held and refills at 12%/s on its own, so it reads as a resource you spend
+     rather than a button you hold. */
+  #gaugeCluster.vehicleHidden{opacity:0;pointer-events:none}
+  #boostGauge.noBoost{display:none}
+  #nitroMeter{position:relative;width:42px;height:180px;margin-bottom:8px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;pointer-events:none}
+  #nitroTrack{position:relative;width:18px;height:132px;border:2px solid rgba(255,255,255,.34);border-radius:8px;background:rgba(5,8,14,.88);overflow:hidden}
+  #nitroFill{position:absolute;left:0;right:0;bottom:0;height:100%;border-radius:5px;background:linear-gradient(0deg,#1ea7ff,#20e3ff 60%,#b9f5ff);transition:height .08s linear}
+  #nitroMeter.low #nitroFill{background:linear-gradient(0deg,#7a2f2f,#ff6b3b)}
+  #nitroMeter.burning #nitroFill{box-shadow:0 0 10px #20e3ff,0 0 18px rgba(32,227,255,.6)}
+  #nitroLabel{font:900 12px/.82 "Segoe UI",system-ui,sans-serif;letter-spacing:1px;color:#7f93ad;white-space:pre;text-align:center}
+  #nitroMeter.burning #nitroLabel{color:#20e3ff}
+  #nitroMeter.noNitro{display:none}
+  #mapSelect{display:grid;grid-template-columns:repeat(3,minmax(210px,280px));gap:16px;margin-top:28px;pointer-events:auto;justify-content:center;width:min(96vw,900px)}
+  @media(max-width:900px){#mapSelect{grid-template-columns:repeat(2,minmax(200px,260px));width:min(96vw,560px)}}
+  .vehicleCard{position:relative;min-height:210px;padding:24px 18px 20px;border:2px solid #334052;border-radius:18px;background:linear-gradient(155deg,rgba(25,31,43,.96),rgba(5,7,11,.96));color:#fff;cursor:pointer;text-align:left;overflow:hidden;transition:transform .16s,border-color .16s,box-shadow .16s}
+  .vehicleCard:hover{transform:translateY(-7px) scale(1.025);border-color:var(--cyan);box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 30px rgba(32,227,255,.22)}
+  .vehicleCard:before{content:"";position:absolute;inset:auto -25px -55px auto;width:150px;height:150px;border-radius:50%;background:var(--card);filter:blur(2px);opacity:.22}
+  .vehicleCard .carIcon{font-size:54px;line-height:1;filter:drop-shadow(0 0 14px var(--card))}
+  .vehicleCard h2{margin-top:18px;font-size:27px;letter-spacing:2px;color:var(--card)}
+  .vehicleCard .drive{margin-top:5px;font-size:13px;font-weight:900;letter-spacing:4px;color:#dce5f2}
+  .vehicleCard p{margin-top:13px;font-size:13px;line-height:1.45;color:#9eacc0}
+  @media(max-width:980px){#vehicleSelect{grid-template-columns:repeat(2,minmax(210px,280px))}}@media(max-width:620px){#vehicleSelect,#mapSelect{grid-template-columns:1fr;width:min(92vw,420px);max-height:65vh;overflow:auto}.vehicleCard{min-height:145px}#overlay h1{font-size:48px}}
+  #loading{color:#9ab;font-size:14px;letter-spacing:2px;margin-top:22px}
+  .fade{opacity:0;pointer-events:none!important}
+
+  /* Wheel + pedals setup */
+  #wheelSetupButton{margin-top:18px;padding:11px 22px;border:1px solid #536278;border-radius:999px;background:rgba(10,14,22,.86);color:#dce7f5;font:800 13px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:2px;cursor:pointer;pointer-events:auto;transition:.16s}
+  #wheelSetupButton:hover{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 24px rgba(32,227,255,.24)}
+  #wheelPanel{position:absolute;inset:0;z-index:30;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(3,5,9,.88);backdrop-filter:blur(8px);pointer-events:auto}
+  #wheelPanel.open{display:flex}
+  .wheelDialog{width:min(760px,96vw);max-height:92vh;overflow:auto;padding:28px;border:1px solid #455269;border-radius:20px;background:#0a0e16;box-shadow:0 24px 90px rgba(0,0,0,.72);text-align:left}
+  .wheelDialog h2{font-size:28px;letter-spacing:3px;color:var(--cyan)}
+  .wheelLead{margin-top:7px;color:#91a1b8;font-size:13px;line-height:1.55}
+  .wheelDeviceRow{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:20px}
+  #wheelDeviceSelect{min-width:0;width:100%;height:44px;padding:0 12px;border:1px solid #354158;border-radius:10px;background:#111725;color:#fff;font-size:15px}
+  #wheelRefresh{height:44px;padding:0 15px;border:1px solid #354158;border-radius:10px;background:#111725;color:#dce7f5;font-weight:800;cursor:pointer}
+  #wheelDeviceStatus{margin-top:9px;min-height:20px;color:#9babc0;font-size:13px}
+  #wheelDeviceStatus.good{color:var(--green)}
+  .wheelBindings{display:grid;gap:10px;margin-top:20px}
+  .wheelBindRow{display:grid;grid-template-columns:145px 1fr 110px;gap:10px;align-items:center;padding:11px;border:1px solid #283349;border-radius:12px;background:#0e1420}
+  .wheelBindRow button{height:42px;border:1px solid #4d5d76;border-radius:9px;background:#151d2b;color:#fff;font-weight:900;letter-spacing:1px;cursor:pointer}
+  .wheelBindRow button.binding{border-color:var(--gold);color:var(--gold);animation:pulse .5s infinite}
+  .wheelBindHint{font-size:12px;line-height:1.4;color:#8fa0b6}
+  .wheelAxisName{text-align:right;color:#dce7f5;font-weight:800;font-size:12px}
+  .wheelOptions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}
+  .wheelOption{padding:11px;border:1px solid #283349;border-radius:12px;background:#0e1420}
+  .wheelOption label{display:block;color:#aebdd0;font-size:12px;font-weight:800;letter-spacing:1px}
+  .wheelOption input[type=range]{width:100%;margin-top:10px}
+  .wheelOption.check{display:flex;align-items:center;gap:10px}
+  .wheelOption.check input{width:20px;height:20px}
+  .wheelLive{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px;margin-top:18px}
+  .wheelMeter{padding:10px;border:1px solid #283349;border-radius:12px;background:#070b12}
+  .wheelMeter label{display:flex;justify-content:space-between;color:#99a9bd;font-size:11px;font-weight:900;letter-spacing:1px}
+  .wheelTrack{position:relative;height:12px;margin-top:9px;border-radius:8px;background:#1b2433;overflow:hidden}
+  .wheelTrack i{position:absolute;inset:0 auto 0 0;width:0;background:var(--cyan);border-radius:8px}
+  #wheelSteerFill{left:50%;width:2px;transform:translateX(-50%);background:var(--gold)}
+  #wheelBrakeFill{background:var(--danger)}
+  .wheelActions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-top:22px}
+  .wheelActions button{min-height:44px;padding:0 18px;border:1px solid #45546c;border-radius:10px;background:#121925;color:#fff;font-weight:900;letter-spacing:1px;cursor:pointer}
+  #wheelSave{border-color:var(--green);color:var(--green)}
+  #wheelDisable{margin-right:auto;color:#8e9caf}
+  @media(max-width:650px){.wheelBindRow{grid-template-columns:1fr}.wheelAxisName{text-align:left}.wheelOptions,.wheelLive{grid-template-columns:1fr}.wheelDialog{padding:20px}}
+
+
+  /* Drift combo — only appears while a slide is alive */
+  #driftBonus{position:absolute;top:92px;left:50%;z-index:8;width:min(520px,72vw);transform:translateX(-50%) translateY(-12px) scale(.96);opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;--drift-color:#20e3ff}
+  #driftBonus.show{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
+  #driftBonus .driftTop{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:7px;font-weight:950;text-shadow:0 3px 12px #000}
+  #driftLevel{font-size:19px;letter-spacing:3px;color:var(--drift-color)}
+  #driftPoints{font-size:38px;line-height:.9;color:#fff;filter:drop-shadow(0 0 11px var(--drift-color))}
+  #driftMultiplier{font-size:24px;color:var(--drift-color);white-space:nowrap}
+  #driftTrack{height:17px;padding:3px;border:2px solid color-mix(in srgb,var(--drift-color) 72%,#fff 28%);border-radius:999px;background:rgba(4,7,12,.88);box-shadow:0 0 22px color-mix(in srgb,var(--drift-color) 38%,transparent)}
+  #driftFill{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--drift-color) 62%,#fff 10%),var(--drift-color));box-shadow:0 0 15px var(--drift-color);transition:width .07s linear}
+  #driftBonus.levelUp{animation:driftLevelPop .34s ease-out}
+  @keyframes driftLevelPop{45%{transform:translateX(-50%) scale(1.09);filter:brightness(1.7)}}
+
+
+
+  /* Mobile controls — touch buttons plus phone-tilt steer-by-wire */
+  #mobileControls{position:absolute;inset:0;z-index:60;display:none;pointer-events:none;user-select:none;-webkit-user-select:none}
+  body.mobile-ui:not(.car-select-open) #mobileControls{display:block}
+  /* Mobile controls: small on screen, generous to the thumb. Every control gets
+     an invisible ::before that extends the touch target well past the artwork,
+     so the visual footprint can shrink without the buttons getting harder to hit. */
+  .mobileTop{position:absolute;top:max(6px,env(safe-area-inset-top));left:50%;display:flex;align-items:center;justify-content:center;gap:6px;transform:translateX(-50%);pointer-events:auto}
+  .mobileTop button,.mobileRound,.mobilePedal,.mobileShift{position:relative;border:1px solid rgba(255,255,255,.28);background:rgba(5,8,14,.72);color:#fff;font:900 11px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.7px;box-shadow:0 4px 14px rgba(0,0,0,.5);backdrop-filter:blur(6px);-webkit-tap-highlight-color:transparent;touch-action:none}
+  .mobileTop button::before,.mobileRound::before,.mobilePedal::before,.mobileShift::before{content:"";position:absolute;inset:-12px;border-radius:inherit}
+  .mobileTop button{min-width:50px;height:34px;padding:0 9px;border-radius:9px;opacity:.86}
+  .mobileTop button.active{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 16px rgba(32,227,255,.4);opacity:1}
+  #mobileMore{min-width:38px;font-size:14px;letter-spacing:1px}
+  .mobileExtra{display:none;gap:6px}
+  .mobileExtra.open{display:flex}
+  #mobileTiltState{position:absolute;top:calc(max(6px,env(safe-area-inset-top)) + 38px);left:50%;transform:translateX(-50%);padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.55);color:#9fb0c6;font-size:9px;font-weight:800;letter-spacing:.6px;pointer-events:none;white-space:nowrap;opacity:.9}
+  /* left thumb: steering.  right thumb: gas/brake. */
+  .mobileSteer{position:absolute;left:max(8px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,58px);gap:12px;pointer-events:auto}
+  .mobileRound{width:58px;height:58px;border-radius:50%;font-size:22px}
+  .mobileRound.pressed,.mobilePedal.pressed,.mobileShift.pressed{transform:scale(.94);background:rgba(32,227,255,.3);border-color:var(--cyan)}
+  .mobileDrive{position:absolute;right:max(8px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));display:grid;grid-template-columns:44px 64px 64px;grid-template-rows:44px 68px;gap:8px;align-items:end;pointer-events:auto}
+  .mobilePedal{height:68px;border-radius:15px;font-size:12px}
+  #mobileGas{background:rgba(22,110,65,.78);border-color:rgba(59,255,139,.6)}
+  #mobileBrake{background:rgba(120,24,31,.8);border-color:rgba(255,59,59,.68)}
+  #mobileNitro,#mobileHandbrake{height:44px;font-size:10px}
+  .mobileShift{width:44px;height:44px;border-radius:12px;font-size:19px}
+  #mobileShiftUp{grid-column:1;grid-row:1}#mobileShiftDown{grid-column:1;grid-row:2;align-self:start}
+  #mobileNitro{grid-column:2;grid-row:1;height:58px;border-radius:14px;color:var(--cyan)}
+  #mobileHandbrake{grid-column:3;grid-row:1;height:58px;border-radius:14px;color:var(--gold)}
+  #mobileGas{grid-column:3;grid-row:2}#mobileBrake{grid-column:2;grid-row:2}
+  @media(max-width:900px),(pointer:coarse){
+    #cash{font-size:25px;top:62px;left:12px}#stars{top:92px;left:12px;font-size:17px}#heartHealth{top:116px;left:11px}#heartHealth #healthBar{width:118px;height:12px}#heartHealth #healthIcon{font-size:19px}#heartHealth #healthValue{font-size:13px;min-width:26px}#engineWarning{top:157px;left:12px}
+    #speed{top:62px;right:13px}#speed .mph{font-size:52px;letter-spacing:-4px}
+    #gaugeCluster{bottom:-42px;transform:translateX(-50%) scale(.54);transform-origin:50% 100%}
+    #driftBonus{top:116px;width:min(72vw,430px)}#map{display:none!important}
+    .toast{font-size:12px;max-width:92vw;white-space:normal;text-align:center}
+  }
+  @media(max-width:430px){
+    .mobileTop{gap:5px}.mobileTop button{min-width:54px;padding:0 8px;font-size:10px}.mobileSteer{grid-template-columns:repeat(2,62px)}.mobileRound{width:62px;height:62px}
+    .mobileDrive{grid-template-columns:52px 72px 72px;grid-template-rows:52px 76px}.mobilePedal{height:76px}.mobileShift{width:52px;height:52px}
+  }
+
+  /* ---------- Landscape-first touch layout ----------
+     A phone held sideways is the orientation this game is designed for: the HUD is
+     wide, the left thumb steers and the right thumb works the pedals. Portrait still
+     runs — it just asks to be rotated first, with a way out for anyone whose phone
+     is orientation-locked.
+     Everything below is scoped to a body class (.touch-ui = coarse pointer only,
+     .mobile-ui = the existing touch/narrow gate), so desktop, including a narrow or
+     short desktop window, gets exactly the layout it had before. */
+
+  /* Portrait rotate prompt. Only a real touch device ever gets body.touch-ui. */
+  #rotateGate{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:15px;text-align:center;
+    padding:calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+    background:radial-gradient(ellipse at center,rgba(255,45,155,.2),rgba(4,5,9,.985)) #05060a;touch-action:manipulation}
+  #rotateGate .phoneIcon{width:74px;height:124px;border:4px solid var(--cyan);border-radius:15px;box-shadow:0 0 32px rgba(32,227,255,.45);animation:rotateHint 2.6s ease-in-out infinite}
+  #rotateGate .phoneIcon i{display:block;width:32px;height:4px;margin:9px auto 0;border-radius:3px;background:rgba(32,227,255,.6)}
+  #rotateGate h2{font-size:25px;font-weight:950;letter-spacing:3px;color:var(--cyan);text-shadow:0 0 22px rgba(32,227,255,.5)}
+  #rotateGate p{max-width:290px;color:#9ab;font-size:13.5px;line-height:1.6}
+  #rotateGate button{min-height:44px;padding:0 20px;border:1px solid #536278;border-radius:999px;background:rgba(10,14,22,.9);color:#dce7f5;
+    font:800 12px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:1.6px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  #rotateGate #rotateLock{border-color:var(--cyan);color:var(--cyan)}
+  #rotateGate #rotateDismiss{border-color:transparent;background:none;color:#7b8ba0;text-decoration:underline;letter-spacing:1px;font-weight:600;text-transform:none}
+  @keyframes rotateHint{0%,26%{transform:rotate(0)}50%,78%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+  /* body.dying fades the HUD away, but pointer-events:none on #mobileControls does
+     not reach the buttons — each control group sets pointer-events:auto and a child
+     always wins that. An invisible control that still takes a thumb is worse than a
+     visible one, so the groups are switched off explicitly. */
+  body.dying #mobileControls .mobileTop,body.dying #mobileControls .mobileSteer,
+  body.dying #mobileControls .mobileDrive{pointer-events:none}
+  @media(orientation:portrait){
+    body.touch-ui:not(.portrait-ok) #rotateGate{display:flex}
+    body.touch-ui:not(.portrait-ok) #mobileControls{display:none!important}
+  }
+  /* Portrait is the fallback, not a broken state: lift the gauges and the toasts
+     clear of the thumb row rather than letting the buttons sit on top of them. */
+  @media(orientation:portrait) and (max-width:560px){
+    body.mobile-ui #gaugeCluster{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 140px);transform:translateX(-50%) scale(.44)}
+    body.mobile-ui #toasts{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 300px)}
+    body.mobile-ui #prompt{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 300px)}
+    body.mobile-ui .mobileSteer{left:max(8px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom))}
+    body.mobile-ui .mobileDrive{right:max(8px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom))}
+  }
+
+  /* Landscape controls: bigger thumb targets than portrait (there is room for them)
+     and every edge pushed clear of the notch and the home indicator. */
+  @media(orientation:landscape){
+    body.mobile-ui .mobileSteer{left:max(12px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));grid-template-columns:repeat(2,64px);gap:14px}
+    body.mobile-ui .mobileRound{width:64px;height:64px;font-size:24px}
+    body.mobile-ui .mobileDrive{right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));grid-template-columns:46px 72px 72px;grid-template-rows:52px 80px;gap:9px}
+    body.mobile-ui .mobilePedal{height:80px;font-size:12px}
+    body.mobile-ui #mobileNitro,body.mobile-ui #mobileHandbrake{height:52px;font-size:10px}
+    body.mobile-ui .mobileShift{width:46px;height:46px;font-size:20px}
+    body.mobile-ui .mobileTop{top:max(6px,env(safe-area-inset-top))}
+  }
+  /* A rotated phone is only ~390px tall. The gauge cluster alone is 330px, so the
+     whole HUD has to come down a size or it eats the road. */
+  @media(orientation:landscape) and (max-height:560px){
+    body.mobile-ui #cash{top:max(5px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));font-size:21px;letter-spacing:1px}
+    body.mobile-ui #stars{top:calc(max(5px,env(safe-area-inset-top)) + 25px);left:max(12px,env(safe-area-inset-left));font-size:14px;letter-spacing:2px}
+    body.mobile-ui #heartHealth{top:calc(max(5px,env(safe-area-inset-top)) + 45px);left:max(11px,env(safe-area-inset-left));gap:4px}
+    body.mobile-ui #heartHealth #healthBar{width:96px;height:11px}
+    body.mobile-ui #heartHealth #healthIcon{font-size:16px}
+    body.mobile-ui #heartHealth #healthValue{font-size:12px;min-width:24px}
+    body.mobile-ui #engineWarning{top:calc(max(5px,env(safe-area-inset-top)) + 78px);left:max(12px,env(safe-area-inset-left));padding:5px 8px;gap:6px}
+    body.mobile-ui #engineWarning svg{width:24px;height:24px}
+    body.mobile-ui #engineWarning span{font-size:10px;letter-spacing:1px}
+    body.mobile-ui #speed{top:max(3px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right))}
+    body.mobile-ui #speed .mph{font-size:44px;letter-spacing:-3px}
+    body.mobile-ui #gaugeCluster{bottom:-32px;transform:translateX(-50%) scale(.4);gap:10px}
+    body.mobile-ui #driftBonus{top:calc(max(5px,env(safe-area-inset-top)) + 64px);width:min(48vw,340px)}
+    body.mobile-ui #driftPoints{font-size:30px}body.mobile-ui #driftLevel{font-size:15px}body.mobile-ui #driftMultiplier{font-size:19px}
+    body.mobile-ui #shiftPrompt{top:auto;bottom:30%;min-width:150px;padding:6px 14px;font-size:19px;letter-spacing:2px}
+    /* toasts move to the left rail, above the steering thumb: dead centre-bottom is
+       where the gauges live and centre-top is the drift meter. */
+    body.mobile-ui #toasts{left:max(12px,env(safe-area-inset-left));transform:none;align-items:flex-start;
+      bottom:calc(max(12px,env(safe-area-inset-bottom)) + 86px)}
+    body.mobile-ui .toast{max-width:44vw;text-align:left}
+    /* the safehouse prompt sits just above the gauges — the top centre belongs to
+       the drift meter, which must never be covered */
+    body.mobile-ui #prompt{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 96px);font-size:12.5px;padding:7px 15px}
+    /* Menus: four car cards will not stack on a 390px-tall screen. */
+    body.mobile-ui #overlay{justify-content:flex-start;overflow:auto;
+      padding:calc(9px + env(safe-area-inset-top)) calc(9px + env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) calc(9px + env(safe-area-inset-left))}
+    body.mobile-ui #overlay h1{font-size:29px;letter-spacing:2px}
+    body.mobile-ui #overlay .sub{font-size:11px;letter-spacing:5px;margin-top:2px}
+    body.mobile-ui #overlay p{margin-top:8px;font-size:11.5px;line-height:1.45;max-width:none}
+    body.mobile-ui #vehicleSelect{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px;width:min(97vw,940px);max-height:none;overflow:visible}
+    body.mobile-ui #mapSelect{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;width:min(97vw,860px);max-height:none;overflow:visible}
+    body.mobile-ui .vehicleCard{min-height:0;padding:11px 11px 13px;border-radius:13px}
+    body.mobile-ui .vehicleCard:before{width:88px;height:88px;inset:auto -18px -34px auto}
+    body.mobile-ui .vehicleCard .carIcon{font-size:27px}
+    body.mobile-ui .vehicleCard h2{margin-top:6px;font-size:15px;letter-spacing:1px}
+    body.mobile-ui .vehicleCard .drive{margin-top:2px;font-size:9.5px;letter-spacing:2px}
+    body.mobile-ui .vehicleCard p{margin-top:6px;font-size:10.5px;line-height:1.35}
+    body.mobile-ui #wheelSetupButton{margin-top:11px;padding:9px 18px;font-size:11px}
+    body.mobile-ui #loading{margin-top:8px;font-size:11px}
+    body.mobile-ui #wheelPanel{padding:8px}
+    body.mobile-ui .wheelDialog{max-height:96vh;padding:16px}
+    body.mobile-ui .wheelDialog h2{font-size:21px}
+    body.mobile-ui .wheelLead{font-size:11.5px}
+    /* The banner is the only channel for mission and save messages now, so it has
+       to land somewhere it is actually readable. At 32% of a 390px viewport it sat
+       across the bottom half of the drift meter; 44% drops it into the clear band
+       between the drift bar and the safehouse prompt. */
+    body.mobile-ui #banner{top:44%}
+    body.mobile-ui #banner .bt{font-size:34px}body.mobile-ui #banner .bs{font-size:14px}
+  }
+
+
+  /* Compact phone presentation: keep the car and road as the dominant image. */
+  @media(max-width:900px),(pointer:coarse){
+    body.mobile-ui #cash{font-size:19px!important;top:44px!important;left:9px!important}
+    body.mobile-ui #stars{font-size:12px!important;top:67px!important;left:9px!important;letter-spacing:2px!important}
+    body.mobile-ui #heartHealth{top:86px!important;left:8px!important;gap:4px!important}
+    body.mobile-ui #heartHealth #healthBar{width:84px!important;height:9px!important}
+    body.mobile-ui #heartHealth #healthIcon{font-size:14px!important}
+    body.mobile-ui #heartHealth #healthValue{font-size:10px!important;min-width:20px!important}
+    body.mobile-ui #engineWarning{top:111px!important;left:8px!important;padding:3px 6px!important}
+    body.mobile-ui #engineWarning svg{width:20px!important;height:20px!important}
+    body.mobile-ui #engineWarning span{font-size:8px!important}
+    body.mobile-ui #speed{top:43px!important;right:9px!important}
+    body.mobile-ui #speed .mph{font-size:38px!important;letter-spacing:-3px!important}
+    body.mobile-ui #gaugeCluster{bottom:-66px!important;transform:translateX(-50%) scale(.39)!important;gap:8px!important}
+    body.mobile-ui #driftBonus{top:82px!important;width:min(250px,42vw)!important;transform:translateX(-50%) translateY(-8px) scale(.78)!important}
+    body.mobile-ui #driftBonus.show{transform:translateX(-50%) translateY(0) scale(.78)!important}
+    body.mobile-ui #driftBonus .driftTop{gap:7px!important;margin-bottom:3px!important}
+    body.mobile-ui #driftLevel{font-size:10px!important;letter-spacing:1.5px!important}
+    body.mobile-ui #driftPoints{font-size:21px!important}
+    body.mobile-ui #driftMultiplier{font-size:13px!important}
+    body.mobile-ui #driftTrack{height:9px!important;padding:2px!important;border-width:1px!important}
+    /* toast feed rules live in the consolidated OV-MOBILE block at the end of this stylesheet */
+    body.mobile-ui #prompt{font-size:10px!important;padding:5px 10px!important;bottom:82px!important}
+    body.mobile-ui .mobileTop{gap:4px!important}
+    body.mobile-ui .mobileTop button{min-width:40px!important;height:27px!important;padding:0 6px!important;font-size:8.5px!important;border-radius:7px!important}
+    body.mobile-ui #mobileMore{min-width:30px!important;font-size:11px!important}
+    body.mobile-ui #mobileTiltState{top:34px!important;font-size:7px!important;padding:2px 6px!important}
+    body.mobile-ui .mobileSteer{grid-template-columns:repeat(2,50px)!important;gap:8px!important}
+    body.mobile-ui .mobileRound{width:50px!important;height:50px!important;font-size:18px!important}
+    body.mobile-ui .mobileDrive{grid-template-columns:38px 56px 56px!important;grid-template-rows:38px 59px!important;gap:6px!important}
+    body.mobile-ui .mobilePedal{height:59px!important;border-radius:12px!important;font-size:9px!important}
+    body.mobile-ui .mobileShift{width:38px!important;height:38px!important;font-size:16px!important}
+    body.mobile-ui #mobileNitro,body.mobile-ui #mobileHandbrake{height:43px!important;font-size:8px!important}
+    body.mobile-ui #banner .bt{font-size:28px!important}
+    body.mobile-ui #banner .bs{font-size:11px!important}
+    body.mobile-ui #raceHud{transform:scale(.72);transform-origin:top right}
+  }
+  @media(orientation:landscape) and (max-height:560px){
+    body.mobile-ui #gaugeCluster{bottom:-74px!important;transform:translateX(-50%) scale(.34)!important}
+    body.mobile-ui #driftBonus{top:55px!important;width:min(220px,38vw)!important}
+    body.mobile-ui #prompt{bottom:68px!important}
+  }
+
+  /* v15 vehicle instruments: the raw RPM number stays removed. The centre
+     readout is transmission state; NOS is a true vertical bottle immediately
+     right of the boost instrument and disappears when no bottle is installed. */
+  #gaugeCluster.vehicleHidden{opacity:0;pointer-events:none}
+  #rpmValue{display:none!important}
+  #boostGauge.noBoost{display:none}
+  #boostGauge.naBoost{filter:saturate(.42) brightness(.76);border-color:#394454}
+  #boostGauge.naBoost .psiNum,#boostGauge.naBoost #boostNeedle{opacity:.12}
+  #boostGauge.naBoost #boostPsi{font-size:20px;color:#9ba8ba;letter-spacing:1px}
+  #nitroMeter{position:absolute;left:calc(100% + 10px);top:17px;width:34px;height:154px;margin:0;display:flex;flex-direction:column-reverse;align-items:center;justify-content:flex-start;gap:5px;pointer-events:none;overflow:visible}
+  #nitroTrack{position:relative;width:16px;height:112px;border:2px solid rgba(255,255,255,.34);border-radius:7px;background:rgba(5,8,14,.88);overflow:hidden;flex:none}
+  #nitroFill{position:absolute;left:0;right:0;bottom:0;width:100%;height:100%;border-radius:4px;background:linear-gradient(0deg,#1ea7ff,#20e3ff 60%,#b9f5ff);transition:height .08s linear}
+  #nitroMeter.low #nitroFill{background:linear-gradient(0deg,#7a2f2f,#ff6b3b)}
+  #nitroLabel{font:950 10px/.82 "Segoe UI",system-ui,sans-serif;letter-spacing:0;color:#7f93ad;white-space:pre;text-align:center}
+  #nitroMeter.noNitro{display:none}
+
+  /* Notifications are lightweight score-feed text, not floating dark cards. */
+  #toasts{position:absolute;top:184px;bottom:auto;left:20px;transform:none;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:min(360px,42vw);pointer-events:none}
+  .toast{max-width:100%;padding:0;border:0!important;border-radius:0;background:none!important;box-shadow:none!important;color:#eaf2ff;font-size:11px;line-height:1.3;font-weight:800;letter-spacing:.25px;text-align:left;text-shadow:0 2px 5px #000,0 0 5px #000;white-space:normal;animation:tinyToastIn .12s ease-out,tinyToastOut .28s ease 2.45s forwards}
+  @keyframes tinyToastIn{from{opacity:0;transform:translateX(-5px)}to{opacity:.95;transform:none}}
+  @keyframes tinyToastOut{to{opacity:0;transform:translateY(-3px)}}
+
+  /* =================== OV-MOBILE — consolidated mobile layer ===================
+     Single home for every body.mobile-ui rule this patch owns: the toast-feed
+     placement (moved here from the two blocks it used to straddle plus the
+     duplicates the compact/landscape blocks carried), SA-style area/vehicle
+     name plates, the re-enabled compact minimap, contextual control visibility
+     (m-foot / m-car / m-air / m-nearcar / m-nonitro, maintained by the
+     ovmobile system from live engine state), and the three steering schemes
+     (msteer-buttons / msteer-pad / msteer-swipe). Desktop never gets
+     body.mobile-ui, so everything here is inert there. */
+  @media(max-width:900px),(pointer:coarse){
+    body.mobile-ui #toasts{top:106px!important;bottom:auto!important;left:max(8px,env(safe-area-inset-left))!important;width:min(190px,42vw)!important;gap:1px!important;transform:none!important}
+    body.mobile-ui .toast{font-size:8px!important;line-height:1.18!important;padding:0!important;max-width:100%!important}
+  }
+  @media(orientation:landscape) and (max-height:560px){
+    body.mobile-ui #toasts{top:84px!important;bottom:auto!important;left:max(8px,env(safe-area-inset-left))!important;width:min(170px,38vw)!important}
+    body.mobile-ui .toast{font-size:7.5px!important;max-width:36vw!important}
+    body.mobile-ui #map{width:74px!important;height:74px!important;top:86px!important}
+  }
+  /* SA-mobile HUD names: area top-centre (fades), current vehicle lower-right. */
+  #mAreaName{position:absolute;left:50%;top:calc(max(6px,env(safe-area-inset-top)) + 62px);transform:translateX(-50%);z-index:8;display:none;padding:3px 12px;color:#ffd7fb;font:900 15px/1.15 Georgia,"Times New Roman",serif;letter-spacing:2.5px;text-shadow:0 2px 6px #000,0 0 14px rgba(255,45,155,.5);white-space:nowrap;opacity:0;transition:opacity .45s ease;pointer-events:none}
+  #mVehName{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:calc(max(12px,env(safe-area-inset-bottom)) + 236px);z-index:8;display:none;color:#bfe8ff;font:900 13px/1.15 Georgia,"Times New Roman",serif;letter-spacing:2px;text-align:right;text-shadow:0 2px 6px #000,0 0 12px rgba(32,227,255,.45);white-space:nowrap;opacity:0;transition:opacity .45s ease;pointer-events:none}
+  body.mobile-ui #mAreaName,body.mobile-ui #mVehName{display:block}
+  #mAreaName.show,#mVehName.show{opacity:1}
+  /* Tighter minimap back on phones — the canvas is already drawn every frame,
+     so showing it costs nothing. Sits under the speedo, clear of both thumbs. */
+  body.mobile-ui #map{display:block!important;width:88px!important;height:88px!important;top:96px!important;right:9px!important;bottom:auto!important;left:auto!important;border-width:1px!important;border-radius:10px!important;opacity:.93}
+  /* Contextual controls: a button is on screen only while it can do something. */
+  body.mobile-ui.m-foot #mobileShiftUp,body.mobile-ui.m-foot #mobileShiftDown,body.mobile-ui.m-foot #mobileHandbrake,
+  body.mobile-ui.m-air #mobileShiftUp,body.mobile-ui.m-air #mobileShiftDown,body.mobile-ui.m-air #mobileHandbrake,
+  body.mobile-ui.m-air #mobileNitro{display:none}
+  body.mobile-ui.m-car.m-nonitro #mobileNitro{visibility:hidden}
+  body.mobile-ui.m-air #cbMobile{display:none!important}
+  body.mobile-ui.m-car #cbAim{display:none}
+  #mobileVehicle{position:absolute;right:calc(max(8px,env(safe-area-inset-right)) + 178px);bottom:max(12px,env(safe-area-inset-bottom));width:64px;height:59px;display:none;pointer-events:auto;border:1px solid rgba(59,255,139,.62);border-radius:14px;background:rgba(12,84,50,.8);color:#eafff3;font:900 10px/1.15 "Segoe UI",system-ui,sans-serif;letter-spacing:.8px;box-shadow:0 4px 14px rgba(0,0,0,.5);-webkit-tap-highlight-color:transparent;touch-action:none}
+  #mobileVehicle::before{content:"";position:absolute;inset:-12px;border-radius:inherit}
+  #mobileVehicle:active{transform:scale(.94)}
+  body.mobile-ui.m-foot.m-nearcar #mobileVehicle{display:block}
+  body.mobile-ui.m-car #mobileVehicle,body.mobile-ui.m-air #mobileVehicle{display:block;border-color:rgba(255,210,63,.62);background:rgba(96,72,10,.8);color:#fff6dc}
+  /* Steering schemes. Aircraft always fall back to the L/R buttons: plane roll
+     and heli yaw read the held left/right booleans, not the analog axis. */
+  #mobilePad,#mobileSwipe{position:absolute;left:max(10px,env(safe-area-inset-left));bottom:max(10px,env(safe-area-inset-bottom));display:none;pointer-events:auto;touch-action:none;-webkit-tap-highlight-color:transparent;border:1px solid rgba(255,255,255,.26);background:rgba(5,8,14,.62);box-shadow:0 4px 14px rgba(0,0,0,.5)}
+  #mobilePad{width:128px;height:128px;border-radius:50%;background:radial-gradient(circle,rgba(5,8,14,.45),rgba(5,8,14,.8))}
+  #mobilePadStick,#mobileSwipeNub{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(32,227,255,.3);border:1px solid var(--cyan);box-shadow:0 0 14px rgba(32,227,255,.35);font-style:normal;pointer-events:none}
+  #mobileSwipe{width:196px;height:58px;border-radius:999px;align-items:center;justify-content:center}
+  #mobileSwipe span{color:#7f93ad;font:900 9px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:2px;pointer-events:none}
+  #mobileSwipeNub{width:42px;height:42px;margin:-21px 0 0 -21px}
+  body.mobile-ui.msteer-pad:not(.m-air) .mobileSteer,body.mobile-ui.msteer-swipe:not(.m-air) .mobileSteer{display:none}
+  body.mobile-ui.msteer-pad:not(.m-air) #mobilePad{display:block}
+  body.mobile-ui.msteer-swipe:not(.m-air) #mobileSwipe{display:flex}
+  /* The tappable interact prompt clears the pedal row on phones (its base
+     position is an inline style, hence the importants). */
+  body.mobile-ui #interactPrompt{bottom:27%!important;font-size:13px!important;padding:9px 16px!important}
+  /* Steering-scheme picker row in pause SETTINGS; desktop keeps mouse+keys. */
+  #pauseSteerRow{display:none}
+  body.mobile-ui #pauseSteerRow{display:block}
+  #pauseSteerRow .pauseAction.on{border-color:#20e3ff;color:#20e3ff;background:rgba(32,227,255,.09)}
+
+</style>
+</head>
+<body>
+<div id="rotateGate" role="dialog" aria-label="Rotate your device">
+  <div class="phoneIcon" aria-hidden="true"><i></i></div>
+  <h2>TURN SIDEWAYS</h2>
+  <p>This one is built for landscape — left thumb steers, right thumb drives. Rotate the phone to start.</p>
+  <button id="rotateLock" type="button">ROTATE FOR ME</button>
+  <button id="rotateDismiss" type="button">play in portrait anyway</button>
+</div>
+<div id="mobileControls" aria-label="Mobile driving controls">
+  <div class="mobileTop">
+    <button id="mobileMenu" type="button">MENU</button><button id="mobilePause" type="button">PAUSE</button><button id="mobileCamera" type="button">CAM</button><button id="mobileReset" type="button">RESET</button><button id="mobileMore" type="button" aria-expanded="false" aria-controls="mobileExtra" aria-label="More controls">•••</button>
+    <span id="mobileExtra" class="mobileExtra"><button id="mobileSteerMode" type="button">STEER</button><button id="mobileTilt" type="button">TILT</button><button id="mobileTiltFlip" type="button">FLIP</button></span>
+  </div>
+  <div id="mobileTiltState">TOUCH STEERING</div>
+  <div class="mobileSteer"><button id="mobileLeft" class="mobileRound" type="button" aria-label="Steer left">◀</button><button id="mobileRight" class="mobileRound" type="button" aria-label="Steer right">▶</button></div>
+  <div class="mobileDrive">
+    <button id="mobileShiftUp" class="mobileShift" type="button" aria-label="Shift up">+</button><button id="mobileShiftDown" class="mobileShift" type="button" aria-label="Shift down">−</button>
+    <button id="mobileNitro" class="mobilePedal" type="button">NITRO</button><button id="mobileHandbrake" class="mobilePedal" type="button">HANDBRAKE</button>
+    <button id="mobileBrake" class="mobilePedal" type="button" aria-label="Brake, then reverse">BRAKE<br>REV</button><button id="mobileGas" class="mobilePedal" type="button">GAS</button>
+  </div>
+  <button id="mobileVehicle" type="button" aria-label="Enter or exit vehicle">EXIT</button>
+  <div id="mobilePad" aria-hidden="true"><i id="mobilePadStick"></i></div>
+  <div id="mobileSwipe" aria-hidden="true"><i id="mobileSwipeNub"></i><span>SWIPE STEER</span></div>
+</div>
+
+<div class="hud" id="cash">SCORE 0</div>
+<div class="hud" id="stars">☆☆☆☆☆</div>
+<div class="hud" id="hpwrap"><div id="hp"></div></div>
+<div class="hud" id="heartHealth"><span id="healthIcon">♥</span><div id="healthBar"><i id="healthFill"></i></div><span id="healthValue">100</span></div>
+<div class="hud" id="engineWarning" role="status" aria-live="polite" aria-label="Engine temperature warning">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7v2h3l2 3h2v8h-3l-2 3H7l-2-3H3V8h2l2-3V3Zm1 5-1 2v5l1 2h7l1-2h2v-5h-2l-1-2H8Zm2 2h4v5h-4v-5Z"/></svg>
+  <span id="engineHeatValue">ENGINE
+HOT</span>
+</div>
+<div class="hud" id="speed"><div class="mph">1</div></div>
+<div class="hud" id="shiftPrompt">SHIFT · X</div>
+<div id="driftBonus" aria-live="polite">
+  <div class="driftTop"><span id="driftLevel">DRIFT</span><span id="driftPoints">0</span><span id="driftMultiplier">×1.0</span></div>
+  <div id="driftTrack"><i id="driftFill"></i></div>
+</div>
+<div class="hud" id="gaugeCluster">
+  <div class="gauge" id="rpmMeter">
+    <span class="rpmNum" style="left:28.78%;top:19.69%">0</span>
+    <span class="rpmNum" style="left:45.35%;top:13.29%">1</span>
+    <span class="rpmNum" style="left:62.99%;top:15.36%">2</span>
+    <span class="rpmNum" style="left:77.64%;top:25.40%">3</span>
+    <span class="rpmNum" style="left:85.92%;top:41.12%">4</span>
+    <span class="rpmNum" style="left:85.92%;top:58.88%">5</span>
+    <span class="rpmNum" style="left:77.64%;top:74.60%">6</span>
+    <span class="rpmNum red" style="left:62.99%;top:84.64%">7</span>
+    <span class="rpmNum red" style="left:45.35%;top:86.71%">8</span>
+    <span class="rpmNum red" style="left:28.78%;top:80.31%">9</span>
+    <div id="shiftLights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="clusterGear">1</div>
+    <div id="driveMode">D</div>
+    <div class="needle" id="rpmNeedle"></div><div class="hub"></div>
+    <div id="rpmReadout"><span id="rpmValue">0900</span></div>
+  </div>
+  <div class="gauge" id="boostGauge">
+    <span class="psiNum" style="left:29.35%;top:20.51%">0</span>
+    <span class="psiNum" style="left:54.18%;top:14.24%">.25</span>
+    <span class="psiNum" style="left:76.89%;top:26.07%">.5</span>
+    <span class="psiNum" style="left:86.00%;top:50.00%">.75</span>
+    <span class="psiNum" style="left:76.89%;top:73.93%">1.0</span>
+    <span class="psiNum" style="left:54.18%;top:85.76%">1.25</span>
+    <span class="psiNum" style="left:29.35%;top:79.49%">1.5</span>
+    <div class="needle" id="boostNeedle"></div><div class="hub"></div>
+    <div id="boostReadout"><span id="boostPsi">0.0</span></div>
+    <div id="nitroMeter" aria-label="Nitrous charge">
+      <div id="nitroTrack"><i id="nitroFill"></i></div>
+      <span id="nitroLabel">N
+O
+S</span>
+    </div>
+  </div>
+</div>
+<canvas class="hud" id="map" width="190" height="190"></canvas>
+<!-- Root for every expansion system's UI (compass, radio, shop panels, weapon
+     HUD, race widgets). Systems create their own children in here; nothing
+     outside this div is theirs to touch. pointer-events pass through the root
+     itself so it never blocks driving input — panels opt back in individually. -->
+<div id="systemsUI" style="position:fixed;inset:0;pointer-events:none;z-index:40"></div>
+<div id="fullmap">
+  <canvas id="fullmapcv" width="960" height="640"></canvas>
+</div>
+<div class="hud" id="prompt" style="display: none;">🏠 <b>Safehouse</b><br><span class="key">ENTER</span> to save</div>
+<div id="toasts"></div>
+<div id="banner" class=""><div class="bt" style="color: rgb(59, 255, 139);">GAME SAVED</div><div class="bs">8/4/2026, 8:28:58 PM</div></div>
+<div id="flash" style="opacity: 0;"></div>
+<div id="vig"></div>
+<div id="wasted" class=""><div class="w">WASTED</div></div>
+<div id="busted"><div class="b">BUSTED</div><div class="bs">ARRESTED</div></div>
+<div class="hud" id="wantedState" aria-live="polite"></div>
+<div id="overlay">
+  <h1 id="overlayTitle">CHOOSE YOUR MAP</h1>
+  <div class="sub">WELCOME TO THE STATE OF NEON</div>
+  <div id="mapSelect"></div>
+  <div id="vehicleSelect" style="display:none">
+    <button class="vehicleCard" data-vehicle="streetDrift" style="--card:#ff7abf">
+      <div class="carIcon">🏎️</div><h2>STREET DRIFT</h2><div class="drive">RWD · 50% POWER</div>
+      <p>Manageable road tune. Enough torque to slide without instantly devouring every gear.</p>
+    </button>
+    <button class="vehicleCard" data-vehicle="proDrift" style="--card:#ff2d9b">
+      <div class="carIcon">🏁</div><h2>PRO DRIFT</h2><div class="drive">RWD · 85% POWER</div>
+      <p>Competition tune with strong boost, long slides and controllable wheelspin.</p>
+    </button>
+    <button class="vehicleCard" data-vehicle="gripper" style="--card:#20e3ff">
+      <div class="carIcon">🚙</div><h2>GRIPPER</h2><div class="drive">AWD</div>
+      <p>Extreme power with absurd all-wheel traction.</p>
+    </button>
+    <button class="vehicleCard" data-vehicle="commuter" style="--card:#ffd23f">
+      <div class="carIcon">🚗</div><h2>COMMUTER</h2><div class="drive">FWD</div>
+      <p>Comically slow. Front tires surrender first.</p>
+    </button>
+  </div>
+  <button id="wheelSetupButton" type="button">⚙ WHEEL & PEDALS</button>
+  <div id="loading">Choose a vehicle.</div>
+</div>
+
+<div id="wheelPanel" role="dialog" aria-modal="true" aria-labelledby="wheelPanelTitle">
+  <div class="wheelDialog">
+    <h2 id="wheelPanelTitle">WHEEL & PEDALS</h2>
+    <p class="wheelLead">Connect the wheel, then bind steering, pedals and shift paddles. Steering calibration automatically learns center and both full-lock endpoints. Keyboard controls remain available.<br>The Gamepad API only exposes <b>rumble</b>, which is not steering torque. For real centring force there is now an experimental WebHID path below — see docs/MOZA_R3_FFB.md.</p>
+    <div class="wheelDeviceRow">
+      <select id="wheelDeviceSelect" aria-label="Wheel device"><option value="">No controller detected</option></select>
+      <button id="wheelRefresh" type="button">REFRESH</button>
+    </div>
+    <div id="wheelDeviceStatus">Move the wheel or press a pedal so the browser can detect it.</div>
+    <div class="wheelBindings">
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-bind="steer">BIND STEERING</button>
+        <div class="wheelBindHint">Center it, click, then turn fully LEFT first and fully RIGHT. The full usable range and direction are learned automatically.</div>
+        <div class="wheelAxisName" id="wheelSteerAxis">NOT BOUND</div>
+      </div>
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-bind="throttle">BIND GAS</button>
+        <div class="wheelBindHint">Leave the pedal released, click, then press it fully and release.</div>
+        <div class="wheelAxisName" id="wheelThrottleAxis">NOT BOUND</div>
+      </div>
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-bind="brake">BIND BRAKE</button>
+        <div class="wheelBindHint">Leave the pedal released, click, then press it fully and release.</div>
+        <div class="wheelAxisName" id="wheelBrakeAxis">NOT BOUND</div>
+      </div>
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-button-bind="shiftUp">BIND SHIFT UP</button>
+        <div class="wheelBindHint">Click, then pull the upshift paddle or press the desired wheel button.</div>
+        <div class="wheelAxisName" id="wheelShiftUpButton">OPTIONAL</div>
+      </div>
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-button-bind="shiftDown">BIND SHIFT DOWN</button>
+        <div class="wheelBindHint">Click, then pull the downshift paddle or press the desired wheel button.</div>
+        <div class="wheelAxisName" id="wheelShiftDownButton">OPTIONAL</div>
+      </div>
+      <div class="wheelBindRow">
+        <button type="button" data-wheel-button-bind="camera">BIND CAMERA</button>
+        <div class="wheelBindHint">Click, then press the wheel button you want to cycle the camera view.</div>
+        <div class="wheelAxisName" id="wheelCameraButton">OPTIONAL</div>
+      </div>
+      <div class="wheelBindRow" id="ffbRow">
+        <button id="ffbConnect" type="button">ENABLE REAL FFB</button>
+        <div class="wheelBindHint"><b>Experimental — real steering torque, not rumble.</b>
+          Talks to the wheel base over WebHID using the USB PID standard and runs a
+          self-centring spring. Chrome or Edge only. <b>Hold the wheel loosely the first
+          time and keep a hand near the power switch.</b> Untested on real hardware.</div>
+        <div class="wheelAxisName" id="ffbStatus">NOT CONNECTED</div>
+      </div>
+      <div class="wheelOption"><label for="ffbStrength">CENTRING STRENGTH <span id="ffbStrengthValue">35%</span></label><input id="ffbStrength" type="range" min="0" max="100" step="1" value="35"></div>
+      <div class="wheelBindRow"><button id="ffbStop" type="button">STOP FFB (GO LIMP)</button>
+        <div class="wheelBindHint">Releases the motor immediately. Also happens automatically if the tab loses focus or the wheel disconnects.</div>
+      </div>
+    </div>
+    <div class="wheelOptions">
+      <div class="wheelOption"><label for="wheelDeadzone">STEERING DEADZONE <span id="wheelDeadzoneValue">3%</span></label><input id="wheelDeadzone" type="range" min="0" max="15" step="1" value="3"></div>
+      <div class="wheelOption"><label for="wheelResponse">STEERING RESPONSE <span id="wheelResponseValue">70%</span></label><input id="wheelResponse" type="range" min="20" max="100" step="1" value="70"></div>
+      <label class="wheelOption check"><input id="wheelInvert" type="checkbox" checked><span>INVERT STEERING</span></label>
+      <label class="wheelOption check"><input id="wheelHaptics" type="checkbox" checked><span>RUMBLE — NOT FORCE FEEDBACK</span></label>
+      <div class="wheelOption"><label for="wheelHapticsStrength">HAPTIC STRENGTH <span id="wheelHapticsStrengthValue">65%</span></label><input id="wheelHapticsStrength" type="range" min="0" max="100" step="1" value="65"></div>
+    </div>
+    <div class="wheelLive">
+      <div class="wheelMeter"><label><span>STEERING</span><span id="wheelSteerValue">0%</span></label><div class="wheelTrack"><i id="wheelSteerFill"></i></div></div>
+      <div class="wheelMeter"><label><span>GAS</span><span id="wheelThrottleValue">0%</span></label><div class="wheelTrack"><i id="wheelThrottleFill"></i></div></div>
+      <div class="wheelMeter"><label><span>BRAKE</span><span id="wheelBrakeValue">0%</span></label><div class="wheelTrack"><i id="wheelBrakeFill"></i></div></div>
+    </div>
+    <div class="wheelActions">
+      <button id="wheelDisable" type="button">KEYBOARD ONLY</button>
+      <button id="wheelTestHaptics" type="button">TEST HAPTICS</button>
+      <button id="wheelClose" type="button">CANCEL</button>
+      <button id="wheelSave" type="button">SAVE & USE WHEEL</button>
+    </div>
+  </div>
+</div>
+
+<script>/*__GAME_MODULE_01_3a73996116bd2299__*/</script>
+<!-- Three.js r128 is vendored locally: the game has no remote runtime dependency. -->
+<script>/*__GAME_MODULE_02_b8db8b92b2972455__*/</script>
+<script>/*__GAME_MODULE_03_8ded7d5401dc741e__*/</script>
+<!-- World API + world modules. Order matters: api, then core, then districts. -->
+<script>/*__GAME_MODULE_04_5460312cc715f364__*/</script>
+<script>/*__GAME_MODULE_05_c924950e074b25d2__*/</script>
+<script>/*__GAME_MODULE_06_86911c59912e8263__*/</script>
+<script>/*__GAME_MODULE_07_bdc2309eb5df15cb__*/</script>
+<script>/*__GAME_MODULE_08_6eecb297b6ce335c__*/</script>
+<script>/*__GAME_MODULE_09_f2c9be8de9b8e7a4__*/</script>
+<script>/*__GAME_MODULE_10_f886b260f02a301d__*/</script>
+<script>/*__GAME_MODULE_11_66c384b913b4607e__*/</script>
+<script>/*__GAME_MODULE_12_258e8e90d7401a77__*/</script>
+<script>/*__GAME_MODULE_13_44255e2b59792b06__*/</script>
+<script>/*__GAME_MODULE_14_83d3d3378eaa39e8__*/</script>
+<script>/*__GAME_MODULE_15_b1d4247ac23a1970__*/</script>
+<script>/*__GAME_MODULE_16_d567ecfce43200c4__*/</script>
+<!-- Prague script removed: src/world/prague-world.js -->
+<!-- Expansion: data first (plain declarations), then the systems that read them.
+     Each file registers itself with GameSystems; the engine boots the registry
+     once it has built the world manager. A missing file 404s loudly in the
+     console and its system is reported as disabled — never a silent gap. -->
+<script>/*__GAME_MODULE_17_52b7ff4bed54e23b__*/</script>
+<script>/*__GAME_MODULE_18_8bb776d888c19697__*/</script>
+<script>/*__GAME_MODULE_19_0e0b44017fa4fb71__*/</script>
+<script>/*__GAME_MODULE_20_013082fc14b62861__*/</script>
+<script>/*__GAME_MODULE_21_259d70cb46f09cc1__*/</script>
+<script>/*__GAME_MODULE_22_2d0de40f0a87f57a__*/</script>
+<script>/*__GAME_MODULE_23_7346aa97207ff1d0__*/</script>
+<script>/*__GAME_MODULE_24_d19de27b2954b660__*/</script>
+<script>/*__GAME_MODULE_25_b292c708a359c4a4__*/</script>
+<script>/*__GAME_MODULE_26_848304be6100b630__*/</script>
+<script>/*__GAME_MODULE_27_bfe5da6b47c8d50c__*/</script>
+<script>/*__GAME_MODULE_28_01ce438d9de63a97__*/</script>
+<script>/*__GAME_MODULE_29_406b79a6d241016d__*/</script>
+<script>/*__GAME_MODULE_30_e0436a6fcd47811d__*/</script>
+<script>/*__GAME_MODULE_31_d74cd31e68971fa4__*/</script>
+<script>/*__GAME_MODULE_32_667fd54f532505c9__*/</script>
+<script>/*__GAME_MODULE_33_fe4e5dd6ef67f3a2__*/</script>
+<script>/*__GAME_MODULE_34_92ac7ce9e5f1d240__*/</script>
+<script>/*__GAME_MODULE_35_db5baaefd063865b__*/</script>
+<script>/*__GAME_MODULE_36_4c78679ea3b8160a__*/</script>
+<script>/*__GAME_MODULE_37_d8502946586b60fa__*/</script>
+<script>/*__GAME_MODULE_38_a2c55235c67e4b9f__*/</script>
+<script>/*__GAME_MODULE_39_3606a318318f93a8__*/</script>
+<script>/*__GAME_MODULE_40_29622702d12d9367__*/</script>
+<script>/*__GAME_MODULE_41_4ae80d17514046bd__*/</script>
+<script>/*__GAME_MODULE_42_3caeda624c4d7076__*/</script>
+<script>/*__GAME_MODULE_43_79e56ae86085d1b0__*/</script>
+<script>/*__GAME_MODULE_44_8f1ec9c57e19c936__*/</script>
+<script>/*__GAME_MODULE_45_039159e786342fde__*/</script>
+<script>/*__GAME_MODULE_46_4ebc90e4de8b1993__*/</script>
+<script>/*__GAME_MODULE_47_18112a6c0a627fdc__*/</script>
+<script>/*__GAME_MODULE_48_81a4386ecdcb0f42__*/</script>
+<script>/*__GAME_MODULE_49_51cc15042e994eaa__*/</script>
+
+<script>/*__GAME_MODULE_50_e90202cf4348641e__*/</script>
+
+<script>/*__GAME_MODULE_51_5e536cb9d0a20402__*/</script>
+<script>/*__GAME_MODULE_52_be25be73e1aabf67__*/</script>
+<script>/*__GAME_MODULE_53_cacdc9f0e98c986a__*/</script>
+<script>/*__GAME_MODULE_54_d9b71b47a0b3027c__*/</script><script>/*__GAME_MODULE_55_6e84a3de12a38048__*/</script><script>/*__GAME_MODULE_56_735b420edffc243c__*/</script><script>/*__GAME_MODULE_57_9d01dc70472d9b5b__*/</script><script>/*__GAME_MODULE_58_b8128e4b7d6211ac__*/</script><script>/*__GAME_MODULE_59_291a7d8292aa278f__*/</script><canvas width="2560" height="1305" style="display: block; width: 2560px; height: 1305px;" class=""></canvas>
+
+
+<script>/*__GAME_MODULE_60_c5aa593ca9d3857a__*/</script><script>/*__GAME_MODULE_61_df99c8e9bcf42b8b__*/</script><script>/*__GAME_MODULE_62_6762fbccf9fef55d__*/</script><script>/*__GAME_MODULE_63_76f4b5221de6dafb__*/</script><script>/*__GAME_MODULE_64_57deeb1f151370f0__*/</script><script>/*__GAME_MODULE_65_1a9cbd400b26f49a__*/</script><script>/*__GAME_MODULE_66_7fa9b508443e37b2__*/</script><script>/*__GAME_MODULE_67_39971edcef4407f5__*/</script><script>/*__GAME_MODULE_68_d62854b1aeae8fce__*/</script><script>/*__GAME_MODULE_69_3261b10a91134aa2__*/</script><script>/*__GAME_MODULE_70_48119ef1790b6f57__*/</script><script>/*__GAME_MODULE_71_84c11530c67b9fe9__*/</script><script>/*__GAME_MODULE_72_bb1f0cb147cef7f6__*/</script>
+</body>
+<!--
+RAGDOLL RESTORE FIX
+- Restored the known-good pedestrian lifecycle/spawn code.
+- Whole-body v18-style ragdolls now live inside the isolated ragdoll system.
+- Generic articulated pieces remain as a safe fallback for nonstandard actors.
+Built: 2026-08-07 Europe/Prague
+-->
+
+<!--
+FINAL BUILD
+Base: v26 + apply-v26fix.js
+Base SHA-256: 65aadc620b01b081b26c8e8911fc857c52e67b59c809d676035ee6e2866fcd4d
+Embedded HeavyOrdnanceModule SHA-256: cecec21f438bb46d8865e38e852b9a2e782454a2fe4e7305780d8333c955e500
+Integration patches: 43
+Built: 2026-08-06 Europe/Prague
+-->
+</html>
