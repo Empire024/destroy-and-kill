@@ -15983,6 +15983,14 @@ body.help-open #mobileControls{display:none!important}
     live.limiterTolerance=profile.limiterTolerance*(extreme?.28:1+stage*.07);live.overRevTolerance=profile.overRevTolerance*(extreme?.34:1+stage*.09);live.heatTolerance=profile.heatTolerance*(extreme?.42:1+stage*.11);live.coolingStrength=profile.coolingStrength*(stage>=2?1.22:1)*(extreme?.72:1);live.transmissionStrength=profile.transmissionStrength*(stage>=3?1.24:1)*(extreme?.46:1);live.mass=profile.mass||1400;live.extremeTune=extreme;live.nitrousInstalled=nitrous;live.nitrousCapacity=nitrous?(profile.nitrousCapacity||100):0;live.naSupercar=!!profile.naSupercar;
   }
 
+  function applyFactoryTuneFields(id){
+    if(!id||!baseTunes.has(id)||!ctx.vehicles.TUNES[id])return false;
+    const had=Object.prototype.hasOwnProperty.call(tuneCfg,id),previous=tuneCfg[id];
+    tuneCfg[id]={preset:'stock',installed:['stock']};
+    try{applyTuneFields(id);}finally{if(had)tuneCfg[id]=previous;else delete tuneCfg[id];}
+    return true;
+  }
+
   function applyLook(id) {
     const e = byId.get(id); if (!e) return;
     const mesh = ctx.player.carMesh;
@@ -16329,6 +16337,7 @@ body.help-open #mobileControls{display:none!important}
     unlockProgress(id) { return progressFor(id); },
     currentVehicle() { return currentId; },
     hydrateVehicle(id, opts) { if (!byId.has(id) || !ctx.vehicles.TUNES[id]) return false; if (opts && opts.syncCurrent) currentId = id; applyTuneFields(id); return true; },
+    hydrateStockVehicle(id, opts) { if (!byId.has(id) || !ctx.vehicles.TUNES[id]) return false; if (opts && opts.syncCurrent) currentId = id; return applyFactoryTuneFields(id); },
     selectVehicle(id) { return selectVehicle(id); },
     wallet() { return wallet; },
     spend(n, reason) { const ok = spend(n, reason); if (ok) refreshWalletLine(); return ok; },
@@ -25705,6 +25714,23 @@ Assumptions that may not hold after integration:
     ...MeleeCombatModule.combatWeaponDefinitions(),
     ...HeavyOrdnanceModule.combatWeaponDefinitions()
   });
+  const WEAPON_FEEL=Object.freeze({
+    pistol:Object.freeze({kick:.48,pitch:.0135,yaw:.0064,recover:7.6,bloom:.36,shake:.052,muzzle:.72,tail:.20,tailHz:1280,tailGain:.070,pattern:[0,.42,-.28,.18,-.12]}),
+    smg:Object.freeze({kick:.17,pitch:.0041,yaw:.0088,recover:9.4,bloom:.13,shake:.024,muzzle:.52,tail:.11,tailHz:1950,tailGain:.038,pattern:[-.42,.38,.68,-.26,.18,-.58,.34]}),
+    shotgun:Object.freeze({kick:1.02,pitch:.034,yaw:.0048,recover:4.45,bloom:.82,shake:.145,muzzle:1.18,tail:.46,tailHz:620,tailGain:.125,pattern:[0,.18,-.12]}),
+    rifle:Object.freeze({kick:.32,pitch:.0074,yaw:.0046,recover:7.25,bloom:.21,shake:.048,muzzle:.76,tail:.31,tailHz:900,tailGain:.082,pattern:[-.16,.22,.38,-.24,.12,-.31]})
+  });
+  const NPC_BURSTS=Object.freeze({
+    pistol:Object.freeze({min:1,max:2,shotGap:.24,pauseMin:.54,pauseMax:.92}),
+    smg:Object.freeze({min:3,max:6,shotGap:.10,pauseMin:.62,pauseMax:1.04}),
+    rifle:Object.freeze({min:2,max:4,shotGap:.14,pauseMin:.72,pauseMax:1.14})
+  });
+  const REGION_RESPONSE=Object.freeze({
+    head:Object.freeze({damage:1,armour:.28,react:.34,stagger:.30,suppress:.86,death:18}),
+    torso:Object.freeze({damage:1,armour:.68,react:.23,stagger:.19,suppress:.64,death:7}),
+    legs:Object.freeze({damage:.72,armour:.38,react:.29,stagger:.34,suppress:.72,death:-4}),
+    body:Object.freeze({damage:1,armour:.62,react:.23,stagger:.20,suppress:.62,death:5})
+  });
   // One visible slot convention: pistol is the only free weapon; every other
   // entry is skipped by cycling until Ammu-Nation has sold it to the player.
   const CYCLE=[null,'pistol','smg','shotgun','rifle','fists','bat','knife','crowbar','rpg','minigun'];
@@ -25748,9 +25774,9 @@ Assumptions that may not hold after integration:
   // module's existing hitscan pipeline; these values only control aim/camera,
   // recoil, crosshair feedback and the two visible gun models.
   let aimHeld=false,forcedFirstPerson=false,aimYaw=0,aimPitch=0,aimBlend=0;
-  let recoilKick=0,crosshairBloom=0,hitMarkerTimer=0,headshotTimer=0,equipKick=0,weaponClock=0,switchClock=0;
+  let recoilKick=0,recoilYawKick=0,recoilPitchKick=0,recoilIndex=0,muzzleImpulse=0,crosshairBloom=0,hitMarkerTimer=0,headshotTimer=0,equipKick=0,weaponClock=0,switchClock=0;
   let combatCanvas=null,pointerLocked=false,worldWeapon=null,viewWeapon=null,aimCameraWasActive=false,qaLookActive=false,qaLookTimer=0,weaponWheelRoot=null,weaponWheelOpen=false,weaponWheelIndex=0,weaponWheelItems=[],weaponWheelLastInput=0;
-  let inputHandlers=null,modelTmpV=null,aimCameraDir=null,gunNoiseBuffer=null,combatDirty=false,combatSaveClock=0,combatSerial=0;
+  let inputHandlers=null,modelTmpV=null,aimCameraDir=null,gunNoiseBuffer=null,gunTailBuffers=new Map(),combatDirty=false,combatSaveClock=0,combatSerial=0;
   const SAVE_COMBAT='progression.combatV16';
 
   function firstPersonActive(){return !!(ctxRef&&ctxRef.player.onFoot&&inv.equipped&&forcedFirstPerson);}
@@ -25798,18 +25824,34 @@ Assumptions that may not hold after integration:
   }
   function ensurePedCharacter(p){
     if(p._charV16)return p._charV16;const role=roleForPed(p),base=CHARACTER_ROLES[role],variance=.92+((combatSerial*37)%17)/100,maxHp=Math.round(base.maxHp*variance),armed=base.armed||(role==='civilian'&&((combatSerial*13)%100)<4),brawler=role==='civilian'&&!armed&&(p._forceBrawler||((combatSerial*29)%100)<10),weapon=role==='guard'?'rifle':role==='criminal'&&combatSerial%3===0?'smg':'pistol';
-    const c=p._charV16={role,maxHp,hp:maxHp,maxArmour:base.armour,armour:base.armour,armed,brawler,weapon,hostile:false,playerStarted:false,hitReact:0,shotCd:Math.random()*1.2,aim:0,dead:false};p._maxHp=maxHp;p._bHp=maxHp;p._armed=armed;p._brawler=brawler;p._weaponId=armed?weapon:null;if(!c.hostile)p._meleePose=null;return c;
+    const c=p._charV16={role,maxHp,hp:maxHp,maxArmour:base.armour,armour:base.armour,armed,brawler,weapon,hostile:false,playerStarted:false,hitReact:0,staggerT:0,suppression:0,suppressT:0,staggerX:0,staggerZ:0,shotCd:Math.random()*1.2,burstLeft:0,burstPause:0,aim:0,decisionT:0,tactic:'hold',strafeSide:(combatSerial&1)?1:-1,cover:null,peekT:0,peekOpen:false,laneBlockedT:0,dead:false};p._maxHp=maxHp;p._bHp=maxHp;p._armed=armed;p._brawler=brawler;p._weaponId=armed?weapon:null;if(!c.hostile)p._meleePose=null;return c;
   }
   function ensureOfficerCharacter(of,ctx){
-    if(of._charV16)return of._charV16;const level=ctx&&ctx.stats?ctx.stats.wanted:1,base=CHARACTER_ROLES.police,maxHp=base.maxHp+level*6,armour=base.armour+level*7;return of._charV16={role:'police',maxHp,hp:maxHp,maxArmour:armour,armour,armed:true,weapon:level>=4?'rifle':'pistol',hostile:true,hitReact:0,dead:false};
+    if(of._charV16)return of._charV16;const level=ctx&&ctx.stats?ctx.stats.wanted:1,base=CHARACTER_ROLES.police,maxHp=base.maxHp+level*6,armour=base.armour+level*7;return of._charV16={role:'police',maxHp,hp:maxHp,maxArmour:armour,armour,armed:true,weapon:level>=4?'rifle':'pistol',hostile:true,hitReact:0,staggerT:0,suppression:0,suppressT:0,staggerX:0,staggerZ:0,laneBlockedT:0,dead:false};
   }
-  function characterSnapshot(target,kind){const c=kind==='officer'?ensureOfficerCharacter(target,ctxRef):ensurePedCharacter(target);return{role:c.role,maxHp:c.maxHp,hp:c.hp,armour:c.armour,armed:c.armed,weapon:c.weapon,dead:!!c.dead};}
+  function characterSnapshot(target,kind){const c=kind==='officer'?ensureOfficerCharacter(target,ctxRef):ensurePedCharacter(target);return{role:c.role,maxHp:c.maxHp,hp:c.hp,armour:c.armour,armed:c.armed,weapon:c.weapon,dead:!!c.dead,hitReact:+(c.hitReact||0).toFixed(3),stagger:+(c.staggerT||0).toFixed(3),suppression:+(c.suppression||0).toFixed(3),tactic:c.tactic||null};}
+  function tickCharacterCombatState(c,dt){
+    if(!c)return;c.hitReact=Math.max(0,(c.hitReact||0)-dt);c.staggerT=Math.max(0,(c.staggerT||0)-dt);c.suppressT=Math.max(0,(c.suppressT||0)-dt);c.laneBlockedT=Math.max(0,(c.laneBlockedT||0)-dt);
+    c.suppression=Math.max(0,(c.suppression||0)-dt*(c.suppressT>0?.34:.72));c.burstPause=Math.max(0,(c.burstPause||0)-dt);c.decisionT=Math.max(0,(c.decisionT||0)-dt);
+  }
+  function suppressCharacter(target,kind,amount,dirX,dirZ){
+    const c=kind==='officer'?ensureOfficerCharacter(target,ctxRef):ensurePedCharacter(target);if(!c||c.dead||target.dead||target.down)return false;
+    const a=clamp(Number(amount)||0,0,1);c.suppression=Math.max(c.suppression||0,a);c.suppressT=Math.max(c.suppressT||0,.28+a*.72);c.decisionT=0;
+    if(a>.46){c.staggerX=(Number(dirX)||0);c.staggerZ=(Number(dirZ)||0);c.staggerT=Math.max(c.staggerT||0,.06+a*.12);}
+    return true;
+  }
   function damageCharacter(ctx,target,amount,opts){
     opts=opts||{};const kind=opts.kind||'ped',isOfficer=kind==='officer',c=isOfficer?ensureOfficerCharacter(target,ctx):ensurePedCharacter(target);if(!c||c.dead||target.dead||target.down||target._removed)return{applied:0,killed:false,dead:true};
-    const critical=!!opts.critical,raw=Math.max(0,+amount||0)*(critical?(opts.headshotMultiplier||2.2):1),armourShare=critical?.28:.68,absorbed=Math.min(c.armour,raw*armourShare);c.armour-=absorbed;const healthDamage=Math.min(c.hp,raw-absorbed);c.hp-=healthDamage;c.hitReact=.24;c.lastHitFrom=opts.from||'unknown';target._bHp=c.hp;target._hitReact=.24;if(!isOfficer){target._aiState='hit';target._aiTimer=.22;target.face=Math.atan2((opts.fromX===undefined?ctx.player.x:opts.fromX)-target.x,(opts.fromZ===undefined?ctx.player.z:opts.fromZ)-target.z);if((c.armed||c.brawler)&&opts.from==='player'){c.hostile=true;c.playerStarted=true;c.aim=0;c.shotCd=.35+Math.random()*.35;if(inv.armedFightWantedCd<=0){inv.armedFightWantedCd=8;const crime=GameSystems.api('crime'),ev=crime&&crime.report('armed-assault',{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:1,witnessRadius:120});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,120,'gunfire',ev);ctx.fx.toast('ARMED VICTIM RETURNING FIRE','#ff6b6b');}}}
-    const applied=absorbed+healthDamage;if(opts.from==='player'&&opts.source==='weapon'&&applied>0)GameSystems.events.emit('damage:dealt',{amount:applied,x:opts.x===undefined?target.x:opts.x,y:opts.y===undefined?(target.y||0)+3:opts.y,z:opts.z===undefined?target.z:opts.z,kind:'person',critical,target,source:'weapon'});
-    let killed=false;if(c.hp<=0){c.dead=true;killed=true;if(isOfficer)downOfficer(ctx,target,opts.dirX||0,opts.dirZ||1);else ctx.actors.killCivilian(target,opts.dirX||0,opts.dirZ||1,critical?62:44);if(opts.from==='player'&&opts.source==='weapon'){const crime=GameSystems.api('crime'),type=isOfficer?'kill-police':'kill-pedestrian',ev=crime&&crime.report(type,{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:isOfficer?3:2,priority:true,immediate:true,witnessRadius:180});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,180,'homicide',ev);}}
-    return{applied,absorbed,healthDamage,killed,hp:c.hp,armour:c.armour,maxHp:c.maxHp};
+    const region=opts.region|| (opts.critical?'head':'body'),response=REGION_RESPONSE[region]||REGION_RESPONSE.body,critical=!!opts.critical;
+    const raw=Math.max(0,+amount||0)*response.damage*(critical?(opts.headshotMultiplier||2.2):1),armourShare=response.armour,absorbed=Math.min(c.armour,raw*armourShare);c.armour-=absorbed;
+    const healthDamage=Math.min(c.hp,raw-absorbed);c.hp-=healthDamage;const applied=absorbed+healthDamage,severity=clamp(applied/Math.max(1,c.maxHp)*2.45+(critical?.22:0),0,1);
+    const react=response.react+severity*.16,stagger=response.stagger*(.48+severity*.82);c.hitReact=Math.max(c.hitReact||0,react);c.staggerT=Math.max(c.staggerT||0,stagger);c.suppression=Math.max(c.suppression||0,clamp(response.suppress*.54+severity*.52,0,1));c.suppressT=Math.max(c.suppressT||0,.36+severity*.62);c.lastHitFrom=opts.from||'unknown';
+    let sx=Number(opts.dirX)||0,sz=Number(opts.dirZ)||0,sl=Math.hypot(sx,sz);if(sl<.001){sx=target.x-(opts.fromX===undefined?ctx.player.x:opts.fromX);sz=target.z-(opts.fromZ===undefined?ctx.player.z:opts.fromZ);sl=Math.hypot(sx,sz)||1;}c.staggerX=sx/sl;c.staggerZ=sz/sl;
+    target._bHp=c.hp;target._hitReact=c.hitReact;target._hitRegion=region;target._hitMagnitude=severity;
+    if(!isOfficer){target._aiState=stagger>.24?'stagger':'hit';target._aiTimer=Math.max(target._aiTimer||0,react);target.face=Math.atan2((opts.fromX===undefined?ctx.player.x:opts.fromX)-target.x,(opts.fromZ===undefined?ctx.player.z:opts.fromZ)-target.z);if((c.armed||c.brawler)&&opts.from==='player'){c.hostile=true;c.playerStarted=true;c.aim=0;c.burstLeft=0;c.burstPause=Math.max(c.burstPause||0,.22+severity*.35);c.shotCd=.24+severity*.34+Math.random()*.18;if(inv.armedFightWantedCd<=0){inv.armedFightWantedCd=8;const crime=GameSystems.api('crime'),ev=crime&&crime.report('armed-assault',{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:1,witnessRadius:120});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,120,'gunfire',ev);ctx.fx.toast('ARMED VICTIM RETURNING FIRE','#ff6b6b');}}}
+    if(opts.from==='player'&&opts.source==='weapon'&&applied>0)GameSystems.events.emit('damage:dealt',{amount:applied,x:opts.x===undefined?target.x:opts.x,y:opts.y===undefined?(target.y||0)+3:opts.y,z:opts.z===undefined?target.z:opts.z,kind:'person',critical,region,target,source:'weapon'});
+    let killed=false;if(c.hp<=0){c.dead=true;killed=true;const deathEnergy=clamp(28+applied*.55+response.death+(critical?6:0),18,92);if(isOfficer)downOfficer(ctx,target,c.staggerX,c.staggerZ,deathEnergy);else ctx.actors.killCivilian(target,c.staggerX,c.staggerZ,deathEnergy);if(opts.from==='player'&&opts.source==='weapon'){const crime=GameSystems.api('crime'),type=isOfficer?'kill-police':'kill-pedestrian',ev=crime&&crime.report(type,{perpetrator:'player',actor:ctx.player,x:target.x,z:target.z,severity:isOfficer?3:2,priority:true,immediate:true,witnessRadius:180});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(target.x,target.z,180,'homicide',ev);}}
+    return{applied,absorbed,healthDamage,killed,hp:c.hp,armour:c.armour,maxHp:c.maxHp,region,stagger:+(c.staggerT||0),suppression:+(c.suppression||0)};
   }
   function absorbPlayerDamage(amount,meta){const incoming=Math.max(0,+amount||0);if(incoming<=0)return 0;const share=meta&&meta.headshot?.35:.65,absorbed=Math.min(inv.armour,incoming*share);inv.armour-=absorbed;if(absorbed>0){markCombatDirty();paintWeaponUI();}return incoming-absorbed;}
   function provokeArmedPeds(ctx,x,z,radius,playerStarted){
@@ -25817,17 +25859,91 @@ Assumptions that may not hold after integration:
     if(playerStarted&&armed&&witness&&inv.armedFightWantedCd<=0){inv.armedFightWantedCd=8;const crime=GameSystems.api('crime'),ev=crime&&crime.report('gun-assault',{perpetrator:'player',actor:ctx.player,x,z,severity:1,witnessRadius:120});if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(x,z,120,'gunfire',ev);ctx.fx.toast('ARMED WITNESSES RETURNING FIRE','#ff6b6b');}
     return armed;
   }
+  function lineDistance2D(ax,az,bx,bz,x,z){
+    const dx=bx-ax,dz=bz-az,ll=dx*dx+dz*dz;if(ll<1e-6)return{along:0,dist:Math.hypot(x-ax,z-az),t:0};
+    const t=clamp(((x-ax)*dx+(z-az)*dz)/ll,0,1),qx=ax+dx*t,qz=az+dz*t;return{along:Math.sqrt(ll)*t,dist:Math.hypot(x-qx,z-qz),t};
+  }
+  function friendlyLineBlocked(ctx,shooter,tx,tz,police){
+    const d=Math.hypot(tx-shooter.x,tz-shooter.z);if(d<3)return false;const list=police?officers:ctx.actors.peds;
+    for(const a of list){
+      if(a===shooter||a.dead||a.down||a._knocked||a._removed)continue;
+      if(!police){const c=a._charV16;if(!c||!c.armed||!c.hostile)continue;}
+      const q=lineDistance2D(shooter.x,shooter.z,tx,tz,a.x,a.z);if(q.along>1.8&&q.along<d-1.5&&q.dist<(police?1.55:1.35))return true;
+    }
+    return false;
+  }
+  function combatCoverPoint(ctx,actor,tx,tz,maxRange){
+    const obs=ctx.world.obstaclesNear(actor.x,actor.z,{mph:0,kind:'combat-cover'})||[];let best=null,bestScore=Infinity;
+    for(const b of obs){
+      const bw=Number(b.w)||1,bd=Number(b.d)||1,dx=b.x-tx,dz=b.z-tz,dl=Math.hypot(dx,dz);if(dl<2)continue;const nx=dx/dl,nz=dz/dl,ext=Math.max(bw,bd)*.52+1.65,x=b.x+nx*ext,z=b.z+nz*ext,travel=Math.hypot(x-actor.x,z-actor.z);if(travel>(maxRange||28)||travel<1.3)continue;
+      const p=ctx.world.clampToBounds(x,z);if(Math.hypot(p.x-x,p.z-z)>1.5||ctx.world.isDrowningAt(x,z,ctx.world.groundHeightAt(x,z,actor.y||0)))continue;
+      const wall=wallDistance(ctx,x,(actor.y||0)+3.2,z,-nx,-nz,Math.min(dl,18));if(wall>=Math.min(dl,18)-.4)continue;
+      const score=travel+Math.abs(dl-22)*.12;if(score<bestScore){bestScore=score;best={x,z,peekX:-nz,peekZ:nx};}
+    }
+    return best;
+  }
+  function suppressNearShot(ctx,o,dx,dz,t,hitObj,w){
+    if(!Number.isFinite(t)||t<=3)return;const ex=o.x+dx*t,ez=o.z+dz*t,base=w.id==='shotgun'?.78:w.id==='rifle'?.70:w.id==='smg'?.52:.58;
+    for(const p of ctx.actors.peds){if(p===hitObj||p.dead||p._knocked)continue;const q=lineDistance2D(o.x,o.z,ex,ez,p.x,p.z);if(q.along<2||q.along>t-1||q.dist>3.2)continue;const a=base*(1-q.dist/3.6);if(a>.12)suppressCharacter(p,'ped',a,dx,dz);}
+    for(const of of officers){if(of===hitObj||of.down)continue;const q=lineDistance2D(o.x,o.z,ex,ez,of.x,of.z);if(q.along<2||q.along>t-1||q.dist>3.2)continue;const a=base*(1-q.dist/3.6);if(a>.12)suppressCharacter(of,'officer',a,dx,dz);}
+  }
+  function moveTacticalPed(ctx,p,tx,tz,dt,pace){
+    const dx=tx-p.x,dz=tz-p.z,d=Math.hypot(dx,dz)||1,mv=ctx.actors.moveCircleWorld(p,dx/d*pace,dz/d*pace,dt,1.05,ctx.actors.DYNAMIC_MASK.PED);if(Math.hypot(mv.vx||0,mv.vz||0)>.08)p.face=p.heading=Math.atan2(mv.vx,mv.vz);return d;
+  }
   function armedNpcShoot(ctx,p,c,range){
-    const dx=ctx.player.x-p.x,dz=ctx.player.z-p.z,d=Math.hypot(dx,dz)||1,ux=dx/d,uz=dz/d,oy=(p.y||0)+4.15,wall=wallDistance(ctx,p.x,oy,p.z,ux,uz,Math.min(d,c.role==='guard'?145:120));
-    p.face=p.heading=Math.atan2(ux,uz);muzzleFlash(ctx,p.x,oy,p.z,p.heading);playGunshot(ctx,c.weapon==='rifle'?'rifle':'pistol',.58);if(wall<d-1.2){impact(ctx,p.x+ux*wall,oy,p.z+uz*wall,0xbcd2ff);return false;}tracer(ctx,p.x,oy,p.z,p.heading,d);
-    const base=CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian,moving=ctx.player.onFoot?playerSpeed>4:ctx.player.mph>10,chance=clamp(base.accuracy+(moving?-.17:.08)-range/260,0.12,.82);if(Math.random()>chance){const rx=uz,rz=-ux,off=(Math.random()<.5?-1:1)*(1.5+Math.random()*2.8);impact(ctx,ctx.player.x+rx*off,(ctx.player.y||0)+2,ctx.player.z+rz*off,0xbcd2ff);return false;}
-    impact(ctx,ctx.player.x-ux*1.2,(ctx.player.y||0)+2.2,ctx.player.z-uz*1.2,0xff8a4b);const dmg=base.damage*(c.weapon==='rifle'?1.18:c.weapon==='smg'?.78:1),vd=GameSystems.api('vdamage');if(ctx.player.onFoot&&ctx.engine.hurtPlayer)ctx.engine.hurtPlayer(dmg*3/100,{source:c.role});else if(vd)vd.damage('player',{amount:dmg,channel:'ballistic',from:c.role});return true;
+    const dx=ctx.player.x-p.x,dz=ctx.player.z-p.z,d=Math.hypot(dx,dz)||1,ux=dx/d,uz=dz/d,oy=(p.y||0)+4.15,weapon=c.weapon||'pistol';
+    if(friendlyLineBlocked(ctx,p,ctx.player.x,ctx.player.z,false)){c.laneBlockedT=.52;c.suppression=Math.max(c.suppression||0,.18);return'blocked';}
+    const wall=wallDistance(ctx,p.x,oy,p.z,ux,uz,Math.min(d,c.role==='guard'?145:120));p.face=p.heading=Math.atan2(ux,uz);if(wall<d-1.2){muzzleFlash(ctx,p.x,oy,p.z,p.heading,0,weapon);playGunshot(ctx,weapon,.54);impact(ctx,p.x+ux*wall,oy,p.z+uz*wall,0xbcd2ff);return'wall';}
+    muzzleFlash(ctx,p.x,oy,p.z,p.heading,0,weapon);playGunshot(ctx,weapon,.56);tracer(ctx,p.x,oy,p.z,p.heading,d);
+    const base=CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian,moving=ctx.player.onFoot?playerSpeed>4:ctx.player.mph>10,suppressed=clamp(c.suppression||0,0,1),chance=clamp(base.accuracy+(moving?-.17:.08)-range/260-suppressed*.24,0.08,.82);
+    if(Math.random()>chance){const rx=uz,rz=-ux,off=(Math.random()<.5?-1:1)*(1.5+Math.random()*2.8+suppressed*2.2);impact(ctx,ctx.player.x+rx*off,(ctx.player.y||0)+2,ctx.player.z+rz*off,0xbcd2ff);if(Math.abs(off)<2.8)ctx.events.emit('camera:shake',{amount:.015+(.025*(1-suppressed)),duration:.08,source:'near-miss'});return'miss';}
+    impact(ctx,ctx.player.x-ux*1.2,(ctx.player.y||0)+2.2,ctx.player.z-uz*1.2,0xff8a4b);const dmg=base.damage*(weapon==='rifle'?1.18:weapon==='smg'?.78:1),vd=GameSystems.api('vdamage');if(ctx.player.onFoot&&ctx.engine.hurtPlayer)ctx.engine.hurtPlayer(dmg*3/100,{source:c.role});else if(vd)vd.damage('player',{amount:dmg,channel:'ballistic',from:c.role});return'hit';
   }
   function updateArmedPeds(dt,ctx){
-    const admin=GameSystems.api('admin');if(admin&&admin.invisible&&admin.invisible()){for(const p of ctx.actors.peds){const c=p._charV16;if(c){c.hostile=false;c.playerStarted=false;}}return;}
-    const px=ctx.player.x,pz=ctx.player.z;for(const p of ctx.actors.peds){if(p.dead||p._knocked)continue;const c=ensurePedCharacter(p);c.hitReact=Math.max(0,c.hitReact-dt);if(c.brawler&&c.hostile&&!c.dead){const fighter=melee&&(melee.getNpc(p)||melee.createNpc(p,{kind:'ped',weaponId:'fists'}));if(p._brawlUntil&&performance.now()>=p._brawlUntil){c.hostile=false;c.playerStarted=false;p._brawlUntil=0;p._meleePose=null;if(fighter)fighter.cancel();p._aiState='flee';p._aiTimer=2.8+Math.random()*2.4;continue;}const d=dist2d(p.x,p.z,px,pz);p._aiState=c.hitReact>0?'hit':'combat';p._aiTimer=Math.max(p._aiTimer||0,.35);p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.hitReact<=0&&d>2.7){const ux=(px-p.x)/(d||1),uz=(pz-p.z)/(d||1);ctx.actors.moveCircleWorld(p,ux*4.2,uz*4.2,dt,1.05,ctx.actors.DYNAMIC_MASK.PED);}if(c.hitReact<=0&&d<3.5&&fighter)fighter.attack({target:ctx.player,targetKind:'player'});continue;}if(!c.armed||!c.hostile||c.dead)continue;const d=dist2d(p.x,p.z,px,pz);if(d>175){c.hostile=false;p._aiState='flee';p._aiTimer=2;continue;}p._aiState=c.hitReact>0?'hit':'combat';p._aiTimer=999;p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.hitReact>0)continue;
-      if(d>52&&c.role==='criminal'){const ux=(px-p.x)/(d||1),uz=(pz-p.z)/(d||1),mv=ctx.actors.moveCircleWorld(p,ux*3.8,uz*3.8,dt,1.05,ctx.actors.DYNAMIC_MASK.PED);p.face=p.heading=Math.atan2(mv.vx||ux,mv.vz||uz);}
-      c.shotCd-=dt;c.aim=Math.min(1,c.aim+dt*(c.role==='guard'?1.6:1.15));if(c.shotCd<=0&&c.aim>.55&&d<(CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian).range){armedNpcShoot(ctx,p,c,d);c.shotCd=(CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian).interval*(.82+Math.random()*.42);}
+    const admin=GameSystems.api('admin');if(admin&&admin.invisible&&admin.invisible()){for(const p of ctx.actors.peds){const c=p._charV16;if(c){c.hostile=false;c.playerStarted=false;c.burstLeft=0;}}return;}
+    const px=ctx.player.x,pz=ctx.player.z;
+    for(const p of ctx.actors.peds){
+      if(p.dead||p._knocked)continue;const c=ensurePedCharacter(p);tickCharacterCombatState(c,dt);
+      if(c.brawler&&c.hostile&&!c.dead){
+        const fighter=melee&&(melee.getNpc(p)||melee.createNpc(p,{kind:'ped',weaponId:'fists'}));if(p._brawlUntil&&performance.now()>=p._brawlUntil){c.hostile=false;c.playerStarted=false;p._brawlUntil=0;p._meleePose=null;if(fighter)fighter.cancel();p._aiState='flee';p._aiTimer=2.8+Math.random()*2.4;continue;}
+        const d=dist2d(p.x,p.z,px,pz);p._aiState=c.hitReact>0||c.staggerT>0?'hit':'combat';p._aiTimer=Math.max(p._aiTimer||0,.35);p.face=p.heading=Math.atan2(px-p.x,pz-p.z);if(c.staggerT>0){moveTacticalPed(ctx,p,p.x+c.staggerX*2.5,p.z+c.staggerZ*2.5,dt,2.8);continue;}if(c.hitReact<=0&&d>2.7)moveTacticalPed(ctx,p,px,pz,dt,4.2);if(c.hitReact<=0&&d<3.5&&fighter)fighter.attack({target:ctx.player,targetKind:'player'});continue;
+      }
+      if(!c.armed||!c.hostile||c.dead)continue;
+      const d=dist2d(p.x,p.z,px,pz),base=CHARACTER_ROLES[c.role]||CHARACTER_ROLES.civilian;if(d>175){c.hostile=false;c.burstLeft=0;p._aiState='flee';p._aiTimer=2;continue;}
+      p._aiTimer=999;p.face=p.heading=Math.atan2(px-p.x,pz-p.z);
+      if(c.staggerT>0){p._aiState='stagger';moveTacticalPed(ctx,p,p.x+c.staggerX*2.8,p.z+c.staggerZ*2.8,dt,2.7);c.aim=Math.max(0,c.aim-dt*4);continue;}
+      if(c.hitReact>0){p._aiState='hit';c.aim=Math.max(0,c.aim-dt*3);continue;}
+      if(d<4.6){
+        c.tactic='melee';c.burstLeft=0;c.aim=0;const fighter=melee&&(melee.getNpc(p)||melee.createNpc(p,{kind:'ped',weaponId:'fists'}));p._aiState='combat';if(d>2.55)moveTacticalPed(ctx,p,px,pz,dt,4.6);if(d<3.65&&fighter)fighter.attack({target:ctx.player,targetKind:'player'});continue;
+      }else{const fighter=melee&&melee.getNpc(p);if(fighter&&c.tactic==='melee')fighter.cancel();}
+      const heading=Math.atan2(px-p.x,pz-p.z),ux=Math.sin(heading),uz=Math.cos(heading),los=wallDistance(ctx,p.x,(p.y||0)+4.0,p.z,ux,uz,Math.min(d,base.range))>=Math.min(d,base.range)-1.2,hpFrac=c.hp/Math.max(1,c.maxHp);
+      if(c.decisionT<=0){
+        c.decisionT=.42+Math.random()*.42;
+        if((c.suppression||0)>.56||hpFrac<.34){c.cover=combatCoverPoint(ctx,p,px,pz,30);c.tactic=c.cover?'cover':'fallback';}
+        else if(!los||d>base.range*.78)c.tactic='advance';
+        else if(d<15)c.tactic='fallback';
+        else if(Math.random()<.42)c.tactic='lateral';
+        else c.tactic='hold';
+        if(c.laneBlockedT>0){c.tactic='lateral';c.strafeSide*=-1;}
+      }
+      let moving=false,canFire=los;
+      if(c.tactic==='cover'&&c.cover){
+        const cd=dist2d(p.x,p.z,c.cover.x,c.cover.z);if(cd>1.6){moving=moveTacticalPed(ctx,p,c.cover.x,c.cover.z,dt,3.7)>1.1;canFire=false;c.peekOpen=false;c.peekT=.25;}
+        else{c.peekT-=dt;if(c.peekT<=0){c.peekOpen=!c.peekOpen;c.peekT=c.peekOpen?.28+Math.random()*.24:.36+Math.random()*.42;}if(c.peekOpen){const tx=c.cover.x+c.cover.peekX*c.strafeSide*1.55,tz=c.cover.z+c.cover.peekZ*c.strafeSide*1.55;moving=moveTacticalPed(ctx,p,tx,tz,dt,3.2)>.45;}else canFire=false;}
+      }else if(c.tactic==='advance'){moving=moveTacticalPed(ctx,p,px-ux*18,pz-uz*18,dt,3.9)>1.2;}
+      else if(c.tactic==='fallback'){moving=moveTacticalPed(ctx,p,p.x-ux*7,p.z-uz*7,dt,3.8)>1.0;}
+      else if(c.tactic==='lateral'){moving=moveTacticalPed(ctx,p,p.x+uz*c.strafeSide*7,p.z-ux*c.strafeSide*7,dt,4.0)>1.0;}
+      p._aiState=(c.tactic==='cover'&&!c.peekOpen)?'cover':'combat';p.face=p.heading=Math.atan2(px-p.x,pz-p.z);
+      c.shotCd-=dt;c.aim=clamp(c.aim+dt*(canFire?(c.role==='guard'?1.7:1.2):-.8),0,1);
+      if(!canFire||d>=base.range||c.aim<.52||c.suppression>.88)continue;
+      const burst=NPC_BURSTS[c.weapon]||NPC_BURSTS.pistol;
+      if(c.burstLeft<=0&&c.burstPause<=0)c.burstLeft=burst.min+Math.floor(Math.random()*(burst.max-burst.min+1));
+      if(c.burstLeft>0&&c.shotCd<=0){
+        const result=armedNpcShoot(ctx,p,c,d);
+        if(result==='blocked'){c.burstLeft=0;c.burstPause=.34;c.decisionT=0;c.tactic='lateral';c.strafeSide*=-1;continue;}
+        c.burstLeft--;c.shotCd=burst.shotGap*(.90+Math.random()*.22);
+        if(c.burstLeft<=0)c.burstPause=(burst.pauseMin+Math.random()*(burst.pauseMax-burst.pauseMin))*clamp(base.interval,.72,1.35);
+      }
     }
   }
 
@@ -25836,19 +25952,25 @@ Assumptions that may not hold after integration:
     const len=Math.max(1,Math.floor(ac.sampleRate*.16));gunNoiseBuffer=ac.createBuffer(1,len,ac.sampleRate);
     const d=gunNoiseBuffer.getChannelData(0);let last=0;
     for(let i=0;i<len;i++){const white=Math.random()*2-1;last=last*.72+white*.28;d[i]=(white*.72+last*.28)*(1-i/len);}
-    return gunNoiseBuffer;
+    gunTailBuffers.clear();return gunNoiseBuffer;
+  }
+  function ensureGunTail(ac,id){
+    const feel=WEAPON_FEEL[id]||WEAPON_FEEL.pistol,key=id+':'+ac.sampleRate;if(gunTailBuffers.has(key))return gunTailBuffers.get(key);
+    const len=Math.max(1,Math.floor(ac.sampleRate*feel.tail)),buf=ac.createBuffer(1,len,ac.sampleRate),d=buf.getChannelData(0);let low=0;
+    for(let i=0;i<len;i++){const p=i/len,w=Math.random()*2-1;low=low*.88+w*.12;d[i]=(w*.34+low*.66)*Math.pow(1-p,id==='shotgun'?.72:1.35);}
+    gunTailBuffers.set(key,buf);return buf;
   }
   function playGunshot(ctx,id,scale){
     if(!ctx||document.hidden||(ctx.audio&&ctx.audio.muted))return;
     if(!ctx.audio.ctx){try{ctx.audio.ensure();}catch(_){}}
-    const ac=ctx.audio.ctx;if(!ac)return;
-    const t=ac.currentTime,master=ac.createGain(),comp=ac.createDynamicsCompressor();
-    master.gain.setValueAtTime(0.0001,t);master.gain.exponentialRampToValueAtTime((id==='rifle'?.34:.26)*(scale||1),t+.004);master.gain.exponentialRampToValueAtTime(.0001,t+(id==='rifle'?.22:.15));
+    const ac=ctx.audio.ctx;if(!ac)return;id=WEAPON_FEEL[id]?id:'pistol';const feel=WEAPON_FEEL[id],s=scale||1,t=ac.currentTime,master=ac.createGain(),comp=ac.createDynamicsCompressor(),peak=id==='shotgun'?.39:id==='rifle'?.35:id==='smg'?.25:.28;
+    master.gain.setValueAtTime(.0001,t);master.gain.exponentialRampToValueAtTime(peak*s,t+.003);master.gain.exponentialRampToValueAtTime(.0001,t+(id==='shotgun'?.26:id==='rifle'?.22:.15));
     comp.threshold.value=-18;comp.knee.value=8;comp.ratio.value=8;comp.attack.value=.002;comp.release.value=.09;master.connect(comp);comp.connect(ac.destination);
-    const src=ac.createBufferSource(),filter=ac.createBiquadFilter();src.buffer=ensureGunNoise(ac);filter.type='bandpass';filter.frequency.value=id==='rifle'?1450:1850;filter.Q.value=.7;src.connect(filter);filter.connect(master);src.start(t);src.stop(t+.16);
-    const crack=ac.createOscillator(),cg=ac.createGain();crack.type='square';crack.frequency.setValueAtTime(id==='rifle'?132:176,t);crack.frequency.exponentialRampToValueAtTime(id==='rifle'?58:72,t+.065);cg.gain.setValueAtTime(.18*(scale||1),t);cg.gain.exponentialRampToValueAtTime(.0001,t+.09);crack.connect(cg);cg.connect(master);crack.start(t);crack.stop(t+.095);
-    const snap=ac.createOscillator(),sg=ac.createGain();snap.type='sawtooth';snap.frequency.setValueAtTime(id==='rifle'?720:560,t);snap.frequency.exponentialRampToValueAtTime(150,t+.035);sg.gain.setValueAtTime(.11,t);sg.gain.exponentialRampToValueAtTime(.0001,t+.045);snap.connect(sg);sg.connect(master);snap.start(t);snap.stop(t+.05);
-    setTimeout(()=>{try{master.disconnect();comp.disconnect();}catch(_){}},350);
+    const src=ac.createBufferSource(),filter=ac.createBiquadFilter();src.buffer=ensureGunNoise(ac);filter.type='bandpass';filter.frequency.value=id==='shotgun'?920:id==='rifle'?1450:id==='smg'?2050:1850;filter.Q.value=id==='shotgun'?.55:.7;src.connect(filter);filter.connect(master);src.start(t);src.stop(t+.16);
+    const crack=ac.createOscillator(),cg=ac.createGain();crack.type=id==='shotgun'?'sawtooth':'square';crack.frequency.setValueAtTime(id==='shotgun'?94:id==='rifle'?132:id==='smg'?196:176,t);crack.frequency.exponentialRampToValueAtTime(id==='shotgun'?42:id==='rifle'?58:72,t+.065);cg.gain.setValueAtTime((id==='shotgun'?.24:.18)*s,t);cg.gain.exponentialRampToValueAtTime(.0001,t+.095);crack.connect(cg);cg.connect(master);crack.start(t);crack.stop(t+.10);
+    const snap=ac.createOscillator(),sg=ac.createGain();snap.type='sawtooth';snap.frequency.setValueAtTime(id==='rifle'?760:id==='smg'?880:id==='shotgun'?420:560,t);snap.frequency.exponentialRampToValueAtTime(150,t+.035);sg.gain.setValueAtTime((id==='smg'?.08:.11)*s,t);sg.gain.exponentialRampToValueAtTime(.0001,t+.045);snap.connect(sg);sg.connect(master);snap.start(t);snap.stop(t+.05);
+    const tail=ac.createBufferSource(),tf=ac.createBiquadFilter(),tg=ac.createGain();tail.buffer=ensureGunTail(ac,id);tf.type='bandpass';tf.frequency.value=feel.tailHz;tf.Q.value=id==='shotgun'?.45:.65;tg.gain.setValueAtTime(.0001,t+.018);tg.gain.exponentialRampToValueAtTime(feel.tailGain*s,t+.035);tg.gain.exponentialRampToValueAtTime(.0001,t+.035+feel.tail);tail.connect(tf);tf.connect(tg);tg.connect(ac.destination);tail.start(t+.018);tail.stop(t+.055+feel.tail);
+    setTimeout(()=>{try{master.disconnect();comp.disconnect();tail.disconnect();tf.disconnect();tg.disconnect();}catch(_){}},Math.ceil((feel.tail+.12)*1000));
   }
 
   /* ========================================================================
@@ -25910,13 +26032,13 @@ Assumptions that may not hold after integration:
   }
   function clearFx() { while (fxLive.length) retireFx(fxLive.length - 1); }
 
-  function muzzleFlash(ctx, x, y, z, heading, pitch) {
-    pitch=pitch||0;
-    const e = takeFx(ctx, 'flash', 0xffd66b, .9),cp=Math.cos(pitch);
+  function muzzleFlash(ctx, x, y, z, heading, pitch, weaponId) {
+    pitch=pitch||0;const feel=WEAPON_FEEL[weaponId]||WEAPON_FEEL.pistol,size=.42+(feel.muzzle||.7)*.16;
+    const e = takeFx(ctx, 'flash', weaponId==='shotgun'?0xffc45d:weaponId==='rifle'?0xffe19a:0xffd66b, .9),cp=Math.cos(pitch);
     const fx = Math.sin(heading)*cp, fy=Math.sin(pitch), fz = Math.cos(heading)*cp;
     e.mesh.position.set(x + fx * 1.1, y+fy*1.1, z + fz * 1.1);
-    e.mesh.scale.set(.5, .5, .5);
-    e.life = e.max = .055; e.peak = .9; e.shrink = false;
+    e.mesh.scale.set(size,size,size);
+    e.life = e.max = .045+(feel.muzzle||.7)*.014; e.peak = .9; e.shrink = false;
   }
   function tracer(ctx, x, y, z, heading, len, pitch) {
     pitch=pitch||0;
@@ -26042,8 +26164,10 @@ Assumptions that may not hold after integration:
     inv.cd=w.interval;if(ammo.mag!==Infinity){ammo.mag--;markCombatDirty();}
     if(!(melee&&melee.isWeapon(w.id))){const crime=GameSystems.api('crime'),ev=crime&&crime.report('gunfire',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:1,witnessRadius:w.id==='rifle'?205:w.id==='shotgun'?185:155});inv.lastCrimeEvent=ev&&ev.id||null;if(ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(ctx.player.x,ctx.player.z,w.id==='rifle'?205:w.id==='shotgun'?185:155,'gunfire',ev);provokeArmedPeds(ctx,ctx.player.x,ctx.player.z,w.id==='rifle'?125:105,true);}
     const count=w.pellets||1;let shot=null,anyHit=false,anyHead=false;for(let i=0;i<count;i++){const r=fireRay(ctx,w,i,count);if(!shot||r&&r.hit)shot=r||shot;if(r&&r.hit)anyHit=true;if(r&&r.headshot)anyHead=true;}
-    recoilKick=Math.min(1.5,recoilKick+(w.id==='shotgun'?.95:w.id==='rifle'?.30:w.id==='smg'?.18:w.id==='pistol'?.48:.18));crosshairBloom=Math.min(1.5,crosshairBloom+(w.id==='shotgun'?.72:w.id==='rifle'?.22:w.id==='smg'?.15:w.id==='pistol'?.38:.14));
-    if(mouseLookActive()&&!(melee&&melee.isWeapon(w.id)))aimPitch=clamp(aimPitch+(w.id==='shotgun'?.028:w.id==='rifle'?.006:w.id==='smg'?.004:.012)*(Math.random()*.45+.75),-.72,.72);
+    const feel=WEAPON_FEEL[w.id]||WEAPON_FEEL.pistol,pattern=feel.pattern||[0],patternYaw=pattern[recoilIndex++%pattern.length]*feel.yaw,jitter=(Math.random()-.5)*feel.yaw*.34;
+    recoilKick=Math.min(1.8,recoilKick+feel.kick);recoilPitchKick=Math.min(.12,recoilPitchKick+feel.pitch);recoilYawKick=clamp(recoilYawKick+patternYaw+jitter,-.085,.085);muzzleImpulse=Math.min(1.7,muzzleImpulse+feel.muzzle);crosshairBloom=Math.min(1.7,crosshairBloom+feel.bloom);
+    if(mouseLookActive()&&!(melee&&melee.isWeapon(w.id))){aimPitch=clamp(aimPitch+feel.pitch,-.72,.72);aimYaw+=patternYaw+jitter;}
+    ctx.events.emit('camera:shake',{amount:feel.shake,duration:w.id==='shotgun'?.16:.075,source:'weapon-muzzle',weaponId:w.id});
     if(anyHit){hitMarkerTimer=.16;if(anyHead)headshotTimer=.24;}if(ammo.mag===0)startReload(ctx);paintWeaponUI();return true;
   }
 
@@ -26074,8 +26198,8 @@ Assumptions that may not hold after integration:
     }
     for(const c of ctx.actors.cops)if(!c._bDead){const wh=nearestVehicleWheelHit(ctx,c,o,dx,dy,dz,bestT);if(wh&&wh.t<bestT){bestT=wh.t;best={obj:c,kind:'cop',region:wh.region,t:wh.t};}test(c,'cop',1.7,3.5);}
     for(const t of ctx.actors.traffic)if(!t.dead&&!t._bDead){const wh=nearestVehicleWheelHit(ctx,t,o,dx,dy,dz,bestT);if(wh&&wh.t<bestT){bestT=wh.t;best={obj:t,kind:'traffic',region:wh.region,t:wh.t};}test(t,'traffic',1.7,3.5);}
-    for(const p of ctx.actors.peds)if(!p.dead&&!p._knocked){test(p,'ped',5.04,.78,'head');test(p,'ped',2.75,1.45,'body');}
-    for(const of of officers)if(!of.down){test(of,'officer',5.04,.78,'head');test(of,'officer',2.75,1.45,'body');}
+    for(const p of ctx.actors.peds)if(!p.dead&&!p._knocked){test(p,'ped',5.04,.74,'head');test(p,'ped',3.18,1.16,'torso');test(p,'ped',1.34,1.02,'legs');}
+    for(const of of officers)if(!of.down){test(of,'officer',5.04,.74,'head');test(of,'officer',3.18,1.16,'torso');test(of,'officer',1.34,1.02,'legs');}
     const interiors=GameSystems.api('interiors'),interiorHit=interiors&&interiors.raycast?interiors.raycast(o,dx,dy,dz,bestT):null;if(interiorHit&&interiorHit.t<bestT){bestT=interiorHit.t;best=interiorHit;}
     return best;
   }
@@ -26083,15 +26207,16 @@ Assumptions that may not hold after integration:
   function fireRay(ctx,w,index,count){
     const o=shooterOrigin(ctx),dir=shotDirection(ctx,o,w,index||0,count||1),dx=dir.dx,dy=dir.dy,dz=dir.dz,range=w.range,first=(index||0)===0;
     const wallT=w.id==='melee'?range:wallDistanceAimed(ctx,o.x,o.y,o.z,dx,dy,dz,range);
-    if(first){if(w.id==='melee')ctx.audio.beep(150,.07,'triangle',.07);else{playGunshot(ctx,w.id==='smg'?'rifle':w.id,1);muzzleFlash(ctx,o.x,o.y,o.z,dir.heading,dir.pitch);}}
+    if(first){if(w.id==='melee')ctx.audio.beep(150,.07,'triangle',.07);else{playGunshot(ctx,w.id,1);muzzleFlash(ctx,o.x,o.y,o.z,dir.heading,dir.pitch,w.id);}}
     const hit=nearestCombatTarget(ctx,o,dx,dy,dz,wallT),t=hit?hit.t:wallT,kind=hit?hit.kind:'wall',obj=hit&&hit.obj;if(w.id==='melee'&&kind==='wall')return{hit:false};const hx=o.x+dx*t,hy=o.y+dy*t,hz=o.z+dz*t;if(w.id!=='melee')tracer(ctx,o.x,o.y,o.z,dir.heading,t,dir.pitch);
-    const vd=GameSystems.api('vdamage'),headshot=!!(hit&&hit.region==='head');
+    const vd=GameSystems.api('vdamage'),region=hit&&hit.region||'body',headshot=region==='head';
+    if(first&&w.id!=='melee')suppressNearShot(ctx,o,dx,dz,t,obj,w);
     if(kind==='wall'){const dest=GameSystems.api('destructibles'),broke=dest&&dest.breakAt?dest.breakAt(hx,hz,2.5,w.damage,{kind:'weapon',from:'player'}):false;impact(ctx,hx,hy,hz,broke?0xffd23f:0xbcd2ff);}
-    else if(kind==='cop'||kind==='traffic'){impact(ctx,hx,hy,hz,0xffb347);const tireRegion=hit&&typeof hit.region==='string'&&hit.region.startsWith('tire:'),corner=tireRegion?hit.region.slice(5):null;if(tireRegion&&ctx.engine.burstVehicleTire)ctx.engine.burstVehicleTire(obj,corner,'GUNFIRE');if(vd)vd.damage(obj,{amount:tireRegion?Math.max(.5,w.vehicleDamage*.12):w.vehicleDamage,channel:'ballistic',from:'player-weapon',source:'weapon',x:hx,y:hy,z:hz,critical:false});if(kind==='cop')raiseWantedForCop(ctx);else{const crime=GameSystems.api('crime'),ev=crime&&crime.report('shooting-occupied-vehicle',{perpetrator:'player',actor:ctx.player,x:obj.x,z:obj.z,severity:1,witnessRadius:145});if(ctx.actors.panicTrafficFromGunfire)ctx.actors.panicTrafficFromGunfire(obj,ev);if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(obj.x,obj.z,145,'gunfire',ev);}}
-    else if(kind==='ped'){impact(ctx,hx,hy,hz,headshot?0xfff4a8:0xff3b6b);damageCharacter(ctx,obj,w.damage,{kind:'ped',critical:headshot,headshotMultiplier:w.headshot,from:'player',source:'weapon',fromX:o.x,fromZ:o.z,x:hx,y:hy,z:hz,dirX:dx,dirZ:dz});if(!obj.dead){const c=ensurePedCharacter(obj);if(c.armed){c.hostile=true;c.playerStarted=true;}}}
-    else if(kind==='officer'){impact(ctx,hx,hy,hz,headshot?0xfff4a8:0xff3b6b);damageCharacter(ctx,obj,w.damage,{kind:'officer',critical:headshot,headshotMultiplier:w.headshot,from:'player',source:'weapon',fromX:o.x,fromZ:o.z,x:hx,y:hy,z:hz,dirX:dx,dirZ:dz});raiseWantedForCop(ctx);}
+    else if(kind==='cop'||kind==='traffic'){impact(ctx,hx,hy,hz,0xffb347);const tireRegion=typeof region==='string'&&region.startsWith('tire:'),corner=tireRegion?region.slice(5):null;if(tireRegion&&ctx.engine.burstVehicleTire)ctx.engine.burstVehicleTire(obj,corner,'GUNFIRE');if(vd)vd.damage(obj,{amount:tireRegion?Math.max(.5,w.vehicleDamage*.12):w.vehicleDamage,channel:'ballistic',from:'player-weapon',source:'weapon',x:hx,y:hy,z:hz,critical:false});if(kind==='cop')raiseWantedForCop(ctx);else{const crime=GameSystems.api('crime'),ev=crime&&crime.report('shooting-occupied-vehicle',{perpetrator:'player',actor:ctx.player,x:obj.x,z:obj.z,severity:1,witnessRadius:145});if(ctx.actors.panicTrafficFromGunfire)ctx.actors.panicTrafficFromGunfire(obj,ev);if(ev&&ctx.actors.alertPedestrians)ctx.actors.alertPedestrians(obj.x,obj.z,145,'gunfire',ev);}}
+    else if(kind==='ped'){impact(ctx,hx,hy,hz,headshot?0xfff4a8:region==='legs'?0xff8b62:0xff3b6b);damageCharacter(ctx,obj,w.damage,{kind:'ped',region,critical:headshot,headshotMultiplier:w.headshot,weaponId:w.id,from:'player',source:'weapon',fromX:o.x,fromZ:o.z,x:hx,y:hy,z:hz,dirX:dx,dirZ:dz});if(!obj.dead){const c=ensurePedCharacter(obj);if(c.armed){c.hostile=true;c.playerStarted=true;}}}
+    else if(kind==='officer'){impact(ctx,hx,hy,hz,headshot?0xfff4a8:region==='legs'?0xff8b62:0xff3b6b);damageCharacter(ctx,obj,w.damage,{kind:'officer',region,critical:headshot,headshotMultiplier:w.headshot,weaponId:w.id,from:'player',source:'weapon',fromX:o.x,fromZ:o.z,x:hx,y:hy,z:hz,dirX:dx,dirZ:dz});raiseWantedForCop(ctx);}
     else if(kind==='interior'){impact(ctx,hx,hy,hz,0xffd23f);const interiors=GameSystems.api('interiors');if(interiors&&interiors.damageTarget)interiors.damageTarget(obj,w.damage,{weapon:w.id,x:hx,y:hy,z:hz});}
-    if(hit&&first)ctx.audio.beep(headshot?880:620,.025,'sine',headshot?.07:.035);if(first&&inv.wantedCd<=0&&witnessesNear(ctx,o.x,o.z)){inv.wantedCd=5;const crime=GameSystems.api('crime'),ev=crime&&crime.coerce(inv.lastCrimeEvent);if(ev){const cop=ctx.actors.cops.find(c=>dist2d(c.x,c.z,o.x,o.z)<WITNESS_R);crime.witness(ev,cop||{id:'police',x:o.x,z:o.z});}}return{hit:!!hit,headshot,kind};
+    if(hit&&first)ctx.audio.beep(headshot?880:620,.025,'sine',headshot?.07:.035);if(first&&inv.wantedCd<=0&&witnessesNear(ctx,o.x,o.z)){inv.wantedCd=5;const crime=GameSystems.api('crime'),ev=crime&&crime.coerce(inv.lastCrimeEvent);if(ev){const cop=ctx.actors.cops.find(c=>dist2d(c.x,c.z,o.x,o.z)<WITNESS_R);crime.witness(ev,cop||{id:'police',x:o.x,z:o.z});}}return{hit:!!hit,headshot,region,kind};
   }
 
   function raiseWantedForCop(ctx){if(inv.copWantedCd>0)return;inv.copWantedCd=3;const crime=GameSystems.api('crime');if(crime)crime.report('assault-police',{perpetrator:'player',actor:ctx.player,x:ctx.player.x,z:ctx.player.z,severity:2,priority:true,immediate:true});}
@@ -26114,7 +26239,7 @@ Assumptions that may not hold after integration:
   function equip(ctx, id) {
     if(id&&inv.owned&&!inv.owned[id]){ctx.fx.toast('Buy '+WEAPONS[id].name+' at Ammu-Nation','#ffd23f');return false;}
     if(inv.equipped===id){if(weaponWheelOpen)closeWeaponWheel(false);return true;}
-    inv.equipped=id;inv.reloadTimer=0;inv.reloadTotal=0;inv.cd=0;inv.warnedInCar=false;if(id==='minigun')aimHeld=false;equipKick=1;switchClock=.32;markCombatDirty();if(ctx)rebuildWeaponModels(ctx);
+    inv.equipped=id;inv.reloadTimer=0;inv.reloadTotal=0;inv.cd=0;inv.warnedInCar=false;recoilIndex=0;recoilKick=0;recoilPitchKick=0;recoilYawKick=0;muzzleImpulse=0;if(id==='minigun')aimHeld=false;equipKick=1;switchClock=.32;markCombatDirty();if(ctx)rebuildWeaponModels(ctx);
     paintWeaponUI();if(ctx&&ctx.engine.requestTimeScale)ctx.engine.requestTimeScale('weapon-switch',.58,.24);
     if (id) {
       ctx.audio.beep(520, .05, 'square', .05);
@@ -26184,12 +26309,12 @@ Assumptions that may not hold after integration:
   }
 
   function updateWeaponPresentation(dt,ctx){
-    weaponClock+=dt;switchClock=Math.max(0,switchClock-dt);recoilKick=Math.max(0,recoilKick-dt*6.8);crosshairBloom=Math.max(0,crosshairBloom-dt*4.8);hitMarkerTimer=Math.max(0,hitMarkerTimer-dt);headshotTimer=Math.max(0,headshotTimer-dt);equipKick=Math.max(0,equipKick-dt*4.5);qaLookTimer=Math.max(0,qaLookTimer-dt);if(qaLookActive&&qaLookTimer<=0)qaLookActive=false;if(weaponWheelOpen&&performance.now()-weaponWheelLastInput>1050)closeWeaponWheel(true);const aimTarget=(aimHeld||qaLookActive)?1:0;aimBlend+=(aimTarget-aimBlend)*(1-Math.exp(-dt*(aimTarget?11:8)));
+    weaponClock+=dt;switchClock=Math.max(0,switchClock-dt);const presentFeel=WEAPON_FEEL[inv.equipped]||WEAPON_FEEL.pistol,recover=presentFeel.recover||7,rk=1-Math.exp(-dt*recover),pitchReturn=recoilPitchKick*rk,yawReturn=recoilYawKick*(1-Math.exp(-dt*recover*.82));recoilKick=Math.max(0,recoilKick-dt*recover);muzzleImpulse=Math.max(0,muzzleImpulse-dt*(recover*1.7));crosshairBloom=Math.max(0,crosshairBloom-dt*(recover*.64));if(mouseLookActive()){aimPitch=clamp(aimPitch-pitchReturn,-.72,.72);aimYaw-=yawReturn;}recoilPitchKick-=pitchReturn;recoilYawKick-=yawReturn;hitMarkerTimer=Math.max(0,hitMarkerTimer-dt);headshotTimer=Math.max(0,headshotTimer-dt);equipKick=Math.max(0,equipKick-dt*4.5);qaLookTimer=Math.max(0,qaLookTimer-dt);if(qaLookActive&&qaLookTimer<=0)qaLookActive=false;if(weaponWheelOpen&&performance.now()-weaponWheelLastInput>1050)closeWeaponWheel(true);const aimTarget=(aimHeld||qaLookActive)?1:0;aimBlend+=(aimTarget-aimBlend)*(1-Math.exp(-dt*(aimTarget?11:8)));
     const onFoot=ctx.player.onFoot&&!!inv.equipped,fp=onFoot&&firstPersonActive(),mesh=ctx.player.footMesh;if(mesh)mesh.visible=ctx.player.onFoot&&!fp;if(worldWeapon)worldWeapon.visible=onFoot&&!fp;if(viewWeapon)viewWeapon.visible=onFoot&&fp;
     if(!onFoot){aimBlend=0;aimCameraWasActive=false;if(crosshair)crosshair.classList.remove('show');return;}const look=mouseLookActive();if(!look){aimYaw=ctx.player.heading;aimPitch*=Math.max(0,1-dt*8);}if(fp)updateFirstPersonCamera(dt,ctx);else if(aimBlend>.005)updateThirdPersonAimCamera(dt,ctx);else if(aimCameraWasActive){aimCameraWasActive=false;ctx.cameraInternals.smoothingReady=false;}
     const ground=ctx.world.groundHeightAt(ctx.player.x,ctx.player.z,0),heading=look?aimYaw:ctx.player.heading,fwdx=Math.sin(heading),fwdz=Math.cos(heading),rx=Math.cos(heading),rz=-Math.sin(heading),moving=!!(ctx.input.keys['w']||ctx.input.keys['s']||ctx.input.keys['a']||ctx.input.keys['d']||ctx.input.mobileInput.gas||ctx.input.mobileInput.brake),bob=moving?Math.sin(weaponClock*10)*.035:Math.sin(weaponClock*2.2)*.012,reload=inv.reloadTimer>0?Math.sin((1-inv.reloadTimer/Math.max(.01,inv.reloadTotal||WEAPONS[inv.equipped].reload||1))*Math.PI):0,switchDrop=equipKick*.36;
-    if(worldWeapon){const long=inv.equipped==='rifle'||inv.equipped==='shotgun'||inv.equipped==='smg',hand=mesh&&mesh.userData.armR;if(hand&&worldWeapon.parent!==hand)hand.add(worldWeapon);worldWeapon.position.set(long?.05:.08,-.72,long?.18:.13);orientHandFirearm(worldWeapon,hand,heading,look?aimPitch*aimBlend:0,(long?-.02:-.05)-recoilKick*.035);}
-    if(viewWeapon){const cam=ctx.camera,aim=aimBlend,ox=(inv.equipped==='rifle'?.43:inv.equipped==='shotgun'?.45:inv.equipped==='smg'?.42:.50)*(1-aim)+(inv.equipped==='rifle'?.04:.06)*aim,oy=(inv.equipped==='rifle'||inv.equipped==='shotgun'?-.43:-.40)+bob-reload*.22+equipKick*.22,oz=(inv.equipped==='rifle'?-1.18:inv.equipped==='shotgun'?-1.12:inv.equipped==='smg'?-1.02:-.92)+recoilKick*.20;modelTmpV.set(ox,oy,oz).applyQuaternion(cam.quaternion);viewWeapon.position.copy(cam.position).add(modelTmpV);viewWeapon.quaternion.copy(cam.quaternion);viewWeapon.rotateY(Math.PI);viewWeapon.rotateZ(reload*.62);viewWeapon.rotateX(-recoilKick*.08);/* model +Z remains camera-forward in every first-person pose */}
+    if(worldWeapon){const long=inv.equipped==='rifle'||inv.equipped==='shotgun'||inv.equipped==='smg',hand=mesh&&mesh.userData.armR;if(hand&&worldWeapon.parent!==hand)hand.add(worldWeapon);worldWeapon.position.set(long?.05:.08,-.72,long?.18:.13-muzzleImpulse*.045);orientHandFirearm(worldWeapon,hand,heading,look?aimPitch*aimBlend:0,(long?-.02:-.05)-recoilKick*.035-recoilYawKick*.35);}
+    if(viewWeapon){const cam=ctx.camera,aim=aimBlend,ox=(inv.equipped==='rifle'?.43:inv.equipped==='shotgun'?.45:inv.equipped==='smg'?.42:.50)*(1-aim)+(inv.equipped==='rifle'?.04:.06)*aim+recoilYawKick*.9,oy=(inv.equipped==='rifle'||inv.equipped==='shotgun'?-.43:-.40)+bob-reload*.22+equipKick*.22+recoilPitchKick*.7,oz=(inv.equipped==='rifle'?-1.18:inv.equipped==='shotgun'?-1.12:inv.equipped==='smg'?-1.02:-.92)+recoilKick*.20+muzzleImpulse*.10;modelTmpV.set(ox,oy,oz).applyQuaternion(cam.quaternion);viewWeapon.position.copy(cam.position).add(modelTmpV);viewWeapon.quaternion.copy(cam.quaternion);viewWeapon.rotateY(Math.PI);viewWeapon.rotateZ(reload*.62-recoilYawKick*.55);viewWeapon.rotateX(-recoilKick*.08-recoilPitchKick*.9);/* model +Z remains camera-forward in every first-person pose */}
     if(mesh&&mesh.userData.armL){const long=inv.equipped==='rifle'||inv.equipped==='shotgun'||inv.equipped==='smg',pistol=!long&&inv.equipped!=='melee',rightAim=pistol?-1.48:long?-1.36:-.78,leftAim=pistol?-.42:long?-1.16:-.28,idleL=-.28,idleR=.18;mesh.userData.armL.rotation.x=lerp(idleL,leftAim,aimBlend)-reload*.28;mesh.userData.armR.rotation.x=lerp(idleR,rightAim-recoilKick*.13,aimBlend)-reload*.12;mesh.userData.armL.rotation.z=lerp(.10,long?.28:pistol?.06:.10,aimBlend);mesh.userData.armR.rotation.z=lerp(-.10,long?-.12:pistol?-.08:-.10,aimBlend);}
     if(crosshair){crosshair.classList.toggle('show',!!aimHeld);crosshair.classList.toggle('hit',aimHeld&&hitMarkerTimer>0);crosshair.classList.toggle('head',aimHeld&&headshotTimer>0);crosshair.style.setProperty('--gap',(4+crosshairBloom*7).toFixed(1)+'px');}
   }
@@ -26413,6 +26538,7 @@ Assumptions that may not hold after integration:
     return of;
   }
   function releaseOfficer(of) {
+    if(melee)try{melee.removeNpc(of);}catch(_){}
     const i = officers.indexOf(of);
     if (i >= 0) officers.splice(i, 1);
     of.group.visible = false;
@@ -26421,15 +26547,16 @@ Assumptions that may not hold after integration:
     if (ud.legL) { ud.legL.rotation.x = 0; ud.legR.rotation.x = 0; ud.armL.rotation.x = 0; ud.armR.rotation.x = 0; }
     officerPool.push(of.group);
   }
-  function downOfficer(ctx, of, dx, dz) {
+  function downOfficer(ctx, of, dx, dz, energy) {
     if (of.down) return;
-    of.down = true; of.downTimer = 6;
-    of.group.rotation.set(-Math.PI / 2, of.heading, 0);
+    of.down = true; of.downTimer = 6;const rag=GameSystems.api('ragdolls'),e=clamp(Number(energy)||44,18,92);
+    if(rag&&rag.launch){of.group.visible=false;rag.launch(of,{dirX:dx,dirZ:dz,energy:e,dead:true});}
+    else of.group.rotation.set(-Math.PI / 2, of.heading, 0);
     ctx.fx.toast('+25 officer down', '#ff6b6b');
     ctx.engine.addScore(25);
     if(of.occupant){of.occupant.alive=false;of.occupant.deployed=false;of.occupant.officer=null;}
     if(of.cop){const cop=of.cop;if(of.occupant&&of.occupant.role==='driver'){cop._driverAlive=false;cop._driverDeployed=false;cop._inert=true;cop._footSpent=true;}if((cop._occupants||[]).every(o=>!o.alive)){cop._inert=true;cop._footSpent=true;}if(cop._foot&&cop._foot.officer===of)cop._foot.state='DRIVER_DOWN';}
-    GameSystems.events.emit('actor:killed',{kind:'cop',actor:of,role:'police',weaponId:of._charV16&&of._charV16.weapon||'pistol',x:of.x,y:of.y,z:of.z});
+    GameSystems.events.emit('actor:killed',{kind:'cop',actor:of,role:'police',weaponId:of._charV16&&of._charV16.weapon||'pistol',x:of.x,y:of.y,z:of.z,ragdollEnergy:e});
   }
 
   function poseOfficer(of, dt, moving, aiming) {
@@ -26465,9 +26592,25 @@ Assumptions that may not hold after integration:
   }
 
   function officerShoot(ctx,of){
-    const onFoot=ctx.player.onFoot,px=ctx.player.x,pz=ctx.player.z,py=(onFoot?ctx.world.groundHeightAt(px,pz,of.y):ctx.carState.y)+1.2,dx=px-of.x,dz=pz-of.z,d=Math.hypot(dx,dz)||1,ux=dx/d,uz=dz/d,tune=ctx.engine.policeTuning?ctx.engine.policeTuning(ctx.stats.wanted):{level:ctx.stats.wanted,aggression:1};of.heading=Math.atan2(ux,uz);const oy=of.y+4.05;muzzleFlash(ctx,of.x,oy,of.z,of.heading);playGunshot(ctx,(tune.level||0)>=4?'rifle':'pistol',.58);const wallT=wallDistance(ctx,of.x,oy,of.z,ux,uz,Math.min(d,145));if(wallT<d-1.5){impact(ctx,of.x+ux*wallT,oy,of.z+uz*wallT,0xbcd2ff);return;}tracer(ctx,of.x,oy,of.z,of.heading,d);
-    const moving=onFoot?playerSpeed>3.5:ctx.player.mph>7,skill=of.profile?of.profile.accuracy:.75,level=tune.level||ctx.stats.wanted||1,chance=clamp(.10+level*.05+(moving?-.08:.05)-clamp(d/120,0,1)*.16+(skill-.75)*.18,.06,.52);if(Math.random()>chance){const rx=uz,rz=-ux,off=(Math.random()<.5?-1:1)*(2.1+Math.random()*3.4);impact(ctx,px+rx*off,py-1,pz+rz*off,0xbcd2ff);return;}
-    impact(ctx,px-ux*1.5,py,pz-uz*1.5,0xff8a4b);const damage=3.1+level*.72+(tune.aggression||1)*.45,vd=GameSystems.api('vdamage');if(!onFoot&&level>=3&&ctx.engine.vehicleTireCorners&&ctx.engine.burstTire){const dy=py-oy,len3=Math.hypot(dx,dy,dz)||1,vx=dx/len3,vy=dy/len3,vz=dz/len3;let tireHit=null,tireT=len3;for(const p of ctx.engine.vehicleTireCorners('player')){if(p.burst)continue;const t=raySphereT(of.x,oy,of.z,vx,vy,vz,p.x,p.y,p.z,.9,tireT);if(t>=0&&t<tireT){tireT=t;tireHit=p.key;}}if(tireHit)ctx.engine.burstTire(tireHit,'POLICE GUNFIRE');}if(!onFoot&&vd)vd.damage('player',{amount:damage,channel:'ballistic',from:'police'});else if(ctx.engine.hurtPlayer){ctx.engine.hurtPlayer(damage*3/100,{source:'police',wanted:level});if(!warnedUnderFire){warnedUnderFire=true;ctx.fx.toast('taking fire','#ff6b6b');}}else ctx.fx.flash(.12);
+    const onFoot=ctx.player.onFoot,px=ctx.player.x,pz=ctx.player.z,py=(onFoot?ctx.world.groundHeightAt(px,pz,of.y):ctx.carState.y)+1.2,dx=px-of.x,dz=pz-of.z,d=Math.hypot(dx,dz)||1,ux=dx/d,uz=dz/d,tune=ctx.engine.policeTuning?ctx.engine.policeTuning(ctx.stats.wanted):{level:ctx.stats.wanted,aggression:1},c=ensureOfficerCharacter(of,ctx),weapon=c.weapon||((tune.level||0)>=4?'rifle':'pistol');
+    of.heading=Math.atan2(ux,uz);if(friendlyLineBlocked(ctx,of,px,pz,true)){c.laneBlockedT=.45;c.suppression=Math.max(c.suppression||0,.16);return'blocked';}
+    const oy=of.y+4.05,wallT=wallDistance(ctx,of.x,oy,of.z,ux,uz,Math.min(d,145));muzzleFlash(ctx,of.x,oy,of.z,of.heading,0,weapon);playGunshot(ctx,weapon,.58);
+    if(wallT<d-1.5){impact(ctx,of.x+ux*wallT,oy,of.z+uz*wallT,0xbcd2ff);return'wall';}tracer(ctx,of.x,oy,of.z,of.heading,d);
+    const moving=onFoot?playerSpeed>3.5:ctx.player.mph>7,skill=of.profile?of.profile.accuracy:.75,level=tune.level||ctx.stats.wanted||1,suppressed=clamp(c.suppression||0,0,1),chance=clamp(.10+level*.05+(moving?-.08:.05)-clamp(d/120,0,1)*.16+(skill-.75)*.18-suppressed*.24,.045,.52);
+    if(Math.random()>chance){const rx=uz,rz=-ux,off=(Math.random()<.5?-1:1)*(2.1+Math.random()*3.4+suppressed*2.1);impact(ctx,px+rx*off,py-1,pz+rz*off,0xbcd2ff);if(Math.abs(off)<3.1)ctx.events.emit('camera:shake',{amount:.018,duration:.08,source:'police-near-miss'});return'miss';}
+    impact(ctx,px-ux*1.5,py,pz-uz*1.5,0xff8a4b);const damage=3.1+level*.72+(tune.aggression||1)*.45,vd=GameSystems.api('vdamage');if(!onFoot&&level>=3&&ctx.engine.vehicleTireCorners&&ctx.engine.burstTire){const dy=py-oy,len3=Math.hypot(dx,dy,dz)||1,vx=dx/len3,vy=dy/len3,vz=dz/len3;let tireHit=null,tireT=len3;for(const p of ctx.engine.vehicleTireCorners('player')){if(p.burst)continue;const t=raySphereT(of.x,oy,of.z,vx,vy,vz,p.x,p.y,p.z,.9,tireT);if(t>=0&&t<tireT){tireT=t;tireHit=p.key;}}if(tireHit)ctx.engine.burstTire(tireHit,'POLICE GUNFIRE');}
+    if(!onFoot&&vd)vd.damage('player',{amount:damage,channel:'ballistic',from:'police'});else if(ctx.engine.hurtPlayer){ctx.engine.hurtPlayer(damage*3/100,{source:'police',wanted:level});if(!warnedUnderFire){warnedUnderFire=true;ctx.fx.toast('taking fire','#ff6b6b');}}else ctx.fx.flash(.12);return'hit';
+  }
+
+  function policeBurstStep(ctx,of,state,dt,range,paceScale){
+    const c=ensureOfficerCharacter(of,ctx),weapon=c.weapon||'pistol',burst=NPC_BURSTS[weapon]||NPC_BURSTS.pistol;state.shotCd=Math.max(0,(state.shotCd||0)-dt);state.burstPause=Math.max(0,(state.burstPause||0)-dt);
+    if(c.hitReact>0||c.staggerT>0||c.suppression>.92||range>150)return'hold';
+    if((state.burstLeft||0)<=0&&state.burstPause<=0)state.burstLeft=burst.min+Math.floor(Math.random()*(burst.max-burst.min+1));
+    if(state.burstLeft>0&&state.shotCd<=0){
+      const result=officerShoot(ctx,of);if(result==='blocked'){state.burstLeft=0;state.burstPause=.34;state.laneBlockedT=.48;state.repositionSide=(state.repositionSide||1)*-1;return result;}
+      state.burstLeft--;state.shotCd=burst.shotGap*(paceScale||1)*(.90+Math.random()*.22);if(state.burstLeft<=0)state.burstPause=(burst.pauseMin+Math.random()*(burst.pauseMax-burst.pauseMin))*(paceScale||1);return result;
+    }
+    return'hold';
   }
 
   const detachedOfficers=[];
@@ -26484,26 +26627,86 @@ Assumptions that may not hold after integration:
   }
   function clearRoadblockPosts(rb){if(!rb)return;for(const c of rb.cars||[])releaseCopOccupants(c,true);if(rb.posts)rb.posts.length=0;}
   function updateDetachedOfficers(dt,ctx){
-    policeSquadCall.t=Math.max(0,policeSquadCall.t-dt);const crime=GameSystems.api('crime'),recentAttack=!!(crime&&crime.recentType&&(crime.recentType('assault-police',7000)||crime.recentType('ram-police',7000)));for(let i=detachedOfficers.length-1;i>=0;i--){const d=detachedOfficers[i],of=d.of,cop=d.cop,occ=d.occ;if(!of||!cop||ctx.actors.cops.indexOf(cop)<0){if(of&&officers.indexOf(of)>=0)releaseOfficer(of);detachedOfficers.splice(i,1);continue;}if(of.down){of.downTimer-=dt;if(of.downTimer<=0){releaseOfficer(of);if(occ){occ.officer=null;occ.deployed=false;}detachedOfficers.splice(i,1);}continue;}const wanted=ctx.stats.wanted,px=ctx.player.x,pz=ctx.player.z,range=dist2d(of.x,of.z,px,pz),leave=wanted<1||cop._retiring||ctx.player.dead||ctx.player.dying;if(leave&&!d.returning)d.returning=true;
-      if(d.returning){const left=walkOfficer(ctx,of,cop.x+Math.cos(cop.heading)*(occ.role==='partner'?-3.2:3.2),cop.z-Math.sin(cop.heading)*(occ.role==='partner'?-3.2:3.2),dt);poseOfficer(of,dt,left>.5,false);if(left<2.5){releaseOfficer(of);occ.deployed=false;occ.officer=null;if(occ.role==='driver'&&occ.alive){cop._driverDeployed=false;cop._inert=false;}detachedOfficers.splice(i,1);}continue;}
-      if(d.mode==='roadblock'){of.group.visible=!cop._hidden;if(cop._hidden)continue;d.warningT=Math.max(0,(d.warningT||0)-dt);const allowed=wanted>=4||recentAttack,shooters=wanted>=6?4:wanted>=5?3:wanted>=4?2:recentAttack?1:0,cycle=Math.floor(performance.now()/1100),activeShooter=allowed&&shooters>0&&((d.index+cycle)%Math.max(1,d.rb.posts.length))<shooters,peek=activeShooter&&d.warningT<=0?.78:0,targetX=d.coverX+Math.cos(cop.heading)*peek,targetZ=d.coverZ-Math.sin(cop.heading)*peek,left=walkOfficer(ctx,of,targetX,targetZ,dt);separateOfficerFromPlayer(of,ctx);of.heading=Math.atan2(px-of.x,pz-of.z);poseOfficer(of,dt,left>.35,activeShooter&&range<180);d.shotCd-=dt;if(activeShooter&&range<180&&d.shotCd<=0){officerShoot(ctx,of);const tune=ctx.engine.policeTuning?ctx.engine.policeTuning(wanted):{aggression:1};d.shotCd=clamp(1.12-(tune.aggression||1)*.08,.58,1.05)*(of.profile?of.profile.interval:1);policeSquadCall={x:px,z:pz,t:1.2,seq:policeSquadCall.seq+1};d.warningT=.45+Math.random()*.7;}continue;}
-      const lethal=wanted>=3||recentAttack,side=occ.role==='partner'?1:-1,role=(d.index||0)%3,ang=Math.atan2(cop.x-px,cop.z-pz)+side*(role===1?1.05:.72),ring=role===0?64:role===1?42:30,targetX=px+Math.sin(ang)*ring,targetZ=pz+Math.cos(ang)*ring,left=walkOfficer(ctx,of,targetX,targetZ,dt);separateOfficerFromPlayer(of,ctx);of.heading=Math.atan2(px-of.x,pz-of.z);poseOfficer(of,dt,left>.7,lethal&&range<145);d.shotCd-=dt;if(lethal&&range<145&&d.shotCd<=0){officerShoot(ctx,of);d.shotCd=(of.profile?of.profile.interval:1.35)*(.72+Math.random()*.28);policeSquadCall={x:px,z:pz,t:1.2,seq:policeSquadCall.seq+1};}
+    policeSquadCall.t=Math.max(0,policeSquadCall.t-dt);
+    const crime=GameSystems.api('crime'),recentAttack=!!(crime&&crime.recentType&&(crime.recentType('assault-police',7000)||crime.recentType('ram-police',7000)));
+    for(let i=detachedOfficers.length-1;i>=0;i--){
+      const d=detachedOfficers[i],of=d.of,cop=d.cop,occ=d.occ;
+      if(!of||!cop||ctx.actors.cops.indexOf(cop)<0){if(of&&officers.indexOf(of)>=0)releaseOfficer(of);detachedOfficers.splice(i,1);continue;}
+      if(of.down){of.downTimer-=dt;if(of.downTimer<=0){releaseOfficer(of);if(occ){occ.officer=null;occ.deployed=false;}detachedOfficers.splice(i,1);}continue;}
+      const c=ensureOfficerCharacter(of,ctx);tickCharacterCombatState(c,dt);
+      const wanted=ctx.stats.wanted,px=ctx.player.x,pz=ctx.player.z,range=dist2d(of.x,of.z,px,pz),leave=wanted<1||cop._retiring||ctx.player.dead||ctx.player.dying;
+      if(leave&&!d.returning)d.returning=true;
+      if(d.returning){
+        const left=walkOfficer(ctx,of,cop.x+Math.cos(cop.heading)*(occ.role==='partner'?-3.2:3.2),cop.z-Math.sin(cop.heading)*(occ.role==='partner'?-3.2:3.2),dt);
+        poseOfficer(of,dt,left>.5,false);
+        if(left<2.5){releaseOfficer(of);occ.deployed=false;occ.officer=null;if(occ.role==='driver'&&occ.alive){cop._driverDeployed=false;cop._inert=false;}detachedOfficers.splice(i,1);}
+        continue;
+      }
+      if(c.staggerT>0||c.hitReact>0){
+        const kick=Math.min(.8,c.staggerT*2.5),left=walkOfficer(ctx,of,of.x+c.staggerX*kick,of.z+c.staggerZ*kick,dt);
+        poseOfficer(of,dt,left>.2,false);continue;
+      }
+      if(d.mode==='roadblock'){
+        of.group.visible=!cop._hidden;if(cop._hidden)continue;
+        d.warningT=Math.max(0,(d.warningT||0)-dt);d.repositionSide=d.repositionSide||((d.index&1)?-1:1);
+        const allowed=wanted>=4||recentAttack,shooters=wanted>=6?4:wanted>=5?3:wanted>=4?2:recentAttack?1:0,cycle=Math.floor(performance.now()/1100),
+          activeShooter=allowed&&shooters>0&&((d.index+cycle)%Math.max(1,d.rb.posts.length))<shooters,
+          laneBlocked=(d.laneBlockedT||0)>0||(c.laneBlockedT||0)>0,peek=activeShooter&&d.warningT<=0&&!laneBlocked?.78:0,
+          lateral=laneBlocked?d.repositionSide*4.2:0,sideX=Math.cos(cop.heading),sideZ=-Math.sin(cop.heading),
+          targetX=d.coverX+sideX*lateral+Math.cos(cop.heading)*peek,targetZ=d.coverZ+sideZ*lateral-Math.sin(cop.heading)*peek,
+          left=walkOfficer(ctx,of,targetX,targetZ,dt);
+        d.laneBlockedT=Math.max(0,(d.laneBlockedT||0)-dt);separateOfficerFromPlayer(of,ctx);of.heading=Math.atan2(px-of.x,pz-of.z);
+        poseOfficer(of,dt,left>.35,activeShooter&&range<180&&peek>0);
+        if(activeShooter&&range<180&&peek>0){
+          const tune=ctx.engine.policeTuning?ctx.engine.policeTuning(wanted):{aggression:1},result=policeBurstStep(ctx,of,d,dt,range,clamp(1.18-(tune.aggression||1)*.06,.72,1.12));
+          if(result==='blocked'){d.laneBlockedT=.55;d.repositionSide*=-1;}
+          else if(result==='hit'||result==='miss'||result==='wall'){policeSquadCall={x:px,z:pz,t:1.2,seq:policeSquadCall.seq+1};d.warningT=.18+Math.random()*.28;}
+        }
+        continue;
+      }
+      const lethal=wanted>=3||recentAttack,role=(d.index||0)%3,side=(d.repositionSide||((occ.role==='partner')?1:-1)),supp=c.suppression||0,
+        ang=Math.atan2(cop.x-px,cop.z-pz)+side*(role===1?1.05:.72),ring=role===0?64:role===1?46:34,
+        retreat=supp>.72?14:0,targetX=px+Math.sin(ang)*(ring+retreat),targetZ=pz+Math.cos(ang)*(ring+retreat),
+        left=walkOfficer(ctx,of,targetX,targetZ,dt);
+      separateOfficerFromPlayer(of,ctx);of.heading=Math.atan2(px-of.x,pz-of.z);poseOfficer(of,dt,left>.7,lethal&&range<145&&c.suppression<.9);
+      if(lethal&&range<145){
+        const result=policeBurstStep(ctx,of,d,dt,range,role===0?.94:1.04);
+        if(result==='blocked'){d.repositionSide=side*-1;d.laneBlockedT=.52;}
+        else if(result==='hit'||result==='miss'||result==='wall')policeSquadCall={x:px,z:pz,t:1.2,seq:policeSquadCall.seq+1};
+      }
     }
   }
 
   function beginStop(ctx, cop) {
     const driver=occupant(cop,'driver');if(!driver||!driver.alive)return false;cop._driverDeployed=true;cop._inert=true;
     cop._foot = {
-      state: 'STOPPING', t: 0,
-      speed: Math.hypot(cop.vx || 0, cop.vz || 0),
-      x: cop.x, z: cop.z, y: cop.y === undefined ? 0 : cop.y, heading: cop.heading,
-      officer: null, shotCd: 0, firingTime: 0,
-      flankX: 0, flankZ: 0, arrestT: 0, tackleCd: 0,
+      state:'STOPPING',t:0,speed:Math.hypot(cop.vx||0,cop.vz||0),
+      x:cop.x,z:cop.z,y:cop.y===undefined?0:cop.y,heading:cop.heading,
+      officer:null,shotCd:0,firingTime:0,burstLeft:0,burstPause:0,laneBlockedT:0,repositionSide:(cop._collisionId&1)?-1:1,
+      flankX:0,flankZ:0,arrestT:0,tackleCd:0,squadRole:0,cover:null,meleeFighter:null,
+      watchX:cop.x,watchZ:cop.z,watchState:'STOPPING',watchT:0,watchTrips:0,lastProgressAt:performance.now(),
       // The engine has already driven this cop once this frame; integrating our
-      // own step on top of that would double its travel for one frame, which
-      // reads as a hitch. Take the wheel from the NEXT frame.
-      fresh:true,driver:driver
+      // own step on top of that would double its travel for one frame.
+      fresh:true,driver
     };return true;
+  }
+
+  function setFootState(st,next){
+    if(st.state===next)return;st.state=next;st.t=0;st.watchState=next;st.watchT=0;st.watchTrips=0;
+    st.watchX=st.officer?st.officer.x:st.x;st.watchZ=st.officer?st.officer.z:st.z;st.lastProgressAt=performance.now();
+    if(next!=='FIRING'){st.burstLeft=0;st.burstPause=0;}
+  }
+
+  function footPoliceWatchdog(ctx,cop,st,dt){
+    const actor=st.officer||st,x=actor.x,z=actor.z,moved=Math.hypot(x-st.watchX,z-st.watchZ),changed=st.watchState!==st.state;
+    if(changed||moved>.75){st.watchState=st.state;st.watchX=x;st.watchZ=z;st.watchT=0;st.lastProgressAt=performance.now();return false;}
+    st.watchT+=dt;if(st.watchT<2.15)return false;
+    st.watchT=0;st.watchTrips++;st.watchX=x;st.watchZ=z;st.repositionSide=(st.repositionSide||1)*-1;st.cover=null;st.laneBlockedT=.45;
+    if(st.state==='STOPPING'){st.speed=0;return'force-exit';}
+    if(st.state==='EXITING'){return'force-aim';}
+    if(st.state==='AIMING'||st.state==='FIRING'){st.burstLeft=0;st.burstPause=.25;return'reposition';}
+    if(st.state==='RETURNING'&&st.watchTrips>=2){releaseCop(cop);return'released';}
+    return'replan';
   }
 
   /** Hold a taken-over cop car exactly where we put it, after the engine's own
@@ -26522,17 +26725,122 @@ Assumptions that may not hold after integration:
 
   function separateOfficerFromPlayer(of,ctx){if(!ctx.player.onFoot||!of)return;let dx=of.x-ctx.player.x,dz=of.z-ctx.player.z,d=Math.hypot(dx,dz);const min=2.15;if(d>=min)return;if(d<.001){dx=1;dz=0;d=1;}const push=(min-d)/d*.55;of.x+=dx*push;of.z+=dz*push;ctx.player.foot.x-=dx*push*.35;ctx.player.foot.z-=dz*push*.35;}
   function updateFootPolice(dt,ctx){
-    policeSquadCall.t=Math.max(0,policeSquadCall.t-dt);const interiors=GameSystems.api('interiors'),admin=GameSystems.api('admin');if((interiors&&interiors.safehouseActive&&interiors.safehouseActive())||(admin&&admin.invisible&&admin.invisible())){clearFootPolice(ctx);return;}const mph=ctx.player.mph,px=ctx.player.x,pz=ctx.player.z,wanted=ctx.stats.wanted,cops=ctx.actors.cops,crime=GameSystems.api('crime'),recentAttack=!!(crime&&crime.recentType&&(crime.recentType('assault-police',7000)||crime.recentType('ram-police',7000))),lethal=wanted>=3||recentAttack;trackPlayerSpeed(dt,px,pz);idleTimer=mph<ENGAGE_MPH?idleTimer+dt:0;fleeTimer=mph>FLEE_MPH?fleeTimer+dt:0;const fleeing=fleeTimer>FLEE_HOLD,tune=ctx.engine.policeTuning?ctx.engine.policeTuning(wanted):{footOfficers:Math.min(MAX_FOOT_OFFICERS,wanted),level:wanted},officerLimit=Math.min(MAX_FOOT_OFFICERS,Math.max(0,tune.footOfficers||0));let engaged=0;for(const c of cops)if(c._foot)engaged++;
-    if(wanted>=1&&(ctx.player.onFoot||idleTimer>ENGAGE_HOLD)&&!fleeing&&!ctx.player.dead&&!ctx.player.dying){for(const c of cops){if(engaged>=officerLimit)break;if(c._foot||c._bDead||c._footSpent||c._roadblock||c._retiring||c._hidden)continue;if(dist2d(c.x,c.z,px,pz)>ENGAGE_RANGE)continue;beginStop(ctx,c);engaged++;}}
-    for(let i=cops.length-1;i>=0;i--){const cop=cops[i],st=cop._foot;if(!st)continue;st.t+=dt;const stuck=st.t>STATE_TIMEOUT,mustLeave=(fleeing||wanted<1||ctx.player.dead||ctx.player.dying||cop._retiring)&&(st.state!=='FIRING'||st.firingTime>=1);st.tackleCd=Math.max(0,(st.tackleCd||0)-dt);
-      if(st.state==='STOPPING'){if(st.fresh)st.fresh=false;else{st.speed=Math.max(0,st.speed-48*dt);st.x+=Math.sin(st.heading)*st.speed*dt;st.z+=Math.cos(st.heading)*st.speed*dt;}st.y=ctx.world.groundHeightAt(st.x,st.z,st.y);pinCop(cop,st);if(st.speed<4||st.t>.75){st.state='EXITING';st.t=0;const side=(officers.length&1)?1:-1,ex=st.x+Math.cos(st.heading)*3.4*side,ez=st.z-Math.sin(st.heading)*3.4*side,oy=ctx.world.groundHeightAt(ex,ez,st.y);st.officer=takeOfficer(ctx,ex,oy,ez,st.heading);bindOccupant(cop,st.officer,st.driver);st.flankX=ex+Math.sin(st.heading)*-3;st.flankZ=ez+Math.cos(st.heading)*-3;st.squadRole=(cop._collisionId||i)%3;st.maxHesitation=.48+st.squadRole*.08;const partner=occupant(cop,'partner');if(partner&&partner.alive&&!partner.deployed){const px2=st.x-Math.cos(st.heading)*3.4*side,pz2=st.z+Math.sin(st.heading)*3.4*side;deployDetached(ctx,cop,partner,px2,pz2,st.heading,'partner',px2,pz2);}}continue;}
-      pinCop(cop,st);const of=st.officer;if(!of){releaseCop(cop);continue;}if(of.down){cop._driverAlive=false;cop._driverDeployed=false;cop._inert=true;st.state='DRIVER_DOWN';continue;}if(mustLeave&&st.state!=='RETURNING'){st.state='RETURNING';st.t=0;}
-      if(st.state==='EXITING'){const left=walkOfficer(ctx,of,st.flankX,st.flankZ,dt);separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,left>.4,false);if(left<1.5||st.t>.35){st.state='AIMING';st.t=0;}}
-      else if(st.state==='AIMING'){separateOfficerFromPlayer(of,ctx);const range=dist2d(of.x,of.z,px,pz),role=st.squadRole||0;of.heading=Math.atan2(px-of.x,pz-of.z);if(!lethal){if(range>10){const holdX=px-Math.sin(of.heading)*9,holdZ=pz-Math.cos(of.heading)*9;walkOfficer(ctx,of,holdX,holdZ,dt);}poseOfficer(of,dt,range>10,false);if(ctx.player.onFoot&&range<FOOT_POLICE_TUNING.onFootArrestRadius+1&&playerSpeed<2.4){st.arrestT=(st.arrestT||0)+dt;if(st.arrestT>FOOT_POLICE_TUNING.onFootArrestHoldSeconds&&ctx.engine.bustPlayer){ctx.engine.bustPlayer('ARRESTED ON FOOT');return;}}else st.arrestT=Math.max(0,(st.arrestT||0)-dt*2);continue;}let moving=false;if(range>105){const side=role===1?-1:role===2?1:0,ang=of.heading+side*.92,targetR=role===0?72:55,tx=px-Math.sin(of.heading)*targetR+Math.cos(of.heading)*side*22,tz=pz-Math.cos(of.heading)*targetR-Math.sin(of.heading)*side*22;moving=walkOfficer(ctx,of,tx,tz,dt)>.7;}poseOfficer(of,dt,moving,true);if(!warnedAim){warnedAim=true;ctx.fx.toast('police taking aim','#ff6b6b');}const aimTime=clamp(.25+(6-wanted)*.055,.25,.52)*(of.profile?of.profile.aim:1),maxH=st.maxHesitation||.62;if(st.t>=Math.min(aimTime,maxH)){st.state='FIRING';st.t=0;st.firingTime=0;st.shotCd=role===0?0:.08+Math.random()*.18;policeSquadCall={x:px,z:pz,t:1.4,seq:policeSquadCall.seq+1};}}
-      else if(st.state==='FIRING'){if(!lethal){st.state='AIMING';st.t=0;continue;}st.firingTime+=dt;const role=st.squadRole||0,call=policeSquadCall.t>0?policeSquadCall:{x:px,z:pz},range=dist2d(of.x,of.z,call.x,call.z),bearing=Math.atan2(call.x-of.x,call.z-of.z),side=role===1?-1:role===2?1:0,targetR=role===0?72:role===1?48:36,targetX=call.x-Math.sin(bearing)*targetR+Math.cos(bearing)*side*24,targetZ=call.z-Math.cos(bearing)*targetR-Math.sin(bearing)*side*24;let moving=false;if(range<7){moving=walkOfficer(ctx,of,of.x-(call.x-of.x)/(range||1)*4,of.z-(call.z-of.z)/(range||1)*4,dt)>.4;}else if(role!==0||range>92)moving=walkOfficer(ctx,of,targetX,targetZ,dt)>.7;separateOfficerFromPlayer(of,ctx);of.heading=bearing;poseOfficer(of,dt,moving,true);st.shotCd-=dt;if(st.shotCd<=0&&range<=OFFICER_GIVEUP_R+45){officerShoot(ctx,of);const base=role===0?.72:role===1?1.08:.92,scale=clamp(1.28-wanted*.055,.76,1.15);st.shotCd=(of.profile?of.profile.interval:SHOT_INTERVAL)*base*scale*(.88+Math.random()*.24);if(role===0)policeSquadCall={x:px,z:pz,t:1.35,seq:policeSquadCall.seq+1};}if(range>OFFICER_GIVEUP_R+65&&st.firingTime>3.2){st.state='AIMING';st.t=0;}}
-      else if(st.state==='RETURNING'){const left=walkOfficer(ctx,of,st.x+Math.cos(st.heading)*3.2,st.z-Math.sin(st.heading)*3.2,dt);separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,left>.5,false);if(left<2.5||stuck)releaseCop(cop);}
+    policeSquadCall.t=Math.max(0,policeSquadCall.t-dt);
+    const interiors=GameSystems.api('interiors'),admin=GameSystems.api('admin');
+    if((interiors&&interiors.safehouseActive&&interiors.safehouseActive())||(admin&&admin.invisible&&admin.invisible())){clearFootPolice(ctx);return;}
+    const mph=ctx.player.mph,px=ctx.player.x,pz=ctx.player.z,wanted=ctx.stats.wanted,cops=ctx.actors.cops,crime=GameSystems.api('crime'),
+      recentAttack=!!(crime&&crime.recentType&&(crime.recentType('assault-police',7000)||crime.recentType('ram-police',7000))),lethal=wanted>=3||recentAttack;
+    trackPlayerSpeed(dt,px,pz);idleTimer=mph<ENGAGE_MPH?idleTimer+dt:0;fleeTimer=mph>FLEE_MPH?fleeTimer+dt:0;
+    const fleeing=fleeTimer>FLEE_HOLD,tune=ctx.engine.policeTuning?ctx.engine.policeTuning(wanted):{footOfficers:Math.min(MAX_FOOT_OFFICERS,wanted),level:wanted},
+      officerLimit=Math.min(MAX_FOOT_OFFICERS,Math.max(0,tune.footOfficers||0));
+    let engaged=0;for(const c of cops)if(c._foot)engaged++;
+    if(wanted>=1&&(ctx.player.onFoot||idleTimer>ENGAGE_HOLD)&&!fleeing&&!ctx.player.dead&&!ctx.player.dying){
+      const candidates=cops.filter(c=>!c._foot&&!c._bDead&&!c._footSpent&&!c._roadblock&&!c._retiring&&!c._hidden)
+        .sort((a,b)=>dist2d(a.x,a.z,px,pz)-dist2d(b.x,b.z,px,pz));
+      for(const c of candidates){if(engaged>=officerLimit)break;if(dist2d(c.x,c.z,px,pz)>ENGAGE_RANGE)continue;if(beginStop(ctx,c))engaged++;}
     }
-    separateOfficers();for(let i=officers.length-1;i>=0;i--){const of=officers[i];if(of.down){of.downTimer-=dt;if(of.downTimer<=0)releaseOfficer(of);continue;}const detached=detachedOfficers.some(d=>d.of===of);if(!of.cop||cops.indexOf(of.cop)<0||(!of.cop._foot&&!detached))releaseOfficer(of);}
+    for(let i=cops.length-1;i>=0;i--){
+      const cop=cops[i],st=cop._foot;if(!st)continue;st.t+=dt;st.tackleCd=Math.max(0,(st.tackleCd||0)-dt);st.laneBlockedT=Math.max(0,(st.laneBlockedT||0)-dt);
+      const mustLeave=(fleeing||wanted<1||ctx.player.dead||ctx.player.dying||cop._retiring)&&(st.state!=='FIRING'||st.firingTime>=1);
+      if(st.state==='STOPPING'){
+        if(st.fresh)st.fresh=false;else{st.speed=Math.max(0,st.speed-54*dt);st.x+=Math.sin(st.heading)*st.speed*dt;st.z+=Math.cos(st.heading)*st.speed*dt;}
+        st.y=ctx.world.groundHeightAt(st.x,st.z,st.y);pinCop(cop,st);
+        const wd=footPoliceWatchdog(ctx,cop,st,dt);
+        if(st.speed<4||st.t>.75||wd==='force-exit'){
+          setFootState(st,'EXITING');const side=(officers.length&1)?1:-1,ex=st.x+Math.cos(st.heading)*3.4*side,ez=st.z-Math.sin(st.heading)*3.4*side,oy=ctx.world.groundHeightAt(ex,ez,st.y);
+          st.officer=takeOfficer(ctx,ex,oy,ez,st.heading);bindOccupant(cop,st.officer,st.driver);
+          st.flankX=ex+Math.sin(st.heading)*-3;st.flankZ=ez+Math.cos(st.heading)*-3;st.squadRole=(cop._collisionId||i)%3;st.maxHesitation=.44+st.squadRole*.07;
+          st.watchX=ex;st.watchZ=ez;
+          const partner=occupant(cop,'partner');if(partner&&partner.alive&&!partner.deployed){const px2=st.x-Math.cos(st.heading)*3.4*side,pz2=st.z+Math.sin(st.heading)*3.4*side;deployDetached(ctx,cop,partner,px2,pz2,st.heading,'partner',px2,pz2);}
+        }
+        continue;
+      }
+      pinCop(cop,st);const of=st.officer;if(!of){releaseCop(cop);continue;}
+      if(of.down){cop._driverAlive=false;cop._driverDeployed=false;cop._inert=true;setFootState(st,'DRIVER_DOWN');continue;}
+      const c=ensureOfficerCharacter(of,ctx);tickCharacterCombatState(c,dt);
+      if(mustLeave&&st.state!=='RETURNING')setFootState(st,'RETURNING');
+      if(st.state==='EXITING'){
+        const left=walkOfficer(ctx,of,st.flankX,st.flankZ,dt);separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,left>.4,false);
+        const wd=footPoliceWatchdog(ctx,cop,st,dt);if(left<1.5||st.t>.45||wd==='force-aim')setFootState(st,'AIMING');
+        continue;
+      }
+      if(st.state==='RETURNING'){
+        if(st.meleeFighter){try{st.meleeFighter.cancel();}catch(_){}st.meleeFighter=null;}
+        const left=walkOfficer(ctx,of,st.x+Math.cos(st.heading)*3.2,st.z-Math.sin(st.heading)*3.2,dt);separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,left>.5,false);
+        const wd=footPoliceWatchdog(ctx,cop,st,dt);if(left<2.5||wd==='released')releaseCop(cop);continue;
+      }
+      if(st.state==='DRIVER_DOWN')continue;
+      const range=dist2d(of.x,of.z,px,pz),bearing=Math.atan2(px-of.x,pz-of.z),role=st.squadRole||0;
+      of.heading=bearing;
+      if(c.staggerT>0||c.hitReact>0){
+        const kick=Math.min(.85,c.staggerT*2.6),left=walkOfficer(ctx,of,of.x+c.staggerX*kick,of.z+c.staggerZ*kick,dt);
+        separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,left>.2,false);footPoliceWatchdog(ctx,cop,st,dt);continue;
+      }
+      if(!lethal){
+        if(st.state!=='AIMING')setFootState(st,'AIMING');
+        if(range>10){const holdX=px-Math.sin(bearing)*9,holdZ=pz-Math.cos(bearing)*9;walkOfficer(ctx,of,holdX,holdZ,dt);}
+        separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,range>10,false);
+        if(ctx.player.onFoot&&range<FOOT_POLICE_TUNING.onFootArrestRadius+1&&playerSpeed<2.4){
+          st.arrestT=(st.arrestT||0)+dt;if(st.arrestT>FOOT_POLICE_TUNING.onFootArrestHoldSeconds&&ctx.engine.bustPlayer){ctx.engine.bustPlayer('ARRESTED ON FOOT');return;}
+        }else st.arrestT=Math.max(0,(st.arrestT||0)-dt*2);
+        footPoliceWatchdog(ctx,cop,st,dt);continue;
+      }
+      // At arm's length a firearm unit commits to the already-integrated melee
+      // controller instead of trading bullets through the player model.
+      if(ctx.player.onFoot&&range<4.6){
+        if(!st.meleeFighter&&melee)st.meleeFighter=melee.getNpc(of)||melee.createNpc(of,{kind:'officer',weaponId:'fists',radius:1.45});
+        if(st.meleeFighter){
+          if(range>2.25)walkOfficer(ctx,of,px-Math.sin(bearing)*1.8,pz-Math.cos(bearing)*1.8,dt);
+          st.meleeCd=Math.max(0,(st.meleeCd||0)-dt);if(st.meleeCd<=0){st.meleeFighter.attack({weaponId:'fists'});st.meleeCd=.38+Math.random()*.22;}
+          poseOfficer(of,dt,true,false);footPoliceWatchdog(ctx,cop,st,dt);continue;
+        }
+      }else if(st.meleeFighter&&range>6.2){try{st.meleeFighter.cancel();}catch(_){}st.meleeFighter=null;}
+      if(st.state==='AIMING'){
+        let moving=false;
+        if(!st.cover&&role===0&&range<105)st.cover=combatCoverPoint(ctx,of,px,pz,30);
+        if(st.cover){
+          const coverDist=dist2d(of.x,of.z,st.cover.x,st.cover.z),peekOpen=((performance.now()/850|0)+(cop._collisionId||0))%3!==0&&c.suppression<.78;
+          const tx=st.cover.x+(peekOpen?st.cover.peekX*1.65:0),tz=st.cover.z+(peekOpen?st.cover.peekZ*1.65:0);
+          moving=walkOfficer(ctx,of,tx,tz,dt)>.65;st.peekOpen=peekOpen&&coverDist<3.6;
+        }else if(range>92||role!==0){
+          const side=(role===1?-1:role===2?1:st.repositionSide||1),targetR=role===0?70:role===1?54:43,
+            tx=px-Math.sin(bearing)*targetR+Math.cos(bearing)*side*22,tz=pz-Math.cos(bearing)*targetR-Math.sin(bearing)*side*22;
+          moving=walkOfficer(ctx,of,tx,tz,dt)>.65;
+        }
+        separateOfficerFromPlayer(of,ctx);poseOfficer(of,dt,moving,st.cover?!!st.peekOpen:true);
+        if(!warnedAim){warnedAim=true;ctx.fx.toast('police taking aim','#ff6b6b');}
+        const aimTime=clamp(.23+(6-wanted)*.05,.22,.48)*(of.profile?of.profile.aim:1),wd=footPoliceWatchdog(ctx,cop,st,dt);
+        if(wd==='reposition'){st.cover=null;st.repositionSide*=-1;}
+        if(st.t>=Math.min(aimTime,st.maxHesitation||.58)){setFootState(st,'FIRING');st.firingTime=0;st.shotCd=role===0?0:.06+Math.random()*.14;policeSquadCall={x:px,z:pz,t:1.4,seq:policeSquadCall.seq+1};}
+        continue;
+      }
+      if(st.state==='FIRING'){
+        st.firingTime+=dt;
+        const call=policeSquadCall.t>0?policeSquadCall:{x:px,z:pz},callRange=dist2d(of.x,of.z,call.x,call.z),callBearing=Math.atan2(call.x-of.x,call.z-of.z),
+          side=role===1?-1:role===2?1:(st.repositionSide||1),targetR=role===0?68:role===1?48:38;
+        let moving=false;
+        if(c.suppression>.74||callRange<7){
+          const awayX=(of.x-call.x)/(callRange||1),awayZ=(of.z-call.z)/(callRange||1),latX=Math.cos(callBearing)*side,latZ=-Math.sin(callBearing)*side;
+          moving=walkOfficer(ctx,of,of.x+awayX*8+latX*5,of.z+awayZ*8+latZ*5,dt)>.4;
+        }else if(role!==0||callRange>88||st.laneBlockedT>0){
+          const extra=st.laneBlockedT>0?10:0,targetX=call.x-Math.sin(callBearing)*targetR+Math.cos(callBearing)*side*(24+extra),
+            targetZ=call.z-Math.cos(callBearing)*targetR-Math.sin(callBearing)*side*(24+extra);
+          moving=walkOfficer(ctx,of,targetX,targetZ,dt)>.65;
+        }
+        separateOfficerFromPlayer(of,ctx);of.heading=callBearing;
+        const canPeek=!st.cover||st.peekOpen!==false||c.suppression<.55;poseOfficer(of,dt,moving,canPeek);
+        if(canPeek&&callRange<=OFFICER_GIVEUP_R+55){
+          const pace=clamp(1.22-wanted*.055,.76,1.14)*(role===0?.92:role===1?1.08:1),result=policeBurstStep(ctx,of,st,dt,callRange,pace);
+          if(result==='blocked'){st.laneBlockedT=.58;st.repositionSide=side*-1;st.cover=null;}
+          else if(result==='hit'||result==='miss'||result==='wall'){if(role===0)policeSquadCall={x:px,z:pz,t:1.35,seq:policeSquadCall.seq+1};}
+        }
+        const wd=footPoliceWatchdog(ctx,cop,st,dt);
+        if(wd==='reposition'){st.cover=null;st.repositionSide*=-1;setFootState(st,'AIMING');}
+        else if(callRange>OFFICER_GIVEUP_R+70&&st.firingTime>3.1)setFootState(st,'AIMING');
+      }
+    }
+    separateOfficers();
+    for(let i=officers.length-1;i>=0;i--){const of=officers[i];if(of.down){of.downTimer-=dt;if(of.downTimer<=0)releaseOfficer(of);continue;}const detached=detachedOfficers.some(d=>d.of===of);if(!of.cop||cops.indexOf(of.cop)<0||(!of.cop._foot&&!detached))releaseOfficer(of);}
   }
 
   function clearFootPolice(ctx) {
@@ -28714,7 +29022,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 
 /* -------------------------- per-vehicle upgrades -------------------------- */
 (function(){
- let ctx=null,save=null,prog=null,data={};const KEY='progression.vehicleProtectionV20';
+ let ctx=null,save=null,prog=null,data={},benchmarkStockId=null;const KEY='progression.vehicleProtectionV20';
  const ARMOR=[{name:'STOCK',price:0,damage:1,mass:1,grip:1},{name:'REINFORCED',price:2800,damage:.82,mass:1.045,grip:.985},{name:'ARMOURED',price:6200,damage:.65,mass:1.09,grip:.965},{name:'HEAVY ARMOUR',price:10500,damage:.5,mass:1.15,grip:.94}];
  function id(){return prog&&prog.currentVehicle?prog.currentVehicle():ctx&&ctx.vehicles.currentKey;}
  function state(v){v=v||id();if(!data[v])data[v]={armor:0,proofTires:false};return data[v];}
@@ -28729,7 +29037,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
    const tb=document.createElement('button');tb.type='button';tb.className='pauseAction';tb.style.cssText='display:block;width:100%;margin:9px 0;padding:10px';tb.textContent=(s.proofTires?'✓ ':'')+'PUNCTURE-PROOF TYRES · $4,200';tb.disabled=s.proofTires;tb.onclick=()=>{const r=buyTires(v);ctx.fx.toast(r.ok?'Puncture-proof tyres installed':r.reason,r.ok?'#3bff8b':'#ff6b6b');renderBodyShopRefresh();};container.appendChild(tb);
  }
  function renderBodyShopRefresh(){const bs=GameSystems.api('bodyshop');if(bs&&bs.refresh)bs.refresh();}
- GameSystems.register({id:'vehicleUpgrades',order:46,requires:['save','progression'],init(c){ctx=c;save=GameSystems.api('save');prog=GameSystems.api('progression');data=save.get(KEY,{})||{};},api:{state,maxTier,renderBodyShop:render,buyArmor,buyTires,damageMultiplier(v,channel){const d=ARMOR[state(v).armor]||ARMOR[0];return channel==='ballistic'||channel==='collision'||channel==='explosion'?d.damage:1;},massMultiplier(v){return(ARMOR[state(v).armor]||ARMOR[0]).mass;},gripMultiplier(v){return(ARMOR[state(v).armor]||ARMOR[0]).grip;},punctureProof(v){return!!state(v).proofTires;},all:()=>JSON.parse(JSON.stringify(data))}});
+ GameSystems.register({id:'vehicleUpgrades',order:46,requires:['save','progression'],init(c){ctx=c;save=GameSystems.api('save');prog=GameSystems.api('progression');data=save.get(KEY,{})||{};},api:{state,maxTier,renderBodyShop:render,buyArmor,buyTires,setBenchmarkStock(v){benchmarkStockId=v||null;return benchmarkStockId;},damageMultiplier(v,channel){const d=(v||id())===benchmarkStockId?ARMOR[0]:(ARMOR[state(v).armor]||ARMOR[0]);return channel==='ballistic'||channel==='collision'||channel==='explosion'?d.damage:1;},massMultiplier(v){return(v||id())===benchmarkStockId?1:(ARMOR[state(v).armor]||ARMOR[0]).mass;},gripMultiplier(v){return(v||id())===benchmarkStockId?1:(ARMOR[state(v).armor]||ARMOR[0]).grip;},punctureProof(v){return(v||id())===benchmarkStockId?false:!!state(v).proofTires;},all:()=>JSON.parse(JSON.stringify(data))}});
 })();
 
 /* ------------------------ low-health screen treatment --------------------- */
@@ -29910,20 +30218,20 @@ let car=makeCar(vehicleTune.color,false,CAR_STYLES[vehicleTune.style]);
 const carState={x:0,z:470,heading:0,speed:0,vx:0,vz:0,y:0,vy:0,airborne:false,airtime:0,maxAir:0,rampCd:0,ramp:null,hp:100,burning:false,fuse:0,fire:null};
 let carColor=vehicleTune.color;
 car.position.set(carState.x,0,carState.z);
-function hydrateVehicleProfile(key,syncCurrent=true){
+function hydrateVehicleProfile(key,syncCurrent=true,stock=false){
   const resolved=VEHICLE_TUNES[key]?key:'proDrift',prog=window.GameSystems&&GameSystems.api('progression');
-  if(prog&&prog.hydrateVehicle)prog.hydrateVehicle(resolved,{syncCurrent:!!syncCurrent});
+  if(prog){if(stock&&prog.hydrateStockVehicle)prog.hydrateStockVehicle(resolved,{syncCurrent:!!syncCurrent});else if(prog.hydrateVehicle)prog.hydrateVehicle(resolved,{syncCurrent:!!syncCurrent});}
   return resolved;
 }
-function selectPlayerVehicle(key){
-  savePowertrainCondition?.(true);
+function selectPlayerVehicle(key,opts){
+  const stock=!!(opts&&opts.stock);savePowertrainCondition?.(true);qaBenchmarkStock=stock;
   resetDriftCombo?.();
   // Picking a car out of the garage cancels a death sequence in flight — otherwise
   // the fresh car inherits the burning wreck's fuse and blows up on you.
   if(dying){ dying=false; engineBlown=false; stats.health=100; playerHealth=100; carState.hp=100; document.body.classList.remove('dying'); }
   clearCarDebris();
   if(carState.fire&&car){car.remove(carState.fire);} carState.fire=null; carState.burning=false;
-  vehicleTuneKey=hydrateVehicleProfile(key,true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];carColor=vehicleTune.color;if(!vehicleTune.nitrousInstalled)stats.nitro=0;
+  vehicleTuneKey=hydrateVehicleProfile(key,true,stock);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];const up=window.GameSystems&&GameSystems.api('vehicleUpgrades');if(up&&up.setBenchmarkStock)up.setBenchmarkStock(stock?vehicleTuneKey:null);carColor=vehicleTune.color;if(!vehicleTune.nitrousInstalled)stats.nitro=0;
   if(car)scene.remove(car);car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]);car.userData.vehicleTuneKey=vehicleTuneKey;
   if(vehicleTuneKey==='gripper')car.scale.set(1.06,1.02,1.08);
   if(vehicleTuneKey==='commuter')car.scale.set(.96,.96,.94);
@@ -30519,7 +30827,7 @@ const POLICE_TUNING_BY_WANTED_LEVEL=Object.freeze([
 ]);
 const POLICE_GLOBAL_TUNING=Object.freeze({targetMemorySeconds:7.5,roadblockLifetimeSeconds:28,roadblockDespawnRange:480,sirenFlashIntervalMs:280,roadblockCandidateDistanceBand:[380,620],roadblockMinimumForwardDot:.74,roadblockCarSpacing:10.5,spawnRevealDelay:1.1,retireTimeout:8,arrestRadius:6.2,arrestHoldSeconds:3.2,tackleRadius:4.2,onFootArrestRadius:2.25,onFootArrestHoldSeconds:2.6});
 const cops=[],policeRoadblocks=[];
-const policeDirector={level:0,previousLevel:0,seen:false,lastSeenX:0,lastSeenZ:0,lastSeenAt:0,sightClock:0,unseenT:0,evadeT:0,spawnT:0,roadblockT:0,arrestT:0,statusT:0,evadedT:0,serial:0};
+const policeDirector={level:0,previousLevel:0,seen:false,lastSeenX:0,lastSeenZ:0,lastSeenAt:0,sightClock:0,unseenT:0,evadeT:0,spawnT:0,roadblockT:0,arrestT:0,statusT:0,evadedT:0,serial:0,pitGlobalCd:0,pitSeq:0,pitLog:[]};
 const _policeCamDir=new THREE.Vector3(),_policeSpawnTmp=new THREE.Vector3();
 function policeTune(level=stats.wanted){return POLICE_TUNING_BY_WANTED_LEVEL[clamp(level|0,0,6)];}
 function policePointVisible(x,z,pad=0){
@@ -30544,6 +30852,85 @@ function policeTravelVector(){
   const vx=playerAircraft?(playerAircraft.vx||0):onFoot?0:(carState.vx||0),vz=playerAircraft?(playerAircraft.vz||0):onFoot?0:(carState.vz||0),sp=Math.hypot(vx,vz);
   return sp>5?{x:vx/sp,z:vz/sp,speed:sp}:{x:Math.sin(PLAYER_heading()),z:Math.cos(PLAYER_heading()),speed:sp};
 }
+
+const PIT_POLICY=Object.freeze({
+  0:Object.freeze({enabled:false}),1:Object.freeze({enabled:false}),
+  2:Object.freeze({enabled:true,minMph:45,maxMph:92,chance:.20,globalCd:13.5,unitCd:15.5,maxActive:1,lunge:1.02,recover:1.85}),
+  3:Object.freeze({enabled:true,minMph:40,maxMph:112,chance:.46,globalCd:9.5,unitCd:12.0,maxActive:1,lunge:1.08,recover:1.75}),
+  4:Object.freeze({enabled:true,minMph:35,maxMph:136,chance:.74,globalCd:6.8,unitCd:9.2,maxActive:1,lunge:1.12,recover:1.68}),
+  5:Object.freeze({enabled:true,minMph:31,maxMph:154,chance:.88,globalCd:5.0,unitCd:7.2,maxActive:2,lunge:1.16,recover:1.58}),
+  6:Object.freeze({enabled:true,minMph:28,maxMph:172,chance:1.00,globalCd:3.8,unitCd:5.8,maxActive:2,lunge:1.20,recover:1.48})
+});
+function pitPolicy(level){return PIT_POLICY[clamp(level|0,0,6)]||PIT_POLICY[0];}
+function activePitUnits(){let n=0;for(const c of cops)if(c._pit&&(c._pit.phase==='lunge'||c._pit.phase==='contact'))n++;return n;}
+function pitRoadAhead(PX,PZ,pux,puz,pvs){
+  const samples=[],heading=Math.atan2(pux,puz),distances=[0,34,68,102],baseY=carState.y;
+  for(const ahead of distances){
+    const x=PX+pux*ahead,z=PZ+puz*ahead,r=WORLD_nearestRoad(x,z);
+    if(!r){samples.push({ahead,ok:false,reason:'no-road'});return{ok:false,samples};}
+    const width=r.width||0,center=r.d||0,axis=r.heading==null?heading:r.heading,align=Math.abs(Math.cos(angleDiff(axis,heading))),dy=Math.abs((r.y==null?WORLD_groundHeightAt(r.x,r.z,baseY):r.y)-baseY),
+      ok=width>=26&&center<Math.max(9,width*.38)&&align>.955&&dy<7.5;
+    samples.push({ahead,ok,width:+width.toFixed(1),center:+center.toFixed(1),align:+align.toFixed(3),dy:+dy.toFixed(1)});
+    if(!ok)return{ok:false,samples};
+  }
+  return{ok:true,samples};
+}
+function pitSetup(cop,tune,PX,PZ,pux,puz,rx,rz,pvs,pvx,pvz){
+  const policy=pitPolicy(tune.level),dx=cop.x-PX,dz=cop.z-PZ,rear=-(dx*pux+dz*puz),side=dx*rx+dz*rz,dp=Math.hypot(dx,dz),
+    copSp=Math.hypot(cop.vx||0,cop.vz||0),mph=pvs*1.6,copAlign=((cop.vx||0)*pux+(cop.vz||0)*puz)/(copSp||1),
+    closing=((cop.vx||0)-pvx)*pux+((cop.vz||0)-pvz)*puz,road=policy.enabled?pitRoadAhead(PX,PZ,pux,puz,pvs):{ok:false,samples:[]};
+  const gates={
+    enabled:!!policy.enabled,notHeavy:!cop._heavy&&!cop._roadblock&&!cop._foot,visual:!!policeDirector.seen,
+    speed:!!policy.enabled&&mph>=policy.minMph&&mph<=policy.maxMph,distance:dp>=4.4&&dp<=15.5,
+    rearQuarter:rear>=2.2&&rear<=12.5&&Math.abs(side)>=1.8&&Math.abs(side)<=8.6,
+    aligned:copAlign>.93,closing:closing>.35&&closing<18,straight:!!road.ok,cooldown:cop.pitCd<=0&&policeDirector.pitGlobalCd<=0,
+    capacity:activePitUnits()<(policy.maxActive||0),healthy:!cop._retiring&&!cop._hidden&&!engineBlown&&!dead&&!dying
+  };
+  return{policy,gates,ok:Object.values(gates).every(Boolean),rear:+rear.toFixed(2),side:+side.toFixed(2),distance:+dp.toFixed(2),playerMph:+mph.toFixed(1),copMph:+(copSp*1.6).toFixed(1),closing:+closing.toFixed(2),alignment:+copAlign.toFixed(3),road};
+}
+function pitAttemptLog(cop,setup,outcome){
+  const rec={seq:++policeDirector.pitSeq,time:+(performance.now()/1000).toFixed(2),copId:cop._collisionId||0,wanted:stats.wanted,
+    setup:{rear:setup.rear,side:setup.side,distance:setup.distance,playerMph:setup.playerMph,copMph:setup.copMph,closing:setup.closing,alignment:setup.alignment,gates:Object.assign({},setup.gates),road:setup.road},
+    outcome:outcome||'authorized',contactClosing:0,energy:0,yawKick:0};
+  policeDirector.pitLog.push(rec);if(policeDirector.pitLog.length>32)policeDirector.pitLog.splice(0,policeDirector.pitLog.length-32);return rec;
+}
+function authorizePit(cop,tune,setup){
+  if(!setup.ok||cop._pit)return false;const p=setup.policy;
+  if(Math.random()>p.chance){cop.pitCd=Math.max(cop.pitCd,clamp(p.globalCd*.28,1.8,4.2));return false;}
+  const side=Math.sign(setup.side)||((cop._collisionId||0)&1?1:-1),rec=pitAttemptLog(cop,setup,'lunge');
+  cop._pit={phase:'lunge',t:0,side,policy:p,record:rec};policeDirector.pitGlobalCd=p.globalCd;cop.pitCd=p.unitCd;cop.ramCd=0;
+  return true;
+}
+function pitDirective(cop,PX,PZ,pux,puz,rx,rz,dt){
+  const p=cop._pit;if(!p)return null;p.t+=dt;
+  if(p.phase==='lunge'){
+    if(p.t>p.policy.lunge){p.phase='recover';p.t=0;p.record.outcome='miss';cop.ramCd=p.policy.recover;return null;}
+    return{x:PX-pux*5.4+rx*p.side*3.15,z:PZ-puz*5.4+rz*p.side*3.15,speedMul:1.10};
+  }
+  if(p.phase==='recover'){
+    if(p.t>p.policy.recover){cop._pit=null;return null;}
+    return{x:PX-pux*(34+12*p.t)+rx*p.side*28,z:PZ-puz*(34+12*p.t)+rz*p.side*28,speedMul:.66};
+  }
+  return null;
+}
+function resolvePitContact(cop,tune,PX,PZ,pux,puz,rx,rz,pvx,pvz){
+  const p=cop._pit;if(!p||p.phase!=='lunge'||onFoot||playerAircraft)return false;
+  const dx=cop.x-PX,dz=cop.z-PZ,d=Math.hypot(dx,dz),rear=-(dx*pux+dz*puz),side=dx*rx+dz*rz;
+  if(d>8.2||rear<.8||Math.abs(side)<1.3)return false;
+  const playerPos={x:carState.x,z:carState.z},playerVel={x:carState.vx||0,z:carState.vz||0},playerMass=PLAYER_vehicleMass(),
+    copVel={x:cop.vx||0,z:cop.vz||0},copMass=cop.mass||1900,nx=(playerPos.x-cop.x)/(d||1),nz=(playerPos.z-cop.z)/(d||1),
+    tangent=Math.abs((playerVel.x-copVel.x)*(-nz)+(playerVel.z-copVel.z)*nx),
+    closing=circleImpulse(playerPos,3.75,playerVel,playerMass,cop,3.85,copVel,copMass,.08,.20);
+  if(closing<=1.4)return false;
+  carState.x=playerPos.x;carState.z=playerPos.z;carState.vx=playerVel.x;carState.vz=playerVel.z;cop.vx=copVel.x;cop.vz=copVel.z;
+  const energy=playerVehicleContactFeedback(closing,playerMass,copMass,nx,nz,tangent),strength=clamp((tune.pitStrength||.1)*(.55+closing/12)*(copMass/(copMass+playerMass))*2.25,.16,1.12),
+    yawKick=-p.side*strength;
+  driftYawRate+=yawKick;carState.heading+=yawKick*.085;rearSlip=Math.max(rearSlip,.66+strength*.18);gripLost=true;driftRecovery=0;
+  carState.vx+=rx*(-p.side)*strength*4.4;carState.vz+=rz*(-p.side)*strength*4.4;breakDriftCombo();
+  p.record.outcome='success';p.record.contactClosing=+closing.toFixed(2);p.record.energy=+energy.toFixed(2);p.record.yawKick=+yawKick.toFixed(3);
+  p.phase='recover';p.t=0;cop.ramCd=p.policy.recover;setBanner('PIT MANEUVER','COUNTERSTEER · RECOVER','#ff922b');
+  return true;
+}
 function choosePoliceSpawn(tune,slot=0,farther=false){
   const p=policeTravelVector(),PX=PLAYER_x(),PZ=PLAYER_z();
   for(let attempt=0;attempt<16;attempt++){
@@ -30564,7 +30951,7 @@ function makePoliceUnit(options={}){
   const heading=options.heading==null?Math.atan2(PLAYER_x()-sp.x,PLAYER_z()-sp.z):options.heading,hasPartner=options.partner!==undefined?!!options.partner:(tune.level>=3||!!options.roadblock);
   mesh.position.set(sp.x,sp.y,sp.z);mesh.rotation.y=heading;mesh.visible=options.visible===true;
   const occupants=[{role:'driver',alive:true,deployed:false,officer:null}];if(hasPartner)occupants.push({role:'partner',alive:true,deployed:false,officer:null});
-  const cop={mesh,x:sp.x,y:sp.y,z:sp.z,heading,vx:0,vz:0,ramCd:0,pitCd:rand(.4,1.2),spawnReveal:POLICE_GLOBAL_TUNING.spawnRevealDelay,
+  const cop={mesh,x:sp.x,y:sp.y,z:sp.z,heading,vx:0,vz:0,ramCd:0,pitCd:rand(.8,2.2),_pit:null,spawnReveal:POLICE_GLOBAL_TUNING.spawnRevealDelay,
     _hidden:options.visible!==true,_roadblock:!!options.roadblock,_retiring:false,_retireT:0,_heavy:heavy,mass:heavy?2700:1900,
     _occupants:occupants,_driverAlive:true,_driverDeployed:false,_inert:false,_roadblockShoved:false,
     spdMul:heavy?rand(.91,.98):rand(.94,1.07),turnRate:heavy?rand(2.05,2.45):rand(2.55,3.45),tie:rand(0,6.28),aggression:rand(.9,1.1),caution:rand(.9,1.12),blockedT:0,patrolX:sp.x,patrolZ:sp.z,patrolT:0};
@@ -30985,11 +31372,11 @@ function burstTire(corner,reason){const admin=window.GameSystems&&GameSystems.ap
 function burstTireAt(x,z,reason){let best=null,bd=1e9;for(const k of ['fl','fr','rl','rr']){if(tireBurst[k])continue;const p=tireCornerWorld(k),d=dist2(x,z,p.x,p.z);if(d<bd){bd=d;best=k;}}return best?burstTire(best,reason):false;}
 function updateBurstTireFx(dt,mph){const count=tireBurstCount();if(!count||!car)return;tireSparkClock-=dt;if(mph>20&&tireSparkClock<=0){for(const k of ['fl','fr','rl','rr'])if(tireBurst[k]){const p=tireCornerWorld(k);boom(p.x,p.z,0xffb13b,2,p.y);}tireSparkClock=clamp(.22-mph*.0012,.055,.18);}}
 function tireDamageProfile(){const left=(tireBurst.fl?1:0)+(tireBurst.rl?1:0),right=(tireBurst.fr?1:0)+(tireBurst.rr?1:0),front=(tireBurst.fl?1:0)+(tireBurst.fr?1:0),rear=(tireBurst.rl?1:0)+(tireBurst.rr?1:0),count=left+right;return{count,left,right,front,rear,grip:Math.max(.22,1-count*.25-front*.15),brake:Math.max(.24,1-count*.24-front*.14),cap:[1e9,55,38,28,18][count]/1.6,pull:(right-left)*.24};}
-let engineHeatSeconds=0,engineDamage=0,engineCondition=100,transmissionCondition=100,engineOverheated=false,engineHeatWarned=false,engineSeized=false,engineSmokeClock=0,heatWhooshClock=0,misfireTimer=0,misfireSeverity=0,misfirePopClock=0,airborneOverRevRisk=0,powertrainSaveAt=0,powertrainLoaded=false;
+let engineHeatSeconds=0,engineDamage=0,engineCondition=100,transmissionCondition=100,engineOverheated=false,engineHeatWarned=false,engineSeized=false,engineSmokeClock=0,heatWhooshClock=0,misfireTimer=0,misfireSeverity=0,misfirePopClock=0,airborneOverRevRisk=0,powertrainSaveAt=0,powertrainLoaded=false,qaBenchmarkStock=false;
 const powertrainByVehicle=Object.create(null),POWERTRAIN_SAVE='progression.powertrainV15';
 function currentPowertrainProfile(){return vehicleTune||{};}
 function ensurePowertrainStore(){if(powertrainLoaded)return;powertrainLoaded=true;const sv=window.GameSystems&&GameSystems.api('save'),saved=sv&&sv.get(POWERTRAIN_SAVE,null);if(saved&&typeof saved==='object')for(const id of Object.keys(saved)){const v=saved[id];if(v&&typeof v==='object')powertrainByVehicle[id]={engine:clamp(+v.engine||0,0,100),transmission:clamp(+v.transmission||0,0,100)};}}
-function savePowertrainCondition(force=false){if(!vehicleTuneKey)return;ensurePowertrainStore();powertrainByVehicle[vehicleTuneKey]={engine:engineCondition,transmission:transmissionCondition};const now=performance.now();if(!force&&now<powertrainSaveAt)return;powertrainSaveAt=now+750;const sv=window.GameSystems&&GameSystems.api('save');if(sv)sv.set(POWERTRAIN_SAVE,Object.assign({},powertrainByVehicle));}
+function savePowertrainCondition(force=false){if(!vehicleTuneKey||qaBenchmarkStock)return;ensurePowertrainStore();powertrainByVehicle[vehicleTuneKey]={engine:engineCondition,transmission:transmissionCondition};const now=performance.now();if(!force&&now<powertrainSaveAt)return;powertrainSaveAt=now+750;const sv=window.GameSystems&&GameSystems.api('save');if(sv)sv.set(POWERTRAIN_SAVE,Object.assign({},powertrainByVehicle));}
 function loadPowertrainCondition(){ensurePowertrainStore();const v=powertrainByVehicle[vehicleTuneKey];engineCondition=v?clamp(v.engine,0,100):100;transmissionCondition=v?clamp(v.transmission,0,100):100;engineDamage=100-engineCondition;engineSeized=engineCondition<=0;misfireSeverity=0;misfireTimer=0;}
 function freshVehicleDamageSnapshot(){return{fresh:true,hp:100,engine:100,transmission:100,tires:{fl:false,fr:false,rl:false,rr:false},vdamage:{ballistic:100,collision:100,stage:'healthy'}};}
 function snapshotPlayerVehicleDamage(){const vd=window.GameSystems&&GameSystems.api('vdamage');return{hp:clamp(carState.hp,0,100),engine:engineCondition,transmission:transmissionCondition,seized:!!engineSeized,tires:Object.assign({},tireBurst),vdamage:vd&&vd.snapshot?vd.snapshot():null};}
@@ -31921,7 +32308,7 @@ function update(dt){
 
   // police director ---------------------------------------------------------
   const adminApi=window.GameSystems&&GameSystems.api('admin'),adminInvisible=!!(adminApi&&adminApi.invisible&&adminApi.invisible()),paintRetreat=document.body.classList.contains('paint-spray-active')||document.body.classList.contains('interior-active')||adminInvisible,tune=policeTune(stats.wanted),PY=PLAYER_y();
-  policeDirector.level=tune.level;policeDirector.sightClock-=dt;policeDirector.statusT=Math.max(0,policeDirector.statusT-dt);policeDirector.evadedT=Math.max(0,policeDirector.evadedT-dt);
+  policeDirector.level=tune.level;policeDirector.sightClock-=dt;policeDirector.statusT=Math.max(0,policeDirector.statusT-dt);policeDirector.evadedT=Math.max(0,policeDirector.evadedT-dt);policeDirector.pitGlobalCd=Math.max(0,(policeDirector.pitGlobalCd||0)-dt);if(stats.wanted<2||onFoot||playerAircraft||paintRetreat)for(const c of cops)if(c._pit){if(c._pit.record&&c._pit.record.outcome==='lunge')c._pit.record.outcome='aborted';c._pit=null;}
   if(stats.wanted>policeDirector.previousLevel){policeDirector.spawnT=0;policeDirector.roadblockT=0;policeDirector.unseenT=0;policeDirector.evadeT=0;policeDirector.lastSeenX=PX;policeDirector.lastSeenZ=PZ;setBanner('WANTED LEVEL '+stats.wanted,stats.wanted>=6?'CITYWIDE MANHUNT':stats.wanted>=4?'TACTICAL RESPONSE':'POLICE DISPATCH','#ff3b3b');}
   if(stats.wanted<policeDirector.previousLevel&&stats.wanted>0)setBanner('WANTED REDUCED',stats.wanted+' STAR'+(stats.wanted===1?'':'S'),'#ffd23f');
   policeDirector.previousLevel=stats.wanted;
@@ -31954,7 +32341,7 @@ function update(dt){
   // level row decides how far ahead and how wide the formation opens.
   const pvec=policeTravelVector(),pvx=playerAircraft?(playerAircraft.vx||0):onFoot?0:(carState.vx||0),pvz=playerAircraft?(playerAircraft.vz||0):onFoot?0:(carState.vz||0),pvs=Math.hypot(pvx,pvz),ph=PLAYER_heading(),pux=pvec.x,puz=pvec.z;
   const COP_LOOK=25,_copSepScratch=[];let policeAirUnit=null,policeAirShotT=0;
-  let nearestCop=1e9;
+  const deployedFootCount=cops.reduce((n,c)=>n+(c._foot?1:0),0);let nearestCop=1e9;
   for(let i=cops.length-1;i>=0;i--){const cop=cops[i];
     if(cop._roadblock&&!cop._roadblockShoved){cop.vx=0;cop.vz=0;cop.mesh.position.set(cop.x,cop.y,cop.z);continue;}
     if(cop._inert||!cop._driverAlive||cop._driverDeployed){const drag=Math.max(0,1-dt*2.4);cop.vx*=drag;cop.vz*=drag;cop.x+=cop.vx*dt;cop.z+=cop.vz*dt;cop.y=WORLD_groundHeightAt(cop.x,cop.z,cop.y);cop.mesh.position.set(cop.x,cop.y,cop.z);cop.mesh.rotation.y=cop.heading;continue;}
@@ -31984,28 +32371,40 @@ function update(dt){
       else if(role===3){tx+=pvx*tune.velocityLeadSeconds*.85;tz+=pvz*tune.velocityLeadSeconds*.85;}
       else if(role===4&&tune.level>=3){const side=(i&1)?1:-1;tx=PX-pux*10+rx*side*5;tz=PZ-puz*10+rz*side*5;}
       else if(role===5){tx+=pux*form*.35;tz+=puz*form*.35;}
+      // Once officers are on the pavement around a stopped suspect, remaining
+      // cars form an outer containment ring instead of grinding into the player.
+      if(pvs<3.5&&deployedFootCount>0&&!cop._foot){
+        const a=((cop._collisionId||i+1)*2.399963229728653)%TAU,ring=34+((cop._collisionId||i)%3)*5;
+        tx=PX+Math.sin(a)*ring;tz=PZ+Math.cos(a)*ring;
+      }
     }else{
       if(cop._footApproachAngle===undefined)cop._footApproachAngle=((cop._collisionId||i+1)*2.399963229728653)%TAU;
       const ring=14+((cop._collisionId||i)%3)*3.5,angle=cop._footApproachAngle;tx=PX+Math.sin(angle)*ring;tz=PZ+Math.cos(angle)*ring;
       cop._footSlotDist=Math.hypot(tx-cop.x,tz-cop.z);cop._footHold=cop._footSlotDist<3.2||dp<9.5;cop._footFace=Math.atan2(PX-cop.x,PZ-cop.z);if(cop._footHold){tx=cop.x;tz=cop.z;}
     }
-    if(cop.ramCd>0&&!onFoot){const side=(i&1)?1:-1;tx=PX+rx*side*42-pux*34;tz=PZ+rz*side*42-puz*34;}
+    if(!onFoot&&!playerAircraft&&tune.pitStrength>0&&!cop._pit&&policeDirector.seen){
+      const setup=pitSetup(cop,tune,PX,PZ,pux,puz,rx,rz,pvs,pvx,pvz);authorizePit(cop,tune,setup);
+    }
+    const pitMove=!onFoot&&!playerAircraft?pitDirective(cop,PX,PZ,pux,puz,rx,rz,dt):null;
+    if(pitMove){tx=pitMove.x;tz=pitMove.z;cop._pitSpeedMul=pitMove.speedMul;}
+    else{cop._pitSpeedMul=1;if(cop.ramCd>0&&!onFoot){const side=(i&1)?1:-1;tx=PX+rx*side*42-pux*34;tz=PZ+rz*side*42-puz*34;}}
 
     let sx=tx-cop.x,sz=tz-cop.z,sl=Math.hypot(sx,sz)||1;sx/=sl;sz/=sl;
     const sep=27+tune.formationRadius*.55,near=actorCollisionGrid.query(cop.x,cop.z,sep,DYN_COP,_copSepScratch);
     let trafficAhead=false;
     for(let j=0;j<near.length;j++){const o=near[j].actor;if(o===cop||o._roadblock||o._retiring)continue;const ox=cop.x-o.x,oz=cop.z-o.z,d2=ox*ox+oz*oz;if(d2>.01&&d2<sep*sep){const d=Math.sqrt(d2),w=(1-d/sep)*(1.5+tune.formationRadius*.035);sx+=ox/d*w;sz+=oz/d*w;const ahead=-(ox*Math.sin(cop.heading)+oz*Math.cos(cop.heading));if(ahead>0&&ahead<18&&Math.abs(ox*Math.cos(cop.heading)-oz*Math.sin(cop.heading))<7)trafficAhead=true;}}
-    const copTires=updateGenericTireFx(cop,dt);let spd=Math.min(tune.pursuitCruiseSpeed*(cop.spdMul||1)*(cop._heavy?.94:1)*(cop.aggression||1),copTires.cap);if(copTires.count)cop.heading+=copTires.pull*dt*clamp(Math.hypot(cop.vx||0,cop.vz||0)/12,0,1);
+    const copTires=updateGenericTireFx(cop,dt);let spd=Math.min(tune.pursuitCruiseSpeed*(cop.spdMul||1)*(cop._heavy?.94:1)*(cop.aggression||1),copTires.cap)*(cop._pitSpeedMul||1);if(copTires.count)cop.heading+=copTires.pull*dt*clamp(Math.hypot(cop.vx||0,cop.vz||0)/12,0,1);
     const fx=Math.sin(cop.heading),fz=Math.cos(cop.heading),ax=cop.x+fx*COP_LOOK,az=cop.z+fz*COP_LOOK,nb=WORLD_obstaclesNear(ax,az,{mph:Math.hypot(cop.vx||0,cop.vz||0)*1.6,kind:'cop'})||[];
     for(let k=0;k<nb.length;k++){const b=nb[k],bh=b.h===undefined?40:b.h;if(b.baseY!==undefined&&(cop.y>b.baseY+bh-.6||cop.y<b.baseY-2.2))continue;if(Math.abs(ax-b.x)>b.w*.5+3||Math.abs(az-b.z)>b.d*.5+3)continue;const side=((cop.x-b.x)*fz+(cop.z-b.z)*-fx)>=0?1:-1;sx+=fz*side*1.2;sz-=fx*side*1.2;spd*=.7;break;}
-    if(trafficAhead)spd*=.72;if(!onFoot&&dp<42)spd=Math.min(spd,Math.max(20,pvs+7+tune.level));if(cop.ramCd>0)spd*=.62;if(onFoot){spd=cop._footHold?0:Math.min(spd,clamp((cop._footSlotDist||dp)*1.7,7,24));}
+    if(trafficAhead)spd*=.72;if(!onFoot&&dp<42&&!cop._pit)spd=Math.min(spd,Math.max(20,pvs+7+tune.level));if(!onFoot&&pvs<3.5&&dp<72&&!cop._pit)spd=Math.min(spd,clamp((dp-18)*1.18,0,24));if(cop.ramCd>0&&!cop._pit)spd*=.62;if(onFoot){spd=cop._footHold?0:Math.min(spd,clamp((cop._footSlotDist||dp)*1.7,7,24));}
     const want=onFoot&&cop._footHold?cop._footFace:Math.atan2(sx,sz);let dh=Math.atan2(Math.sin(want-cop.heading),Math.cos(want-cop.heading));const turn=(cop.turnRate||3)*(1+1.2*clamp((65-dp)/45,0,1))*dt;cop.heading+=clamp(dh,-turn,turn);if(Math.abs(dh)>1.45)spd*=.79;
     const road=WORLD_nearestRoad(cop.x,cop.z),off=!road||road.d>road.width*.62,wvx=Math.sin(cop.heading)*spd,wvz=Math.cos(cop.heading)*spd,follow=off?1.3:8.5;cop.vx=lerp(cop.vx||0,wvx,clamp(follow*dt,0,1));cop.vz=lerp(cop.vz||0,wvz,clamp(follow*dt,0,1));
     if(off){const drag=Math.max(0,1-2.1*dt);cop.vx*=drag;cop.vz*=drag;}
     const cm=moveAICircleWorld(cop,cop.vx,cop.vz,dt,3.85,DYN_COP);cop.vx=cm.vx;cop.vz=cm.vz;if(cm.hit){cop.blockedT=(cop.blockedT||0)+dt;cop.heading+=(((Math.sin(cop.heading)*cm.nz-Math.cos(cop.heading)*cm.nx)>=0)?-1:1)*(.42+Math.min(.65,cop.blockedT*.35));}else cop.blockedT=Math.max(0,(cop.blockedT||0)-dt*2.4);
-    // PIT nudge: only a rear-quarter contact, only from level 3 up, and each car
-    // has its own cooldown. This rotates momentum instead of launching the car.
-    if(!onFoot&&!playerAircraft&&tune.pitStrength>0&&cop.pitCd<=0&&dp<9.5&&pvs>18){const dx=cop.x-PX,dz=cop.z-PZ,rear=-(dx*pux+dz*puz),side=dx*rx+dz*rz;if(rear>1.5&&Math.abs(side)>2.2){const sign=side>0?-1:1,k=tune.pitStrength*clamp((pvs-15)/45,.25,1);carState.heading+=sign*k*.075;carState.vx+=rx*sign*k*8;carState.vz+=rz*sign*k*8;cop.pitCd=clamp(3.4-tune.level*.35,1.4,2.5);cop.ramCd=.75;setBanner('PIT MANEUVER','COUNTERSTEER','#ff922b');}}
+    // PIT contact uses the same closed-form inverse-mass impulse as every other
+    // v29 vehicle contact. The extra yaw term represents the rear-quarter moment
+    // arm; it does not add another collision pass.
+    if(cop._pit&&cop._pit.phase==='lunge')resolvePitContact(cop,tune,PX,PZ,pux,puz,rx,rz,pvx,pvz);
     cop.y=WORLD_groundHeightAt(cop.x,cop.z,cop.y===undefined?carState.y:cop.y);cop.mesh.position.set(cop.x,cop.y,cop.z);cop.mesh.rotation.y=cop.heading;
     const on=(performance.now()/POLICE_GLOBAL_TUNING.sirenFlashIntervalMs|0)%2;if(cop.mesh.userData.bl){cop.mesh.userData.bl.material.color.setHex(on?0x2b6bff:0x111133);cop.mesh.userData.br.material.color.setHex(on?0x111133:0xff2b2b);}
   }
@@ -33359,7 +33758,8 @@ window.GAME_DEBUG={
         cap:Number.isFinite(t._trafficCap)?+t._trafficCap.toFixed(1):null,pullout:!!t._pullOut,detour:!!t._detour};});},
   /** Set the wanted level so police behaviour can be tested without earning it. */
   wanted(n){stats.wanted=clamp(n|0,0,6);stats._decay=0;policeDirector.previousLevel=0;policeDirector.spawnT=0;return stats.wanted;},
-  police(){return{tune:policeTune(),director:{...policeDirector},cops:cops.map(c=>({x:+c.x.toFixed(1),z:+c.z.toFixed(1),heavy:!!c._heavy,roadblock:!!c._roadblock,retiring:!!c._retiring,hidden:!!c._hidden,inert:!!c._inert,driverAlive:!!c._driverAlive,driverDeployed:!!c._driverDeployed,occupants:(c._occupants||[]).map(o=>({role:o.role,alive:!!o.alive,deployed:!!o.deployed}))})),roadblocks:policeRoadblocks.map(r=>({x:+r.x.toFixed(1),z:+r.z.toFixed(1),life:+r.life.toFixed(1),triggered:r.triggered,posts:(r.posts||[]).length}))};},
+  police(){return{tune:policeTune(),director:{...policeDirector},cops:cops.map(c=>({x:+c.x.toFixed(1),z:+c.z.toFixed(1),heavy:!!c._heavy,roadblock:!!c._roadblock,retiring:!!c._retiring,hidden:!!c._hidden,inert:!!c._inert,driverAlive:!!c._driverAlive,driverDeployed:!!c._driverDeployed,pit:c._pit?{phase:c._pit.phase,t:+c._pit.t.toFixed(2),side:c._pit.side}:null,foot:c._foot?{state:c._foot.state,t:+c._foot.t.toFixed(2),watchT:+(c._foot.watchT||0).toFixed(2),watchTrips:c._foot.watchTrips||0}:null,occupants:(c._occupants||[]).map(o=>({role:o.role,alive:!!o.alive,deployed:!!o.deployed}))})),roadblocks:policeRoadblocks.map(r=>({x:+r.x.toFixed(1),z:+r.z.toFixed(1),life:+r.life.toFixed(1),triggered:r.triggered,posts:(r.posts||[]).length}))};},
+  pitAttempts(){return policeDirector.pitLog.map(r=>JSON.parse(JSON.stringify(r)));},
   policeRoadblock(){policeDirector.roadblockT=999;return spawnPoliceRoadblock(policeTune());},
   bust(reason){return bustPlayer(reason||'DEBUG ARREST');},
   smashProps(radius=35,mph=80){const d=GameSystems.api('destructibles');return d&&d.breakAt?d.breakAt(playerX,playerZ,radius,mph):0;},
@@ -33574,6 +33974,13 @@ if(window.GameSystems){
       },
       deliverVehicle(id,pose){if(!pose||!VEHICLE_TUNES[id])return false;selectPlayerVehicle(id);return this.deliverCurrentCar(pose);},
       adminSpawnVehicle(id,pose){if(!pose||!VEHICLE_TUNES[id])return false;selectPlayerVehicle(id);resetCar();this.teleportCar(pose.x,pose.z,pose.heading||0,pose.y);carState.hp=100;return true;},
+      benchmarkSpawnVehicle(id,pose){
+        if(!pose||!VEHICLE_TUNES[id])return false;
+        const aa=window.GameSystems&&GameSystems.api('aircraft');if(playerAircraft&&aa&&aa.exitCurrent)aa.exitCurrent();
+        selectPlayerVehicle(id,{stock:true});resetCar();this.teleportCar(pose.x,pose.z,pose.heading||0,pose.y);
+        carState.hp=100;stats.health=playerHealth=100;engineCondition=100;transmissionCondition=100;engineDamage=0;engineBlown=false;engineSeized=false;resetEngineHeat();restorePlayerVehicleDamage(null,true);
+        ensurePlayerPossession('qa-benchmark',{x:pose.x,z:pose.z,y:pose.y,heading:pose.heading||0});return true;
+      },
       deliverCurrentCar(pose){if(!pose)return false;if(carState.burning&&car)detachBurningCar();if(!car){car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]);car.userData.vehicleTuneKey=vehicleTuneKey;}car.userData.playerOwned=true;carState.x=pose.x;carState.z=pose.z;carState.heading=pose.heading||0;carState.y=WORLD_groundHeightAt(pose.x,pose.z,pose.y===undefined?carState.y:pose.y);carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;carState.hp=100;carState.burning=false;carState.fuse=0;engineBlown=false;resetBurstTires();if(carState.fire&&car)car.remove(carState.fire);carState.fire=null;restorePlayerVehicleDamage(null,true);car.position.set(carState.x,carState.y,carState.z);car.rotation.set(0,carState.heading,0);cameraSmoothingReady=false;return true;},
       resetCar,reviveForRace,ensurePlayerPossession,playerPossessionValid,forceEjectBurningVehicle,burstTire,burstTireAt,burstVehicleTire,vehicleTireCorners(v){return v==='player'||v===carState||v===car?playerTireCorners():genericTireCorners(v);},vehicleTireProfile:genericTireProfile,requestManualShift,vehicleDamageSnapshot:snapshotPlayerVehicleDamage,freshVehicleDamageSnapshot,restoreVehicleDamage(snap,fresh){return restorePlayerVehicleDamage(snap,!!fresh);},repairPowertrain(){engineCondition=100;transmissionCondition=100;engineDamage=0;engineBlown=false;engineSeized=false;resetEngineHeat();savePowertrainCondition(true);},powertrain(){return{engineName:vehicleTune.engineName,engineClass:vehicleTune.engineClass,quality:vehicleTune.engineQuality,safeRpm:engineSafeRpm(),limiterRpm:engineLimiterRpm(),limiterTolerance:vehicleTune.limiterTolerance,overRevTolerance:vehicleTune.overRevTolerance,heatTolerance:vehicleTune.heatTolerance,condition:engineCondition,transmissionCondition,temperature:Math.round(78+engineHeatSeconds*2),misfire:misfireSeverity,stage:vehicleTune.hardwareStage,hardware:(vehicleTune.installedHardware||[]).slice(),forcedInduction:vehicleTune.forcedInduction,nitrousInstalled:!!vehicleTune.nitrousInstalled,wheelspin:drivenWheelSpin,driveMode,gear:reverseEngaged?'R':driveGear};},
       toggleFullMap,focusFullMap,clearFullMapFocus,get fullMapOpen(){return showFullMap;},get fullMapZoom(){return fullMapZoom;},
@@ -33630,6 +34037,14 @@ if(window.GameSystems){
     enterNearestVehicle(){if(!onFoot)return false;const beforeAircraft=playerAircraft;qaTap('KeyE');return!onFoot||playerAircraft!==beforeAircraft;},
     /** Tap E through the real input pipeline and report whether exit occurred. */
     exitVehicle(){if(onFoot&&!playerAircraft)return false;qaTap('KeyE');return onFoot&&!playerAircraft;},
+    /** Every real catalogue road car, including locked vehicles, for external benchmark enumeration. */
+    listVehicles(){const p=GameSystems.api('progression');return p&&p.catalogue?p.catalogue().map(v=>({id:v.id,name:v.displayName||v.name||v.id,class:v.class||'ROAD'})):Object.keys(VEHICLE_TUNES).map(id=>({id,name:VEHICLE_TUNES[id].name||id,class:'ROAD'}));},
+    /** Spawn factory-stock through the core select/reset/possession path; never edits unlocks or saved tuning. */
+    spawnVehicle(id){
+      id=String(id||'');const row=this.listVehicles().find(v=>v.id===id);if(!row||!VEHICLE_TUNES[id])throw new RangeError('unknown drivable vehicle: '+id);
+      const x=PLAYER_x(),z=PLAYER_z(),heading=PLAYER_heading(),y=WORLD_groundHeightAt(x,z,PLAYER_y()),ok=gameCtx.engine.benchmarkSpawnVehicle&&gameCtx.engine.benchmarkSpawnVehicle(id,{x,z,y,heading});
+      if(!ok)return false;return{id:row.id,name:row.name,class:row.class,x:PLAYER_x(),z:PLAYER_z(),heading:PLAYER_heading(),hp:playerHealth,stock:true};
+    },
     /** Admin-style relocation without creating or clearing wanted heat. */
     teleport(x,z){x=Number(x);z=Number(z);if(!Number.isFinite(x)||!Number.isFinite(z))throw new TypeError('teleport requires finite x/z');const admin=GameSystems.api('admin');if(admin&&admin.teleport)admin.teleport(x,z,PLAYER_heading());else if(onFoot){const p=WORLD_clampToBounds(x,z);foot.x=p.x;foot.z=p.z;footChar.position.set(p.x,WORLD_groundHeightAt(p.x,p.z,footChar.position.y),p.z);cameraSmoothingReady=false;}else gameCtx.engine.teleportCar(x,z,PLAYER_heading());}
   };
