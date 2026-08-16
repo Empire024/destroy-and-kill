@@ -35036,7 +35036,7 @@ if(window.GameSystems){
   }
   if(document.readyState==='loading')addEventListener('DOMContentLoaded',bootWithShelfModules,{once:true});
   else setTimeout(bootWithShelfModules,0);
-  const qaKeySpec=code=>{const raw=String(code||''),map={Space:[' ','Space'],ShiftLeft:['shift','ShiftLeft'],ShiftRight:['shift','ShiftRight'],ArrowUp:['arrowup','ArrowUp'],ArrowDown:['arrowdown','ArrowDown'],ArrowLeft:['arrowleft','ArrowLeft'],ArrowRight:['arrowright','ArrowRight'],Escape:['escape','Escape'],Enter:['enter','Enter']};if(map[raw])return{key:map[raw][0],code:map[raw][1]};if(/^Key[A-Z]$/.test(raw))return{key:raw.slice(3).toLowerCase(),code:raw};if(/^Digit[0-9]$/.test(raw))return{key:raw.slice(5),code:raw};const key=raw.length===1?raw.toLowerCase():raw.toLowerCase();return{key,code:raw||key};},qaDispatch=(code,type)=>{const k=qaKeySpec(code),ev=new KeyboardEvent(type,{key:k.key,code:k.code,bubbles:true,cancelable:true});window.dispatchEvent(ev);return!ev.defaultPrevented;},qaTap=code=>{qaDispatch(code,'keydown');qaDispatch(code,'keyup');};
+  const qaKeySpec=code=>{const raw=String(code||''),map={Space:[' ','Space'],ShiftLeft:['shift','ShiftLeft'],ShiftRight:['shift','ShiftRight'],ArrowUp:['arrowup','ArrowUp'],ArrowDown:['arrowdown','ArrowDown'],ArrowLeft:['arrowleft','ArrowLeft'],ArrowRight:['arrowright','ArrowRight'],Escape:['escape','Escape'],Enter:['enter','Enter']};if(map[raw])return{key:map[raw][0],code:map[raw][1]};if(/^Key[A-Z]$/.test(raw))return{key:raw.slice(3).toLowerCase(),code:raw};if(/^Digit[0-9]$/.test(raw))return{key:raw.slice(5),code:raw};if(/^[A-Za-z]$/.test(raw))return{key:raw.toLowerCase(),code:'Key'+raw.toUpperCase()};if(/^[0-9]$/.test(raw))return{key:raw,code:'Digit'+raw};const key=raw.length===1?raw.toLowerCase():raw.toLowerCase();return{key,code:raw||key};},qaDispatch=(code,type)=>{const k=qaKeySpec(code),ev=new KeyboardEvent(type,{key:k.key,code:k.code,bubbles:true,cancelable:true});window.dispatchEvent(ev);return!ev.defaultPrevented;},qaTap=code=>{qaDispatch(code,'keydown');qaDispatch(code,'keyup');};
   /* External automation hooks. pressKey/mouseMove enter the installed DOM/combat
      handlers; vehicle entry/exit synthesize E; teleport uses the admin transport
      path and therefore creates no crime or wanted side effect. */
@@ -35044,12 +35044,14 @@ if(window.GameSystems){
     bootReady:false,
     /** Complete map/vehicle selection through the real select/reset/begin flow. */
     startGame(mapIndex=0,vehicleIndex=0){return qaStartGame(mapIndex,vehicleIndex);},
+    /** Board a requested aircraft through the live aircraft system; enterKind picks a nearby parked match or spawns one, then calls the real enterUnit/beginAircraft chain. */
+    enterAircraft(kind){const api=GameSystems.api('aircraft');if(!api)return false;const target=kind==='helicopter'?'heli':kind;if(target!=='heli'&&target!=='plane')throw new RangeError("enterAircraft(kind): expected 'helicopter' or 'plane'");if(playerAircraft&&playerAircraft.kind===target)return{kind:target==='heli'?'helicopter':'plane',id:playerAircraft.id};if(playerAircraft){if(api.resetCurrent)api.resetCurrent();if(!api.exitCurrent||!api.exitCurrent())return false;}if(!onFoot){carState.speed=carState.vx=carState.vz=0;if(!exitCar(true))return false;}const u=api.enterKind&&api.enterKind(target);return u?{kind:target==='heli'?'helicopter':'plane',id:u.id}:false;},
     /** Read only live engine state; no simulation shortcut. */
     /** Stable mode strings: vehicle, on-foot, on-foot-aim, on-foot-first-person, plane, helicopter. */
     getState(){const combat=GameSystems.api('combat'),bikes=GameSystems.api('bikes'),mode=playerAircraft?(playerAircraft.kind==='heli'?'helicopter':'plane'):onFoot?(combat&&combat.aiming&&combat.aiming()?'on-foot-aim':combat&&combat.isFirstPerson&&combat.isFirstPerson()?'on-foot-first-person':'on-foot'):'vehicle',cameraYaw=onFoot&&combat&&combat.cameraYaw?combat.cameraYaw():PLAYER_heading();return{mode,playerX:PLAYER_x(),playerZ:PLAYER_z(),playerHeading:PLAYER_heading(),cameraYaw,vehicleId:vehicleTuneKey,vehicleSpeed:gameCtx.player.speed,driveMode,gear:reverseEngaged?'R':driveGear,engineOn:!engineBlown&&!engineSeized,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas),bikeActive:!!(bikes&&bikes.playerActive&&bikes.playerActive()),wantedStars:stats.wanted,hp:playerHealth};},
     inputState(){return inputDebugState();},
     /** Hold a synthetic key through the real window keydown/keyup listeners. */
-    pressKey(code,ms=60){ms=Math.max(0,Number(ms)||0);qaDispatch(code,'keydown');const frames=Math.max(1,Math.ceil(ms/(1000/60)));if(window.GAME_DEBUG&&window.GAME_DEBUG.step)window.GAME_DEBUG.step(frames,1/60);qaDispatch(code,'keyup');return Promise.resolve(true);},
+    pressKey(code,downOrMs=60){if(typeof downOrMs==='boolean'){qaDispatch(code,downOrMs?'keydown':'keyup');return Promise.resolve(true);}const ms=Math.max(0,Number(downOrMs)||0);qaDispatch(code,'keydown');const frames=Math.max(1,Math.ceil(ms/(1000/60)));if(window.GAME_DEBUG&&window.GAME_DEBUG.step)window.GAME_DEBUG.step(frames,1/60);qaDispatch(code,'keyup');return Promise.resolve(true);},
     /** Inject a delta into the installed combat mousemove handler. */
     mouseMove(dx,dy){const combat=GameSystems.api('combat'),ok=!!(combat&&combat.injectMouse&&combat.injectMouse(dx,dy));if(ok&&window.GAME_DEBUG&&window.GAME_DEBUG.step)window.GAME_DEBUG.step(2,1/60);return ok;},
     /** Select through the combat equip pipeline; accepts id or display name. */
@@ -38452,7 +38454,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   function mat(T,color,opts){
     opts=opts||{};
     if(opts.basic)return new T.MeshBasicMaterial({color:color,transparent:!!opts.transparent,opacity:opts.opacity==null?1:opts.opacity,depthWrite:opts.depthWrite!==false});
-    return new T.MeshStandardMaterial({color:color,roughness:opts.roughness==null?.72:opts.roughness,metalness:opts.metalness==null?.08:opts.metalness,emissive:opts.emissive||0,emissiveIntensity:opts.emissiveIntensity||0,transparent:!!opts.transparent,opacity:opts.opacity==null?1:opts.opacity,depthWrite:opts.depthWrite!==false,side:opts.side});
+    const params={color:color,roughness:opts.roughness==null?.72:opts.roughness,metalness:opts.metalness==null?.08:opts.metalness,emissive:opts.emissive||0,emissiveIntensity:opts.emissiveIntensity||0,transparent:!!opts.transparent,opacity:opts.opacity==null?1:opts.opacity,depthWrite:opts.depthWrite!==false};if(opts.side!==undefined)params.side=opts.side;return new T.MeshStandardMaterial(params);
   }
 
   function box(T,parent,w,h,d,color,x,y,z,opts){
@@ -41691,6 +41693,12 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     ])
   });
 
+  const POLISH_DRESSING = Object.freeze({
+    canyonOutcropSpacing: 190,
+    novaScrub: 120,
+    novaScreeClusters: 64
+  });
+
   const PERFORMANCE = Object.freeze({
     terrainChunk: REGION.terrainChunk,
     terrainStepDesert: 100,
@@ -41780,15 +41788,28 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   const CANYON_SPUR = Object.freeze([[10450,3270],[11000,3520],[11450,3640]]);
   const WASH_LINE = Object.freeze([[5950,3400],[6600,3480],[7300,3420],[8000,3380],[8500,3420]]);
 
+  function quarryCanyonFade(x, z) {
+    const q = Math.sqrt(sq((x - 10650) / 980) + sq((z - 2920) / 850));
+    return smoothstep(.48, 1.05, q);
+  }
+
+  function canyonShoulderRise(x, z) {
+    if (x < 8650 || x > 10950 || z < 3050 || z > 3900) return 0;
+    const d = Math.min(simplePolyDist(x, z, CANYON_LINE), simplePolyDist(x, z, CANYON_SPUR));
+    const band = smoothstep(105, 175, d) * (1 - smoothstep(315, 390, d));
+    const deep = smoothstep(8750, 9200, x) * (1 - smoothstep(10350, 10850, x));
+    return 16 * band * deep * quarryCanyonFade(x, z);
+  }
+
   function canyonCut(x, z) {
     if (x < 8250 || x > 11700 || z < 2950 || z > 4000) return 0;
     const d = Math.min(simplePolyDist(x, z, CANYON_LINE), simplePolyDist(x, z, CANYON_SPUR));
-    if (d > 170) return 0;
-    const wall = d < 55 ? 1 : smooth01((170 - d) / 115);
-    // Fade the canyon out where the quarry bowl takes over so the two digs
-    // never stack into a below-sea pit.
-    const qf = 1 - clamp(quarryDepth(x, z) / 10, 0, 1);
-    return (mesaRise(x, z) + 6) * wall * qf;
+    if (d > 180) return 0;
+    const wall = d < 48 ? 1 : Math.pow(1 - smoothstep(48, 170, d), 1.6);
+    const deep = smoothstep(8750, 9200, x) * (1 - smoothstep(10350, 10850, x));
+    // The extra floor depth and raised shoulder make a narrow, readable wall;
+    // the geometric quarry fade avoids the old quarry-bench discontinuity.
+    return (mesaRise(x, z) + 18 + 3 * deep) * wall * quarryCanyonFade(x, z);
   }
 
   function washRelief(x, z) {
@@ -41815,7 +41836,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     const northFoothill = smoothstep(8800, 10500, x) * smoothstep(800, -1450, z) * 16;
     const mountain = mountainShape(x,z);
     const quarry = quarryDepth(x,z);
-    const mesa = mesaRise(x,z) + butteRise(x,z);
+    const mesa = mesaRise(x,z) + canyonShoulderRise(x,z) + butteRise(x,z);
     const canyon = canyonCut(x,z);
     const wash = washRelief(x,z);
     let y = edge * (rolling + eastRise + northFoothill + mountain + mesa + wash - quarry - canyon);
@@ -41838,6 +41859,10 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   }
 
   const CLIMB_POINTS = ROAD_ROUTES.find(function (r) { return r.id === 'mount-nova-climb'; }).points;
+  const CANYON_RUN_POINTS = ROAD_ROUTES.find(function (r) { return r.id === 'copper-canyon-run'; }).points;
+  const BOX_CANYON_POINTS = ROAD_ROUTES.find(function (r) { return r.id === 'box-canyon-spur'; }).points;
+  const MESA_RIM_POINTS = ROAD_ROUTES.find(function (r) { return r.id === 'mesa-rim-spur'; }).points;
+  const BOULDER_CLEARANCE_ROUTES = Object.freeze([CLIMB_POINTS,CANYON_RUN_POINTS,BOX_CANYON_POINTS,MESA_RIM_POINTS]);
   const RUNWAY_POINTS = ROAD_ROUTES.find(function (r) { return r.type === 'runway'; }).points;
   const RUNWAY_Y = heightBeforeRoadBench(RUNWAY_POINTS[0][0], RUNWAY_POINTS[0][1]);
   const RUNWAY_TARGETS = Object.freeze(RUNWAY_POINTS.map(function () { return RUNWAY_Y; }));
@@ -41855,6 +41880,24 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     for (let i = 0; i < nPts; i++) {
       const target = i === nPts - 1 ? summitRaw : Math.max(start + (summitRaw - start) * (cum[i] / totalLen), last);
       out[i] = target; last = target;
+    }
+    return Object.freeze(out);
+  })();
+
+  const CANYON_RUN_TARGETS = (function () {
+    const out = CANYON_RUN_POINTS.map(function (p) { return heightBeforeRoadBench(p[0], p[1]); });
+    const maxSlope = .075;
+    // Clamp both directions so the analytical floor follows a continuous,
+    // drivable shelf through the quarry transition without moving route points.
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 1; i < out.length; i++) {
+        const a=CANYON_RUN_POINTS[i-1],b=CANYON_RUN_POINTS[i],lim=Math.hypot(b[0]-a[0],b[1]-a[1])*maxSlope;
+        out[i]=clamp(out[i],out[i-1]-lim,out[i-1]+lim);
+      }
+      for (let i = out.length-2; i >= 0; i--) {
+        const a=CANYON_RUN_POINTS[i],b=CANYON_RUN_POINTS[i+1],lim=Math.hypot(b[0]-a[0],b[1]-a[1])*maxSlope;
+        out[i]=clamp(out[i],out[i+1]-lim,out[i+1]+lim);
+      }
     }
     return Object.freeze(out);
   })();
@@ -41895,11 +41938,19 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     return 0;
   }
 
+  function canyonRunBenchCorrection(x, z) {
+    if (x < 5750 || x > 11000 || z < 3150 || z > 3750) return 0;
+    const n=nearestPolylineSegment(x,z,CANYON_RUN_POINTS,CANYON_RUN_TARGETS),d=Math.sqrt(n.d2);
+    if(d>=72)return 0;
+    const blend=1-smooth01(clamp((d-16)/56,0,1));
+    return (n.y-heightBeforeRoadBench(x,z))*blend;
+  }
+
   function countyHeightContribution(x, z) {
     if (x < REGION.minX || x > REGION.maxX || z < REGION.minZ || z > REGION.maxZ) return 0;
     const land = countyLandStrength(x,z);
     if (land <= 0) return 0;
-    return heightBeforeRoadBench(x,z) + climbBenchCorrection(x,z);
+    return heightBeforeRoadBench(x,z) + climbBenchCorrection(x,z) + canyonRunBenchCorrection(x,z);
   }
 
   function terrainColorAt(x, z, y) {
@@ -41999,6 +42050,17 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     return best;
   }
 
+  function minBoulderRouteClearance(x,z) {
+    let best=Infinity;
+    for(let i=0;i<BOULDER_CLEARANCE_ROUTES.length;i++)best=Math.min(best,simplePolyDist(x,z,BOULDER_CLEARANCE_ROUTES[i]));
+    return best;
+  }
+
+  function safeBoulderSite(x,z) {
+    // 72 from centerline leaves more than 40 from the edge of these roads.
+    return minBoulderRouteClearance(x,z)>72&&roadDistance(x,z)>72;
+  }
+
   function makeMaterialCache(T) {
     const cache=new Map();
     return function material(color,kind){const key=(kind||'std')+':'+color;if(cache.has(key))return cache.get(key);let m;if(kind==='basic')m=new T.MeshBasicMaterial({color:color});else if(kind==='water')m=new T.MeshBasicMaterial({color:color,transparent:true,opacity:.72,depthWrite:false,side:T.DoubleSide});else m=new T.MeshStandardMaterial({color:color,roughness:.82,metalness:kind==='metal'?.58:.05});cache.set(key,m);return m;};
@@ -42033,7 +42095,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     const T=builder.THREE,root=new T.Group();root.name='sa-county-terrain';handle.root.add(root);handle.terrainRoot=root;
     const mat=new T.MeshStandardMaterial({vertexColors:true,roughness:.96,metalness:0,side:T.DoubleSide});handle.sharedMaterials.push(mat);
     const CH=REGION.terrainChunk;
-    for(let x=REGION.minX;x<REGION.maxX;x+=CH){for(let z=REGION.minZ;z<REGION.maxZ;z+=CH){const x1=Math.min(x+CH,REGION.maxX),z1=Math.min(z+CH,REGION.maxZ),cx=(x+x1)*.5,cz=(z+z1)*.5;if(countyLandStrength(cx,cz)<=.005&&countyLandStrength(x,z)<=.005&&countyLandStrength(x1,z1)<=.005)continue;const mountain=x>9550&&z<450,step=mountain?PERFORMANCE.terrainStepMountain:PERFORMANCE.terrainStepDesert,geo=makeTerrainGeometry(T,builder,x,z,x1,z1,step);if(!geo)continue;const mesh=new T.Mesh(geo,mat);mesh.receiveShadow=true;mesh.castShadow=false;mesh.frustumCulled=true;mesh.userData.saChunk={x:cx,z:cz,r:Math.hypot(x1-x,z1-z)*.55};root.add(mesh);handle.terrainChunks.push(mesh);}}
+    for(let x=REGION.minX;x<REGION.maxX;x+=CH){for(let z=REGION.minZ;z<REGION.maxZ;z+=CH){const x1=Math.min(x+CH,REGION.maxX),z1=Math.min(z+CH,REGION.maxZ),cx=(x+x1)*.5,cz=(z+z1)*.5;if(countyLandStrength(cx,cz)<=.005&&countyLandStrength(x,z)<=.005&&countyLandStrength(x1,z1)<=.005)continue;const mountain=x>9550&&z<450,canyon=x1>8250&&x<11700&&z1>2900&&z<4050,fine=mountain||canyon,step=fine?PERFORMANCE.terrainStepMountain:PERFORMANCE.terrainStepDesert,geo=makeTerrainGeometry(T,builder,x,z,x1,z1,step);if(!geo)continue;const mesh=new T.Mesh(geo,mat);mesh.receiveShadow=true;mesh.castShadow=false;mesh.frustumCulled=true;mesh.userData.saChunk={x:cx,z:cz,r:Math.hypot(x1-x,z1-z)*.55};root.add(mesh);handle.terrainChunks.push(mesh);}}
     return root;
   }
 
@@ -42245,13 +42307,57 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     for(let i=0;i<points.length-1;i++){const a=points[i],b=points[i+1],dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz);if(len<1)continue;const n=Math.floor(len/spacing),h=Math.atan2(dx,dz);for(let j=1;j<=n;j++){const t=j/(n+1);fn(lerp(a[0],b[0],t),lerp(a[1],b[1],t),h,i,j);}}
   }
 
+  function makeCanyonOutcropSites() {
+    const sites=[],r=rng(0xC011A11),spacing=POLISH_DRESSING.canyonOutcropSpacing;
+    let station=0;
+    sampleRoute(CANYON_LINE,spacing,function(x,z,h){
+      station++;
+      const tx=Math.sin(h),tz=Math.cos(h),nx=Math.cos(h),nz=-Math.sin(h);
+      for(const side of [-1,1]){
+        const rimOffset=252+r()*42;
+        for(let k=0;k<3;k++){
+          const along=(r()-.5)*48,offset=rimOffset+(r()-.5)*22,bx=x+tx*along+nx*side*offset,bz=z+tz*along+nz*side*offset;
+          if(!safeBoulderSite(bx,bz))continue;
+          sites.push({source:'canyon-rim',x:bx,z:bz,ry:h+(r()-.5)*.75,sx:3.8+r()*4.8,sy:1.5+r()*2.1,sz:2.2+r()*3.2,rx:(r()-.5)*.34,rz:(r()-.5)*.34});
+        }
+        if((station&1)===0){
+          const along=(r()-.5)*34,offset=112+r()*30,bx=x+tx*along+nx*side*offset,bz=z+tz*along+nz*side*offset;
+          if(safeBoulderSite(bx,bz))sites.push({source:'canyon-wall',x:bx,z:bz,ry:h+(r()-.5)*.7,sx:2.8+r()*3.7,sy:1.3+r()*1.8,sz:1.9+r()*2.7,rx:(r()-.5)*.42,rz:(r()-.5)*.42});
+        }
+      }
+    });
+    return sites;
+  }
+
+  function makeMountNovaRockSites() {
+    const sites=[],r=rng(0xB01D3A5);
+    for(let i=0;i<POLISH_DRESSING.novaScreeClusters;i++){
+      const p=randomLandPoint(r,9550,12700,-4500,-500,function(x,z){const m=mountainShape(x,z);return m>=300&&m<625&&safeBoulderSite(x,z);});
+      if(!p)continue;
+      for(let k=0;k<3;k++){
+        const a=r()*TAU,rad=3+r()*15,x=p.x+Math.sin(a)*rad,z=p.z+Math.cos(a)*rad,m=mountainShape(x,z);
+        if(m<300||m>=640||!safeBoulderSite(x,z))continue;
+        sites.push({source:'nova-scree',x:x,z:z,ry:r()*TAU,sx:.8+r()*1.8,sy:.35+r()*.65,sz:.8+r()*1.7,rx:(r()-.5)*.45,rz:(r()-.5)*.45});
+      }
+    }
+    const erratics=[[12549,-2074,6.8,4.2,5.6,.35],[11058,-3644,7.6,4.8,6.3,-.55],[11207,-2348,6.2,4.5,7.2,.18]];
+    for(let i=0;i<erratics.length;i++){
+      const e=erratics[i];
+      if(safeBoulderSite(e[0],e[1]))sites.push({source:'nova-erratic',x:e[0],z:e[1],ry:e[5],sx:e[2],sy:e[3],sz:e[4],rx:.12*(i-1),rz:-.1*(i-1)});
+    }
+    return sites;
+  }
+
   function buildDressing(builder,handle) {
     const T=builder.THREE,H=builder.terrain.heightAt.bind(builder.terrain),root=new T.Group();root.name='sa-county-dressing';handle.root.add(root);handle.dressingRoot=root;const batch=new DressingBatcher(T,root,handle.material),r=rng(0x5A4E0C0A);
     for(let i=0;i<AMBIENT.targets.scrub;i++){const p=randomLandPoint(r,5900,10400,-2500,5000,function(x,z){return x<9800||z>300;});if(!p)continue;const y=H(p.x,p.z),s=.55+r()*1.25;batch.add('scrub',p.x,y+.5*s,p.z,r()*TAU,s,.55+r()*.5,s);}
     for(let i=0;i<AMBIENT.targets.dryGrass;i++){const p=randomLandPoint(r,6000,9900,-1800,4700);if(!p)continue;const y=H(p.x,p.z),s=.5+r()*.8;batch.add('grass',p.x,y+1.0*s,p.z,r()*TAU,s,s,s);}
     for(let i=0;i<AMBIENT.targets.cactus;i++){const p=randomLandPoint(r,6100,9300,-900,4400,function(x,z){return z>250||x<8200;});if(!p)continue;const y=H(p.x,p.z),s=.75+r()*.75;batch.add('cactus',p.x,y+2.7*s,p.z,r()*TAU,s,s,s);if(r()>.25){const side=r()<.5?-1:1;batch.add('cactusArm',p.x+side*.6*s,y+3.2*s,p.z,r()*TAU,s*.65,s*.65,s*.65,0,Math.PI/2);}}
-    for(let i=0;i<AMBIENT.targets.pine;i++){const p=randomLandPoint(r,9300,12450,-4400,1700,function(x,z){return mountainShape(x,z)>18||x>10100;});if(!p)continue;const y=H(p.x,p.z),s=.75+r()*.85;batch.add('pineTrunk',p.x,y+2.4*s,p.z,r()*TAU,s,s,s);batch.add((i&3)?'pineTop':'pineTopDark',p.x,y+7.0*s,p.z,r()*TAU,s,s,s);}
+    for(let i=0;i<AMBIENT.targets.pine;i++){const p=randomLandPoint(r,9300,12450,-4400,1700,function(x,z){const m=mountainShape(x,z);return m>18&&m<300;});if(!p)continue;const y=H(p.x,p.z),s=.75+r()*.85;batch.add('pineTrunk',p.x,y+2.4*s,p.z,r()*TAU,s,s,s);batch.add((i&3)?'pineTop':'pineTopDark',p.x,y+7.0*s,p.z,r()*TAU,s,s,s);}
+    for(let i=0;i<POLISH_DRESSING.novaScrub;i++){const p=randomLandPoint(r,9550,12700,-4500,-500,function(x,z){const m=mountainShape(x,z);return m>=180&&m<450;});if(!p)continue;const y=H(p.x,p.z),s=.45+r()*.9;batch.add('scrub',p.x,y+.5*s,p.z,r()*TAU,s,.45+r()*.35,s);}
     for(let i=0;i<AMBIENT.targets.boulder;i++){const p=randomLandPoint(r,8800,12450,-4300,4500);if(!p)continue;const y=H(p.x,p.z),s=.5+r()*2.2;batch.add('boulder',p.x,y+.55*s,p.z,r()*TAU,s,.55+r()*.65,s,r()*.4,r()*.4);}
+    const polishRocks=makeCanyonOutcropSites().concat(makeMountNovaRockSites());
+    for(let i=0;i<polishRocks.length;i++){const p=polishRocks[i],y=H(p.x,p.z);batch.add('boulder',p.x,y+.55*p.sy,p.z,p.ry,p.sx,p.sy,p.sz,p.rx,p.rz);}
     const highway=ROAD_ROUTES.find(function(q){return q.id==='county-highway-12';});sampleRoute(highway.points,AMBIENT.powerPoleSpacing,function(x,z,h){const nx=Math.cos(h),nz=-Math.sin(h),side=(Math.floor((x+z)/100)&1)?1:-1,px=x+nx*35*side,pz=z+nz*35*side,y=H(px,pz);batch.add('pole',px,y+4.5,pz,h,1,1,1);batch.add('crossbar',px,y+8.3,pz,h,1,1,1);});
     handle.dressingChunks=batch.finish(DRESS_TYPES);buildBreakableFences(builder);return root;
   }
@@ -42470,6 +42576,8 @@ Assumptions that may not hold after integration:
  *                   dur     seconds on screen (default: scaled to length)
  *                   now     true = clear the queue and show immediately
  *                   tag     grouping label for clear(tag)
+ *                   voice   false to keep this one line silent, or a partial
+ *                           profile object to override the speaker's for it
  *                   onDone  callback when the line finishes }
  *
  *   NeonDialogue.choice(options, opts) -> stepId
@@ -42491,16 +42599,73 @@ Assumptions that may not hold after integration:
  *   NeonDialogue.busy()          true while a line or choice is live
  *   NeonDialogue.choosing()      true only while a choice is awaiting input
  *   NeonDialogue.current()       { kind, speaker, text, tag } or null
- *   NeonDialogue.speaker(name, color)   register a default colour for a name
- *   NeonDialogue.setPaused(bool) freeze timers and hide the bar
+ *   NeonDialogue.speaker(name, color, voiceProfile)
+ *                                register a name's accent colour and, if you
+ *                                pass one, its voice. Also accepts the object
+ *                                form speaker(name, {color, voice}).
+ *   NeonDialogue.setPaused(bool) freeze timers, hide the bar, stop the voice
  *   NeonDialogue.tick(dt)        manual pump (only if you own the frame)
  *   NeonDialogue.onKey(key)      manual key routing; returns true if consumed
  *   NeonDialogue.version
  *
+ * ---------------------------------------------------------------------------
+ * VOICE — speechSynthesis narration (NeonDialogue.voice)
+ * ---------------------------------------------------------------------------
+ *   Lines are read aloud by the browser's built-in speech engine. No network,
+ *   no assets, nothing for the CSP to block. The subtitle stays the source of
+ *   truth: the voice is garnish, it is allowed to be absent, off, or to fail
+ *   mid-sentence, and the conversation runs at the same pace either way.
+ *
+ *   VOICE PROFILE — the shape every NPC in the game can be given:
+ *     { pitch      0..2,  default 1. Character, mostly: a nervous first-timer
+ *                  sits near 1.35, a gruff salesman near 0.7.
+ *       rate       0.1..10, default 1. Practically 0.75..1.3 stays natural.
+ *       volume     0..1, default 1.
+ *       voiceHint  a string or array of strings, matched case-insensitively
+ *                  against each installed voice's `name` AND `lang`. First
+ *                  hit wins, e.g. 'female', 'daniel', 'en-GB'. Nothing is
+ *                  guaranteed to be installed — treat every hint as a wish.
+ *       lang       BCP-47 tag used when no hint matches; defaults to the
+ *                  document/navigator language.
+ *       mute       true to give a character subtitles but no voice. }
+ *
+ *   When no hint matches, the engine still hands each speaker a DIFFERENT
+ *   voice from the same-language pool by hashing their name, so two
+ *   characters never collide by accident even on a machine with two voices.
+ *
+ *     NeonDialogue.voice.enabled        get/set, default ON, persisted in
+ *                                       localStorage under
+ *                                       'neon_dialogue_voice_v1'. Forced off
+ *                                       and unsettable when unsupported.
+ *     NeonDialogue.voice.supported      does this browser have speechSynthesis
+ *     NeonDialogue.voice.suppressed     get/set transient mute that leaves the
+ *                                       saved preference alone — this is what
+ *                                       the game's own audio mute drives
+ *     NeonDialogue.voice.profile(name, p)   register / overwrite; null removes
+ *     NeonDialogue.voice.profileOf(name)    read one back
+ *     NeonDialogue.voice.voiceOf(name)      the resolved SpeechSynthesisVoice
+ *     NeonDialogue.voice.voices()           [{name, lang}] this browser offers.
+ *                                       May be empty on the first call: the
+ *                                       list loads async and the engine
+ *                                       re-resolves on 'voiceschanged'.
+ *     NeonDialogue.voice.test(name, text)   speak one line now, for a preview
+ *     NeonDialogue.voice.cancel()           stop whatever is speaking
+ *     NeonDialogue.voice.rate / .pitch      global multipliers over every
+ *                                       profile, for an accessibility slider
+ *
+ *   In-game the player toggles it with the 🔊 button in the top-right corner
+ *   of the subtitle bar (hidden entirely when speechSynthesis is missing).
+ *   Speech is cancelled when a line is skipped, answered or cleared, when the
+ *   game pauses, and when the bar is hidden. A spoken line stays on screen
+ *   until the voice actually finishes rather than for a guessed reading time,
+ *   and a choice does not start its answer countdown until the question has
+ *   been asked out loud.
+ *
  *   Reuse contract: the engine is installed once and never clobbered. A second
  *   module shipping this same file finds window.NeonDialogue already live and
  *   leaves it alone, so conversations from two systems queue instead of
- *   fighting over the bar.
+ *   fighting over the bar — and voice profiles registered by one module are
+ *   visible to all of them.
  *
  * ---------------------------------------------------------------------------
  * QA CHECKLIST  (teleport with __QA.teleport(x, z), or the admin panel)
@@ -42534,6 +42699,15 @@ Assumptions that may not hold after integration:
  *      'dealership' after ten minutes of play, and
  *      GameSystems.api('dealership').stats() should report ~430 showcars,
  *      under 60 row colliders and a build under 10ms.
+ *   8. VOICE           take a ride with the sound on. Ray should read low and
+ *      slow, Marisol high and quick. Click the 🔊 in the corner of the
+ *      subtitle bar: narration stops mid-word, the subtitles keep their pace,
+ *      and the setting survives a reload. Check
+ *        NeonDialogue.voice.voices()
+ *      lists what this machine actually installed — on a box with one voice
+ *      the characters are separated by pitch and rate alone, which is
+ *      expected. Pausing (Esc) must stop speech; the engine's own mute (M)
+ *      must silence it without flipping the 🔊 setting.
  *
  * PERFORMANCE CONTRACT
  *   Build : one bounded pass per sub-area; every stall costs one
@@ -42849,7 +43023,8 @@ Assumptions that may not hold after integration:
         el = doc.createElement('div');
         el.id = ROOT_ID;
         el.innerHTML =
-          '<div class="nd-bar"><span class="nd-who"></span><span class="nd-text"></span>' +
+          '<div class="nd-bar"><button class="nd-voice" type="button" title="Spoken dialogue on/off"></button>' +
+          '<span class="nd-who"></span><span class="nd-text"></span>' +
           '<div class="nd-opts"></div><div class="nd-timer"><i></i></div></div>';
         const host = doc.getElementById('systemsUI') || doc.body;
         host.appendChild(el);
@@ -42859,6 +43034,15 @@ Assumptions that may not hold after integration:
         optsEl = el.querySelector('.nd-opts');
         timerEl = el.querySelector('.nd-timer');
         timerFill = timerEl.firstChild;
+        voiceBtn = el.querySelector('.nd-voice');
+        // No speechSynthesis means no toggle: an inert button is worse than
+        // no button. The bar itself is unchanged either way.
+        if (synth && voiceBtn) {
+          voiceBtn.onclick = function (ev) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            engine.voice.enabled = !voiceEnabled;
+          };
+        }
         mounted = true;
       } catch (e) {
         console.error('[neondialogue] could not mount the subtitle bar', e);
@@ -42931,6 +43115,14 @@ Assumptions that may not hold after integration:
         const t = Math.max(0, Math.min(1, curTimer / curLimit));
         timerFill.style.transform = 'scaleX(' + t.toFixed(3) + ')';
       }
+      if (voiceBtn && synth) {
+        const glyph = voiceEnabled ? '🔊' : '🔇';
+        if (glyph !== lastVoiceGlyph) {
+          lastVoiceGlyph = glyph;
+          voiceBtn.textContent = glyph;
+        }
+        voiceBtn.className = voiceEnabled ? 'nd-voice on' : 'nd-voice on off';
+      }
       el.className = 'on';
     }
 
@@ -42945,6 +43137,7 @@ Assumptions that may not hold after integration:
       cur = null;
       curTimer = 0;
       curLimit = 0;
+      cancelSpeech();          // skipped, answered, cleared — the voice stops with the line
       clearOptionButtons();
       hideBar();
       if (done && typeof done.onDone === 'function') {
@@ -42963,8 +43156,10 @@ Assumptions that may not hold after integration:
         cur = step;
         curTimer = step.dur;
         curLimit = step.dur;
+        step.tail = 0.45;
         if (step.kind === 'line' && step.speaker) lastSpeaker = step.speaker;
         lastRenderKey = '';
+        speakStep(step);       // sets step.spoke / step.speechDone; never throws
         render();
         return;
       }
@@ -43009,13 +43204,26 @@ Assumptions that may not hold after integration:
       return out;
     }
 
+    /** True while the voice is still reading this step. The hard cap exists
+     *  because a lost `onend` (Chrome drops it on long or cancelled
+     *  utterances) must never freeze the conversation. */
+    function waitingOnVoice(step, d) {
+      if (!step.spoke || step.speechDone) return false;
+      step.speechGuard += d;
+      if (step.speechGuard >= step.dur * 3 + 4) { step.speechDone = true; return false; }
+      return true;
+    }
+
     function tick(dt) {
       if (paused) return;
       const d = (typeof dt === 'number' && isFinite(dt)) ? Math.min(0.12, Math.max(0, dt)) : 0.016;
+      nudgeSpeech(d);
       if (!cur) { if (queue.length) advance(); return; }
-      curTimer -= d;
       if (cur.kind === 'choice') {
         render();
+        // Do not start the answer countdown until the question has been asked.
+        if (waitingOnVoice(cur, d)) return;
+        curTimer -= d;
         if (curTimer <= 0) {
           const step = cur;
           finishStep('timeout');
@@ -43031,6 +43239,16 @@ Assumptions that may not hold after integration:
         }
         return;
       }
+      // A spoken line stays up for as long as it takes to read out loud, plus
+      // a short tail. An unspoken one uses the reading-speed estimate, so the
+      // pacing is identical whether or not the voice is switched on.
+      if (cur.spoke) {
+        if (waitingOnVoice(cur, d)) return;
+        cur.tail -= d;
+        if (cur.tail <= 0) { finishStep('done'); advance(); }
+        return;
+      }
+      curTimer -= d;
       if (curTimer <= 0) { finishStep('done'); advance(); }
     }
 
@@ -43062,6 +43280,7 @@ Assumptions that may not hold after integration:
           color: opts.color || null,
           dur: +opts.dur > 0 ? +opts.dur : readTime(body),
           tag: opts.tag || null,
+          voice: opts.voice === undefined ? null : opts.voice,
           onDone: opts.onDone || null
         });
       },
@@ -43081,6 +43300,7 @@ Assumptions that may not hold after integration:
           options: list,
           dur: +opts.dur > 0 ? +opts.dur : 10,
           tag: opts.tag || null,
+          voice: opts.voice === undefined ? null : opts.voice,
           onTimeout: opts.onTimeout || null,
           onDone: opts.onDone || null
         });
@@ -43133,23 +43353,40 @@ Assumptions that may not hold after integration:
       },
       queued: function () { return queue.length; },
 
-      speaker: function (name, color) {
+      /** speaker('RAY', '#ffd23f', {pitch:.72, rate:.92, voiceHint:'david'})
+       *  or the object form speaker('RAY', {color:'#ffd23f', voice:{...}}). */
+      speaker: function (name, color, voice) {
         if (!name) return;
+        if (color && typeof color === 'object') {
+          voice = color.voice;
+          color = color.color;
+        }
         speakerColors[String(name)] = color || DEFAULT_COLOR;
+        if (voice) setVoiceProfile(name, voice);
       },
 
       setPaused: function (v) {
         const next = !!v;
         if (next === paused) return;
         paused = next;
-        if (paused) hideBar(); else render();
+        if (paused) {
+          // Pausing stops the voice. It does not rewind: on resume the line
+          // finishes on its short tail rather than reading itself again.
+          cancelSpeech();
+          if (cur) cur.speechDone = true;
+          hideBar();
+        } else render();
       },
 
       setHidden: function (v) {
         const next = !!v;
         if (next === hidden) return;
         hidden = next;
-        if (hidden) hideBar(); else render();
+        if (hidden) {
+          cancelSpeech();
+          if (cur) cur.speechDone = true;
+          hideBar();
+        } else render();
       },
 
       tick: tick,
@@ -43167,6 +43404,64 @@ Assumptions that may not hold after integration:
       element: function () { mount(); return el; },
       mount: mount
     };
+
+    /* -------------------------------------------------------- voice API */
+    const voiceApi = {
+      /** True when the browser has speechSynthesis at all. Read-only. */
+      get supported() { return !!synth; },
+      /** Register or overwrite a speaker's voice profile. Pass null to drop it. */
+      profile: function (name, p) { return setVoiceProfile(name, p); },
+      profileOf: function (name) {
+        const p = profileFor(name);
+        return { pitch: p.pitch, rate: p.rate, volume: p.volume, voiceHint: p.voiceHint, lang: p.lang, mute: !!p.mute };
+      },
+      /** The resolved SpeechSynthesisVoice for a speaker, or null. */
+      voiceOf: function (name) { return pickVoice(String(name || 'narrator'), profileFor(name)); },
+      /** Names of the voices this browser actually offers. May be empty until
+       *  the async list lands; call again after a second if it is. */
+      voices: function () {
+        refreshVoices();
+        const out = [];
+        for (let i = 0; i < voiceList.length; i++) out.push({ name: voiceList[i].name, lang: voiceList[i].lang });
+        return out;
+      },
+      /** Speak one line right now without touching the queue — for a settings
+       *  screen's "preview" button. */
+      test: function (name, text) {
+        if (!voiceLive()) return false;
+        const probe = { speaker: String(name || ''), text: String(text || 'Testing, one two.'), dur: 4, voice: null };
+        return speakStep(probe);
+      },
+      cancel: cancelSpeech,
+      /** Transient mute that leaves the saved preference alone — wire the
+       *  game's own audio mute to this, not to `enabled`. */
+      get suppressed() { return voiceSuppressed; },
+      set suppressed(v) {
+        const next = !!v;
+        if (next === voiceSuppressed) return;
+        voiceSuppressed = next;
+        if (next) { cancelSpeech(); if (cur) cur.speechDone = true; }
+      },
+      /** Global multipliers on every profile, for an accessibility slider. */
+      get rate() { return globalRate; },
+      set rate(v) { globalRate = vClamp(v, 0.25, 3, 1); },
+      get pitch() { return globalPitch; },
+      set pitch(v) { globalPitch = vClamp(v, 0.25, 2, 1); }
+    };
+    Object.defineProperty(voiceApi, 'enabled', {
+      enumerable: true,
+      get: function () { return voiceEnabled; },
+      set: function (v) {
+        const next = !!v && !!synth;
+        if (next === voiceEnabled) return;
+        voiceEnabled = next;
+        saveVoicePref();
+        if (!next) { cancelSpeech(); if (cur) cur.speechDone = true; }
+        lastVoiceGlyph = '';
+        render();
+      }
+    });
+    engine.voice = voiceApi;
 
     // If nobody pumps us within a second of the first line, drive ourselves.
     // A GameSystems host calls markHosted() and this never arms.
@@ -43655,6 +43950,13 @@ Assumptions that may not hold after integration:
     { id: 'docksgate', name: 'FREIGHT DOCKS GATE', x: -712, z: 3612, blurb: 'the docks' }
   ];
 
+  // Seed the live coordinates from the authored ones at load. snapDestinations()
+  // refines them against the real road net during the district build, but the
+  // system can legitimately run without that build ever happening — a late
+  // script tag, or NeonDistricts already consumed — and a job that routes the
+  // player to `undefined` is worse than one that routes them to the anchor.
+  for (let i = 0; i < DESTS.length; i++) { DESTS[i].wx = DESTS[i].x; DESTS[i].wz = DESTS[i].z; DESTS[i].snapped = false; }
+
   function snapDestinations(b) {
     for (let i = 0; i < DESTS.length; i++) {
       const d = DESTS[i];
@@ -43839,6 +44141,39 @@ Assumptions that may not hold after integration:
   });
 
   const RAY = 'RAY OKONKWO';
+
+  /* Voice profiles. `pitch` 0..2 and `rate` 0.1..10 are the SpeechSynthesis
+   * defaults-of-1 scale; `voiceHint` is matched case-insensitively against
+   * each installed voice's name and lang, first hint that hits wins. When no
+   * hint matches (a machine with two voices, or none of the named ones) the
+   * engine still gives each speaker a different voice from the same-language
+   * pool by hashing their name, so pitch and rate are doing the character
+   * work but nobody ends up sounding like the person they just replaced. */
+  const VOICES = {
+    ray: { pitch: 0.72, rate: 0.92, voiceHint: ['david', 'daniel', 'male'] },
+    marisol: { pitch: 1.34, rate: 1.16, voiceHint: ['zira', 'samantha', 'female'] },
+    nana: { pitch: 1.12, rate: 0.80, voiceHint: ['hazel', 'karen', 'female'] },
+    dexter: { pitch: 0.94, rate: 1.14, voiceHint: ['mark', 'alex', 'male'] },
+    tommy: { pitch: 0.66, rate: 0.88, voiceHint: ['george', 'daniel', 'male'] },
+    kit: { pitch: 1.46, rate: 1.26, voiceHint: null },
+    ilse: { pitch: 0.96, rate: 0.84, voiceHint: ['hazel', 'en-GB', 'female'] },
+    borys: { pitch: 0.58, rate: 0.80, voiceHint: ['male'] },
+    audrey: { pitch: 1.06, rate: 1.02, voiceHint: ['en-GB', 'female'] }
+  };
+
+  /* The scripted beats address people by their short name and the job code
+   * addresses them by their full one. Both spellings need the same voice. */
+  const VOICE_ALIASES = [
+    [RAY, VOICES.ray], ['RAY', VOICES.ray],
+    ['MARISOL ADEYEMI', VOICES.marisol], ['MARISOL', VOICES.marisol],
+    ['NANA PELL', VOICES.nana],
+    ['DEXTER VANE', VOICES.dexter], ['DEXTER', VOICES.dexter],
+    ['TOMMY SUNSET', VOICES.tommy],
+    ['KIT OYELARAN', VOICES.kit], ['KIT', VOICES.kit],
+    ['PROF. ILSE HAAG', VOICES.ilse], ['PROF. HAAG', VOICES.ilse],
+    ['BORYS', VOICES.borys],
+    ['AUDREY KANE', VOICES.audrey], ['AUDREY', VOICES.audrey]
+  ];
 
   /* A customer:
    *   id, name, colour, minRep    unlock gate
@@ -45094,6 +45429,12 @@ Assumptions that may not hold after integration:
     const j = S.job;
     if (!j) return;
     if (j.leg === 0 && j.cust.beats) {
+      // Wait for the bar to clear as well as for the clock. With narration on,
+      // a line takes as long as it takes to say; firing the next beat on
+      // schedule regardless would stack a backlog the player hears minutes
+      // late. Beats drift instead, and arriveAtStop() flushes any unasked
+      // question at the kerb.
+      if (DLG && DLG.busy()) return;
       while (j.beatIndex < j.cust.beats.length) {
         const beat = j.cust.beats[j.beatIndex];
         if (j.legT < beat.at) return;
@@ -45167,11 +45508,15 @@ Assumptions that may not hold after integration:
     const help = api('help');
     if (help && help.addControls && !S.helpAdded) {
       try {
-        help.addControls('MERIDIAN MOTORS', [
+        const rows = [
           ['Enter', 'Talk to Ray at the showroom door — start a test drive'],
           ['1 / 2 / 3', 'Answer your passenger'],
           ['Drive smooth', 'Payout scales with no bumps, no panic braking, no speeding']
-        ]);
+        ];
+        if (DLG && DLG.voice && DLG.voice.supported) {
+          rows.push(['🔊 button', 'Top-right of the subtitle bar — spoken dialogue on/off']);
+        }
+        help.addControls('MERIDIAN MOTORS', rows);
         S.helpAdded = true;
       } catch (e) { /* the help panel is optional */ }
     }
@@ -45229,6 +45574,9 @@ Assumptions that may not hold after integration:
       DLG.speaker('PROF. HAAG', CLR.ilse);
       DLG.speaker('BORYS', CLR.borys);
       DLG.speaker('AUDREY', CLR.audrey);
+      if (DLG.voice && DLG.voice.profile) {
+        for (let i = 0; i < VOICE_ALIASES.length; i++) DLG.voice.profile(VOICE_ALIASES[i][0], VOICE_ALIASES[i][1]);
+      }
       DLG.mount();
     }
     S.marker = makeMarker(ctx, 0xffd23f, true);
@@ -45254,7 +45602,15 @@ Assumptions that may not hold after integration:
     }
 
     const paused = isPaused();
-    if (DLG) DLG.setPaused(paused);
+    if (DLG) {
+      // The engine's own mute silences the narration without touching the
+      // player's saved voice preference.
+      if (DLG.voice) {
+        const muted = !!(ctx.audio && ctx.audio.muted);
+        if (DLG.voice.suppressed !== muted) DLG.voice.suppressed = muted;
+      }
+      DLG.setPaused(paused);
+    }
     if (paused) return;
     if (DLG) DLG.tick(dt);
 
@@ -45683,6 +46039,33 @@ ASSUMPTIONS & RISKS
   7. COUNTY SCENES need samap-module.js loaded. If the county never built, the
      two Dry Creek scenes find no road within their search radius, log once,
      and are skipped. Nothing else is affected.
+  8. `Builder.prototype.collider` is the one Builder method used here that the
+     build-time precondition check does not require. It is routed through
+     solid(); if a future toolkit drops it the parked scene vehicles become
+     drive-through rather than the scene being lost.
+
+-------------------------------------------------------------------------------
+VERIFICATION (headless, before hand-off)
+-------------------------------------------------------------------------------
+  · node --check passes.
+  · Built against a stubbed Builder + gameCtx and run for ~9,000 simulated
+    frames with the player walking every scene and every delivery stop:
+    all 7 scenes and 4 rounds resolve, every crew turns up, every crew is
+    returned to the pool on leaving, nothing throws.
+  · Placement audited: no destructible ends up on tarmac outside the lane
+    closure, and the closure itself runs ALONG the road for 60+ units entirely
+    on one side of the centreline, leaving the far half drivable.
+  · Panic audited: setting a reaction state on a crew makes every one of them
+    flee; a killed worker stays dead and the site does not repopulate in front
+    of the player.
+  · Soak: 20 simulated minutes over 6 laps of the whole map — ped array,
+    traffic array and scene-graph node count are all bit-identical between
+    lap 1 and lap 5, so nothing leaks.
+  · Degradation: re-run with DestructibleAuthoring, NeonDialogue, `document`,
+    Builder.collider, ctx.actors.makeCar / moveCircleWorld /
+    rebuildCollisionGrid / CAR_STYLES, ctx.fx, ctx.audio, ctx.dom, ctx.engine,
+    ctx.vehicles and EVERY GameSystems.api() all absent — 7/7 scenes still
+    build, crews still work, nothing throws.
 ===============================================================================
 */
 
@@ -48545,20 +48928,39 @@ PERFORMANCE CONTRACT
     return mesh;
   }
 
-  /** Flat strip between two lateral offsets of one centreline segment.
-   *  The caller sets `_nrm` with normal(i, _nrm) immediately before. */
-  function offsetQuad(b, i, o0, o1, y, color, emissive) {
+  /**
+   * Strip between two lateral offsets of one centreline segment, at height y0
+   * on the inner edge and y1 on the outer one (equal for a flat strip).
+   * The caller sets `_nrm` with normal(i, _nrm) immediately before.
+   *
+   * Winding is deliberately not normalised: the merged surface material is
+   * DoubleSide precisely because districts hand quads over in both rotational
+   * senses, and three.js flips the normal for back faces there.
+   */
+  function offsetQuad(b, i, o0, o1, y0, y1, color, emissive) {
     i = wrapI(i);
     const a = TRACK.pts[i], c = TRACK.pts[(i + 1) % TRACK.n];
     const nx = _nrm.x, nz = _nrm.z;
     b.quad(
-      [a.x + nx * o0, y, a.z + nz * o0],
-      [c.x + nx * o0, y, c.z + nz * o0],
-      [c.x + nx * o1, y, c.z + nz * o1],
-      [a.x + nx * o1, y, a.z + nz * o1],
+      [a.x + nx * o0, y0, a.z + nz * o0],
+      [c.x + nx * o0, y0, c.z + nz * o0],
+      [c.x + nx * o1, y1, c.z + nz * o1],
+      [a.x + nx * o1, y1, a.z + nz * o1],
       color, emissive);
   }
   const _nrm = { x: 0, z: 0 };
+
+  // Paint heights, all relative to the pad. Builder.road lays its tarmac at
+  // +0.06 and its own dashed markings at +0.14 — an 0.08 lift is the build's
+  // proven no-z-fight offset for paint, so the edge lines use exactly that.
+  // The grey curb Builder.road draws at every road edge ramps from +0.06 at
+  // half-width to +0.55 at half-width+2.6; the kerb is drawn as a parallel
+  // plane 0.06 above that ramp rather than as a flat strip through it.
+  const PAINT = Object.freeze({
+    line: 0.14,
+    kerbInner: 0.12, kerbOuter: 0.61, kerbTail: 0.22,
+    runoff: 0.09, gravel: 0.13
+  });
 
   /** Instanced prop batcher — one InstancedMesh per type, saCull metadata. */
   function Batcher(T, parent, material, defs) {
@@ -48719,34 +49121,44 @@ PERFORMANCE CONTRACT
     });
 
     // White edge lines, both sides, the whole way round.
-    const y = H + 0.14;
+    const y = H + PAINT.line;
     for (let i = 0; i < TRACK.n; i++) {
       normal(i, _nrm);
-      offsetQuad(b, i, TRACK_HW - 1.6, TRACK_HW - 0.5, y, PALETTE.lineWhite, true);
-      offsetQuad(b, i, -(TRACK_HW - 0.5), -(TRACK_HW - 1.6), y, PALETTE.lineWhite, true);
+      offsetQuad(b, i, TRACK_HW - 1.6, TRACK_HW - 0.5, y, y, PALETTE.lineWhite, true);
+      offsetQuad(b, i, -(TRACK_HW - 0.5), -(TRACK_HW - 1.6), y, y, PALETTE.lineWhite, true);
     }
     return added;
   }
 
-  /** Red/white apex kerbs plus a matching exit kerb on the outside. */
+  /**
+   * Red/white apex kerbs plus a matching exit kerb on the outside.
+   *
+   * Each stripe is two quads that trace the real kerb profile: a ramp up over
+   * the road's own curb band, then a flatter tail dropping back to the run-off.
+   * Drawing one flat strip instead would run straight THROUGH the grey curb
+   * Builder.road already draws there.
+   */
   function buildKerbs(b, H) {
-    const y = H + 0.12;
-    const inner0 = TRACK_HW + 0.2, inner1 = TRACK_HW + 5.4;
+    const ramp0 = TRACK_HW, ramp1 = TRACK_HW + CURB, tail = TRACK_HW + CURB + 3.4;
+    const yIn = H + PAINT.kerbInner, yTop = H + PAINT.kerbOuter, yTail = H + PAINT.kerbTail;
     let painted = 0;
     for (let c = 0; c < TRACK.corners.length; c++) {
       const corner = TRACK.corners[c];
       const side = corner.left ? 1 : -1;                       // +1 = left normal
-      const span = corner.i1 - corner.i0;
+      const span = Math.max(1, corner.i1 - corner.i0);
       for (let i = corner.i0; i < corner.i1; i++) {
         normal(i, _nrm);
         const red = ((i - corner.i0) & 1) === 0;
         const col = red ? PALETTE.kerbRed : PALETTE.kerbWhite;
-        offsetQuad(b, i, side * inner0, side * inner1, y, col, false);
-        painted++;
-        // Exit kerb: last 45% of the corner, opposite side, a shade narrower.
+        offsetQuad(b, i, side * ramp0, side * ramp1, yIn, yTop, col, false);
+        offsetQuad(b, i, side * ramp1, side * tail, yTop, yTail, col, false);
+        painted += 2;
+        // Exit kerb: last 45% of the corner, on the outside, a shade narrower.
         if (i - corner.i0 > span * 0.55) {
-          offsetQuad(b, i, -side * inner0, -side * (inner0 + 4.2), y, red ? PALETTE.kerbWhite : PALETTE.kerbRed, false);
-          painted++;
+          const alt = red ? PALETTE.kerbWhite : PALETTE.kerbRed;
+          offsetQuad(b, i, -side * ramp0, -side * ramp1, yIn, yTop, alt, false);
+          offsetQuad(b, i, -side * ramp1, -side * (ramp1 + 2.4), yTop, yTail, alt, false);
+          painted += 2;
         }
       }
     }
@@ -48755,7 +49167,7 @@ PERFORMANCE CONTRACT
 
   /** Run-off aprons and gravel traps on the outside of every corner. */
   function buildRunoff(b, H) {
-    const y = H + 0.04, gy = H + 0.05;
+    const y = H + PAINT.runoff, gy = H + PAINT.gravel;
     for (let c = 0; c < TRACK.corners.length; c++) {
       const corner = TRACK.corners[c];
       const out = corner.left ? -1 : 1;
@@ -48770,9 +49182,10 @@ PERFORMANCE CONTRACT
         const w = 8 + depth * shape;
         if (w < 9) continue;
         normal(i, _nrm);
-        offsetQuad(b, i, out * (TRACK_HW + CURB + 0.4), out * (TRACK_HW + CURB + w), y, PALETTE.runoff, false);
+        // Starts outside the kerb tail so the two never share a plane.
+        offsetQuad(b, i, out * (TRACK_HW + CURB + 3.2), out * (TRACK_HW + CURB + w), y, y, PALETTE.runoff, false);
         if (heavy && shape > 0.45) {
-          offsetQuad(b, i, out * (TRACK_HW + CURB + w * 0.42), out * (TRACK_HW + CURB + w * 0.94), gy, PALETTE.gravel, false);
+          offsetQuad(b, i, out * (TRACK_HW + CURB + w * 0.42), out * (TRACK_HW + CURB + w * 0.94), gy, gy, PALETTE.gravel, false);
         }
       }
     }
@@ -49759,6 +50172,59 @@ PERFORMANCE CONTRACT
  *    raceway tarmac and lands exactly on the nearest county road point.
  * 10. Three races, one map POI, a talkable track marshal, a TIME ATTACK job
  *     with medal payouts, and a rivalry with KASPAR VOSS.
+ * ==========================================================================*/
+
+/* ============================================================================
+ * SELF-TEST RECORD  —  what was actually run against this exact file
+ *
+ *   node --check ov-raceway-module.js                                    PASS
+ *
+ *   Build harness: a faithful Builder stub (the real RoadNet/SpatialHash/
+ *   Terrain code, a proxy THREE), the REAL modules/63-samap/module.js built
+ *   into it, and a stand-in flatten district that subtracts samap's own height
+ *   field back to y=7 inside the pad with a 140-unit blend.
+ *     lap 3510 units · 10 corners · 103 circuit + 5 pit + 4 access segments
+ *     41 breakable tyre stacks · 539 merged quads · 456 merged boxes
+ *     163 colliders · 324 instanced props in 10 batches · build 3-5 ms
+ *     closed loop: |end - start| = 0.00000
+ *     all 27 race anchors 0.00 units from a road centreline (limit 80)
+ *     access road landed exactly on county route 'mesa-south-road'
+ *     no collider face intrudes inside track half-width + curb (16.6)
+ *     pit lane clear of colliders · build() idempotent · races idempotent
+ *
+ *   Runtime harness: stubbed GameSystems/save/progression/interact/nav/events.
+ *     subsystem registers at order 62 · both prompts appear · POIs added
+ *     conversation plays through NeonDialogue.start() when present and falls
+ *     back to paced toasts when absent OR when the api shape is unrecognised
+ *     flying lap at 60 u/s -> 58.50 s, GOLD, $4,800 credited, PB saved
+ *     slow lap -> no medal, no payout, PB untouched
+ *     teleporting across the line banks nothing
+ *     leaving the car aborts · world change stops the clock
+ *     Voss taunts before the GP, concedes after a win, then stays quiet
+ *     facility hides downtown and returns on site · dispose cleans up
+ *
+ * ASSUMPTIONS THAT COULD STOP HOLDING
+ * 1. THE FLATTEN PASS MUST REGISTER ITS TERRAIN ZONE BEFORE SAMAP BUILDS.
+ *    samap bakes its VISUAL terrain chunks from builder.terrain.heightAt at
+ *    build time. This module pulls samap's build forward (ensureCounty), so a
+ *    flatten module that registers its zone after that point would flatten the
+ *    physics height field while leaving the visible desert bumpy. Keep the
+ *    flatten district earlier in window.NeonDistricts than 'ov-raceway' — i.e.
+ *    keep this file's <script> last. The module measures the pad and warns
+ *    loudly if the height it finds is not 7.0.
+ * 2. Generic county traffic is coordinate-driven, not metadata-driven. The
+ *    circuit's segments advertise trafficDensity 0 / policeWeight 0, but if
+ *    spawnGenericTrafficNear() ignores those fields a civilian car can still
+ *    appear on the racing line. Honour seg.trafficDensity there to fix it.
+ * 3. The roadgraph's crossing/end-point pass joins the pit lane and the access
+ *    road to the tarmac they land on. Both end exactly on an existing
+ *    centreline point, which is the same contract samap's county-gate bridge
+ *    relies on.
+ * 4. window.NeonDialogue is authored in parallel, so its api shape is probed
+ *    rather than assumed: start / play / open / converse / say / show / queue
+ *    are each tried, and anything unrecognised degrades to toasts.
+ * 5. Opponent tuneKeys are limited to ones already in the build: streetDrift,
+ *    proDrift, gripper. Renaming those only affects opponent data.
  * ==========================================================================*/
 </script><script>/*
 ===============================================================================
