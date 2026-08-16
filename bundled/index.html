@@ -4736,6 +4736,16 @@ window.addEventListener('unhandledrejection', (e) => {
   // depth-less draw above means it can never poke through regardless.
   const SEA_Y = -0.25;
 
+  // Maximum geometric lift in VERT (.16 + .09 + .03). The larger amplitudes
+  // in FRAG only shade the analytic normal; they never move the surface.
+  const RIPPLE_PEAK = 0.28;
+  // The shore texture's alpha channel is a low-road film mask. A full CELL of
+  // margin guarantees LinearFilter has reached zero before a deck edge even
+  // when a 40-unit texel grid lands in the least favourable phase.
+  const FILM_ROAD_MARGIN = 40;
+  const FILM_ROAD_CLEAR = 0.45;
+  const FILM_ROAD_BASE_MAX = SEA_Y + RIPPLE_PEAK + FILM_ROAD_CLEAR;
+
   // 2 x camera.far (5200) plus margin for the chase camera sitting behind the
   // car. Two triangles — the size costs nothing but fill.
   const SIZE = 15000;
@@ -4792,6 +4802,18 @@ window.addEventListener('unhandledrejection', (e) => {
   // stopping you, spin 1.6 means you have to feather it out of a standstill.
   // Tuned by driving — see docs/handoffs/environment.md.
   const SAND_SURFACE = { type: 'sand', grip: 0.62, drag: 0.38, spin: 1.6, fx: 'sand' };
+
+  // Guaranteed POI-facing beach openings. These are not a second coastline:
+  // land cells still come from the shared shore field, but this contract widens
+  // the selected sand band, cuts every generated barrier out of the view
+  // corridor, and adds one submerged sand apron for readable shallows.
+  const AUTHORED_BEACH_FRONTS = Object.freeze([
+    Object.freeze({
+      id: 'tidelight-north', worldId: 'neon',
+      minX: 280, maxX: 720, waterZ: 4260, shoreZ: 4300, inlandZ: 4440,
+      arrivalX: 500, arrivalZ: 4380, arrivalHeading: Math.PI
+    })
+  ]);
 
   // Which maps get an authored coast.
   //   neon    — the map edge IS its coastline, and the bay is open water inside
@@ -4861,11 +4883,19 @@ window.addEventListener('unhandledrejection', (e) => {
     '  float dhz = A1 * c1 * 0.0046 - A2 * c2 * 0.0305 + A3 * c3 * 0.0510;',
     '  vec3 N = normalize( vec3( -dhx * 26.0, 1.0, -dhz * 26.0 ) );',
     '  vec3 V = normalize( uCamPos - vec3( vXZ.x, uSeaY, vXZ.y ) );',
-    // shore field: 0 hard against land, 1 in open water
+    // Shore red: 0 hard against land, 1 in open water. Alpha is 0 under
+    // low/coplanar road footprints (with a raster-cell margin), so only the
+    // transparent ripple film yields there; the depthless body remains under
+    // the deck and is painted over by the opaque road.
     '  float shore = 1.0;',
+    '  float roadFilm = 1.0;',
     '  if ( uHasShore > 0.5 ) {',
     '    vec2 uv = ( vXZ - uShoreRect.xy ) * uShoreRect.zw;',
-    '    if ( all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) ) ) shore = texture2D( uShore, uv ).r;',
+    '    if ( all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) ) ) {',
+    '      vec4 shoreSample = texture2D( uShore, uv );',
+    '      shore = shoreSample.r;',
+    '      roadFilm = shoreSample.a;',
+    '    }',
     '  }',
     '  float h = A1 * a1 + A2 * a2 + A3 * a3;',
     '  float depth = smoothstep( 0.025, 0.72, shore );',
@@ -4904,7 +4934,7 @@ window.addEventListener('unhandledrejection', (e) => {
     // straight down that a sinking car still reads, thicker at a grazing angle.
     // Deliberately well under 1: the body pass beneath already draws the same
     // sea, and a near-opaque film just repaints it flat.
-    '  float alpha = mix( 0.20, 0.60, fres ) + spec + foam * 0.5;',
+    '  float alpha = ( mix( 0.20, 0.60, fres ) + spec + foam * 0.5 ) * roadFilm;',
     '  gl_FragColor = vec4( col, clamp( alpha, 0.0, 1.0 ) );',
     '#else',
     '  gl_FragColor = vec4( col, 1.0 );',
@@ -4918,6 +4948,8 @@ window.addEventListener('unhandledrejection', (e) => {
   let activeGrid = null, activeId = null, activeWorldRef = null;
   const coasts = new Map();         // world id -> built coast (see buildCoast)
   let activeCoast = null;
+  const inlandSurfaces = [];
+  let waterClockStart = 0;
 
   // ------------------------------------------------------------ shore field
   /**
@@ -5033,14 +5065,24 @@ window.addEventListener('unhandledrejection', (e) => {
       }
     }
 
-    // metres from land, and the same thing as an 8-bit texture for the shader
+    // Metres from land, and the same thing as an 8-bit texture for the shader.
+    // Alpha is a no-allocation low-road mask derived from the actual RoadNet:
+    // every authored low crossing/approach is covered automatically, while
+    // elevated RIM/deck water keeps its animated film.
     const units = new Uint16Array(nx * nz);
     const tex = new Uint8Array(nx * nz * 4);
+    const roadSegs = world.roadsRef && world.roadsRef.segs;
+    const filmRoads = roadSegs && roadSegs.length ? new RoadShield(roadSegs, 0, CELL) : null;
+    let guardedRoadCells = 0;
     for (let i = 0; i < units.length; i++) {
       const u = Math.min(65535, (dt[i] / 3) * CELL);
       units[i] = u;
       const v = Math.min(255, Math.round(u / SHORE_RANGE * 255));
-      tex[i * 4] = v; tex[i * 4 + 1] = v; tex[i * 4 + 2] = v; tex[i * 4 + 3] = 255;
+      const ix = i % nx, iz = (i / nx) | 0;
+      const wx = minX + (ix + 0.5) * CELL, wz = minZ + (iz + 0.5) * CELL;
+      const guarded = !!(filmRoads && filmRoads.lowBlocks(wx, wz, FILM_ROAD_MARGIN, FILM_ROAD_BASE_MAX));
+      if (guarded) guardedRoadCells++;
+      tex[i * 4] = v; tex[i * 4 + 1] = v; tex[i * 4 + 2] = v; tex[i * 4 + 3] = guarded ? 0 : 255;
     }
 
     const texture = new THREE.DataTexture(tex, nx, nz, THREE.RGBAFormat);
@@ -5081,7 +5123,8 @@ window.addEventListener('unhandledrejection', (e) => {
       minX: minX, minZ: minZ, nx: nx, nz: nz, mask: mask, units: units,
       ground: ground, wdist: wdist, beach: null,
       texture: texture, w: nx * CELL, d: nz * CELL,
-      ms: Math.round(performance.now() - t0), tris: tris, pits: pits
+      ms: Math.round(performance.now() - t0), tris: tris, pits: pits,
+      guardedRoadCells: guardedRoadCells
     };
     console.log('[sea] shore field for "' + world.id + '": ' + nx + 'x' + nz +
                 ' cells from ' + tris + ' land triangles in ' + grid.ms + 'ms');
@@ -5206,7 +5249,9 @@ window.addEventListener('unhandledrejection', (e) => {
       const e = {
         ax: s.ax - s.ux * extend, az: s.az - s.uz * extend,
         bx: s.bx + s.ux * extend, bz: s.bz + s.uz * extend,
-        width: s.width === undefined ? 44 : s.width, y: s.ay
+        width: s.width === undefined ? 44 : s.width, y: s.ay,
+        ay: s.ay === undefined ? 0 : s.ay,
+        by: s.by === undefined ? (s.ay === undefined ? 0 : s.ay) : s.by
       };
       e.dx = e.bx - e.ax; e.dz = e.bz - e.az;
       e.len = Math.hypot(e.dx, e.dz) || 1;
@@ -5237,6 +5282,22 @@ window.addEventListener('unhandledrejection', (e) => {
         const dx = x - (e.ax + e.dx * t), dz = z - (e.az + e.dz * t);
         if (dx * dx + dz * dz < (e.width * 0.5 + pad) * (e.width * 0.5 + pad)) return true;
       }
+    }
+    return false;
+  };
+  /** Is a corridor at or below maxY? Used once while baking the shore texture,
+   *  so the animated film cannot rise onto a low road. The hash already stamps
+   *  every segment into every overlapped cell; querying one cell is complete. */
+  RoadShield.prototype.lowBlocks = function (x, z, pad, maxY) {
+    const c = this.cell, cx = Math.floor(x / c), cz = Math.floor(z / c);
+    const a = this.map.get(cx * 73856093 ^ cz * 19349663); if (!a) return false;
+    for (let i = 0; i < a.length; i++) {
+      const e = a[i];
+      let t = ((x - e.ax) * e.ux + (z - e.az) * e.uz) / e.len;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const dx = x - (e.ax + e.dx * t), dz = z - (e.az + e.dz * t);
+      const r = e.width * 0.5 + pad;
+      if (dx * dx + dz * dz <= r * r && e.ay + (e.by - e.ay) * t <= maxY) return true;
     }
     return false;
   };
@@ -5312,6 +5373,16 @@ window.addEventListener('unhandledrejection', (e) => {
   };
   const MODULE_KEYS = ['seawall', 'fence', 'rocks'];
 
+  function beachFrontAt(worldId, x, z, pad) {
+    pad = pad || 0;
+    for (let i = 0; i < AUTHORED_BEACH_FRONTS.length; i++) {
+      const f = AUTHORED_BEACH_FRONTS[i];
+      if (f.worldId === worldId && x >= f.minX - pad && x <= f.maxX + pad &&
+          z >= f.waterZ - pad && z <= f.inlandZ + pad) return f;
+    }
+    return null;
+  }
+
   /**
    * Build the coast for one world: the sand band, its physics mask, and the
    * furniture line with matching colliders. Returns null where the map has no
@@ -5364,15 +5435,19 @@ window.addEventListener('unhandledrejection', (e) => {
     // reaches 20 units into the carriageway, and sand 1cm under a road surface
     // z-fights across the whole street.
     const cand = [];
+    let frontageCells = 0;
     for (let iz = 0; iz < nz; iz++) {
       for (let ix = 0; ix < nx; ix++) {
         const i = iz * nx + ix;
         if (!g.mask[i]) continue;                                  // water
         const wd = g.wdist[i];
-        if (wd < 1 || wd > BEACH_BAND) continue;
         const gy = g.ground[i];
-        if (gy < BEACH_LO || gy > BEACH_HI) continue;
         const cx = minX + (ix + 0.5) * CELL, cz = minZ + (iz + 0.5) * CELL;
+        const front = beachFrontAt(id, cx, cz, 0);
+        const regular = wd >= 1 && wd <= BEACH_BAND && gy >= BEACH_LO && gy <= BEACH_HI;
+        const authored = !!(front && wd >= 1 && wd <= BEACH_BAND + 1 &&
+                            gy >= BEACH_LO && gy <= BEACH_HI + 1.5);
+        if (!regular && !authored) continue;
         let bad = false;
         for (let k = 0; k < 4 && !bad; k++) {
           const qx = minX + (ix + (k & 1)) * CELL, qz = minZ + (iz + (k >> 1)) * CELL;
@@ -5381,6 +5456,7 @@ window.addEventListener('unhandledrejection', (e) => {
         if (bad || blocked(cx, cz, 6)) continue;
         beach[i] = 1;
         cand.push(i);
+        if (authored) frontageCells++;
       }
     }
     // Shared shoreline corners already dip below the waterline; keep sand
@@ -5443,6 +5519,24 @@ window.addEventListener('unhandledrejection', (e) => {
         sandColor(cornT[c00] * 1.6, jit), sandColor(cornT[c01] * 1.6, jit),
         sandColor(cornT[c11] * 1.6, jit), sandColor(cornT[c10] * 1.6, jit));
     }
+    // A single submerged strip makes the selected frontage visibly run into
+    // the shallows. It sits below the sea at both ends, so the existing body +
+    // film tint and foam still own the final water colour.
+    let frontageApronTris = 0;
+    for (let fi = 0; fi < AUTHORED_BEACH_FRONTS.length; fi++) {
+      const f = AUTHORED_BEACH_FRONTS[fi]; if (f.worldId !== id) continue;
+      const slices = 8, step = (f.maxX - f.minX) / slices;
+      for (let s = 0; s < slices; s++) {
+        const x0 = f.minX + step * s, x1 = x0 + step;
+        const jit = 0.86 + 0.08 * rnd();
+        const wet = sandColor(1, jit), swash = sandColor(0.86, jit);
+        sand.quadC(
+          [x0, SEA_Y - SAND_DIP - 0.18, f.waterZ], [x0, SEA_Y - 0.02, f.shoreZ],
+          [x1, SEA_Y - 0.02, f.shoreZ], [x1, SEA_Y - SAND_DIP - 0.18, f.waterZ],
+          wet, swash, swash, wet);
+        frontageApronTris += 2;
+      }
+    }
     if (!sand.isEmpty()) {
       const m = new THREE.Mesh(sand.build(), new THREE.MeshStandardMaterial({
         vertexColors: true, roughness: 0.97, metalness: 0, side: THREE.FrontSide
@@ -5470,6 +5564,7 @@ window.addEventListener('unhandledrejection', (e) => {
         }
         if (!touches) continue;
         const cx = minX + (ix + 0.5) * CELL, cz = minZ + (iz + 0.5) * CELL;
+        if (beachFrontAt(id, cx, cz, 24)) continue;
         if (onRoute(furnShield, cx, cz, FURN_ROAD_CLEAR) || blocked(cx, cz, 5)) continue;
         const rl = rampNear(cx, cz);
         if (rl && rl.length) {
@@ -5528,7 +5623,7 @@ window.addEventListener('unhandledrejection', (e) => {
     const placed = { seawall: [], fence: [], rocks: [] };
     const colliders = new ColliderGrid(60);
     const colliderList = [];
-    let modules = 0, gaps = 0, routeSkips = 0, coastSealed = 0;
+    let modules = 0, gaps = 0, routeSkips = 0, frontageSkips = 0, coastSealed = 0;
     for (let c = 0; c < chains.length; c++) {
       const ch = chains[c];
       const pts = new Array(ch.length);
@@ -5549,6 +5644,9 @@ window.addEventListener('unhandledrejection', (e) => {
         dx /= seg; dz /= seg;
         for (let s = carry; s < seg; s += MODULE_STEP) {
           const px = ax + dx * s, pz = az + dz * s;
+          if (beachFrontAt(id, px, pz, MODULE_LEN)) {
+            frontageSkips++; sinceGap++; runLeft--; continue;
+          }
           if (gapLeft > 0) { gapLeft--; continue; }
           if (sinceGap >= nextGap) {
             gapLeft = GAP_WIDTH - 1; sinceGap = 0; gaps++;
@@ -5653,6 +5751,9 @@ window.addEventListener('unhandledrejection', (e) => {
       stats: {
         beachCells: cand.length, sandCells: sandCells.length, sandTris: sand.tris(), chains: chains.length,
         modules: modules, gaps: gaps, routeSkips: routeSkips, sealedRoutes: coastSealed,
+        frontageCells: frontageCells, frontageApronTris: frontageApronTris,
+        frontageGaps: AUTHORED_BEACH_FRONTS.filter(f => f.worldId === id).length,
+        frontageSkips: frontageSkips,
         furnTris: furnTris, colliders: colliderList.length,
         seawall: placed.seawall.length, fence: placed.fence.length, rocks: placed.rocks.length,
         drawCalls: (sand.isEmpty() ? 0 : 1) + MODULE_KEYS.filter(k => placed[k].length).length,
@@ -5712,9 +5813,105 @@ window.addEventListener('unhandledrejection', (e) => {
     return c.colliders.query(x, z, _coastScratch);
   }
 
+  function makeSurfaceUniforms(surfaceY, shoreTexture, rect) {
+    const u = THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uDeep:      { value: new THREE.Color(0x05131d) },
+        uShallow:   { value: new THREE.Color(0x0d3346) },
+        uCrest:     { value: new THREE.Color(0x27607d) },
+        uSand:      { value: new THREE.Color(0x1b3038) },
+        uFoam:      { value: new THREE.Color(0xa8c6d0) },
+        uSun:       { value: new THREE.Vector3(SUN[0], SUN[1], SUN[2]) },
+        uTime:      { value: 0 },
+        uSeaY:      { value: surfaceY },
+        uCam:       { value: new THREE.Vector2() },
+        uCamPos:    { value: new THREE.Vector3() },
+        uShore:     { value: null },
+        uShoreRect: { value: new THREE.Vector4(0, 0, 1, 1) },
+        uHasShore:  { value: 0 }
+      }
+    ]);
+    if (shoreTexture && rect) {
+      u.uShore.value = shoreTexture;
+      u.uShoreRect.value.set(rect[0], rect[1], rect[2], rect[3]);
+      u.uHasShore.value = 1;
+    }
+    return u;
+  }
+
+  function radialShoreTexture() {
+    const n = 96, a = new Uint8Array(n * n * 4);
+    for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
+      const ux = ((x + 0.5) / n - 0.5) * 2, uz = ((z + 0.5) / n - 0.5) * 2;
+      const q = Math.hypot(ux, uz), v = Math.max(0, Math.min(1, (1 - q) * 4));
+      const c = Math.round(v * 255), i = (z * n + x) * 4;
+      a[i] = c; a[i + 1] = c; a[i + 2] = c; a[i + 3] = 255;
+    }
+    const tex = new THREE.DataTexture(a, n, n, THREE.RGBAFormat);
+    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.generateMipmaps = false; tex.needsUpdate = true;
+    return tex;
+  }
+
+  function updateSurfaceMeshes(meshes, cam) {
+    const now = (performance.now() - waterClockStart) * 0.001;
+    for (let i = 0; i < meshes.length; i++) {
+      const m = meshes[i], u = m.material.uniforms;
+      if (!u || !u.uTime) continue;
+      u.uTime.value = now;
+      u.uCam.value.set(cam.position.x, cam.position.z);
+      u.uCamPos.value.copy(cam.position);
+      m.material.uniformsNeedUpdate = true;
+    }
+  }
+
+  /** A bounded inland body using the ocean's exact ripple/film/foam shader. */
+  function createInlandSurface(o) {
+    if (!THREE || !o || !o.parent) return null;
+    const x = +o.x || 0, z = +o.z || 0, y = +o.y || 0;
+    const rx = Math.max(1, +o.radiusX || 1), rz = Math.max(1, +o.radiusZ || 1);
+    const group = new THREE.Group(), texture = radialShoreTexture();
+    group.name = o.name || 'inland-water';
+    const geo = new THREE.CircleGeometry(1, 64); geo.rotateX(-Math.PI / 2);
+    const rect = [x - rx, z - rz, 1 / (rx * 2), 1 / (rz * 2)];
+    const base = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      uniforms: makeSurfaceUniforms(y, texture, rect), vertexShader: VERT, fragmentShader: FRAG,
+      fog: true, depthTest: false, depthWrite: false, side: THREE.FrontSide
+    }));
+    base.name = group.name + '-body'; base.renderOrder = -900;
+    const top = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      uniforms: makeSurfaceUniforms(y, texture, rect), vertexShader: VERT, fragmentShader: FRAG,
+      defines: { FILM: '' }, fog: true, transparent: true, depthTest: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
+      side: THREE.FrontSide
+    }));
+    top.name = group.name + '-film'; top.renderOrder = -1;
+    const meshes = [base, top];
+    for (let i = 0; i < meshes.length; i++) {
+      const m = meshes[i];
+      m.position.set(x, y, z); m.scale.set(rx, 1, rz);
+      m.castShadow = false; m.receiveShadow = false;
+      group.add(m);
+    }
+    base.onBeforeRender = function (renderer, sc, cam) { updateSurfaceMeshes(meshes, cam); };
+    group.userData.waterSurface = { x: x, z: z, y: y, radiusX: rx, radiusZ: rz, shader: 'GameSea-ripple-film' };
+    o.parent.add(group); inlandSurfaces.push(group);
+    return group;
+  }
+
   // ------------------------------------------------------------------- API
   window.GameSea = {
     y: SEA_Y,
+    geometrySpec: Object.freeze({
+      ripplePeak: RIPPLE_PEAK,
+      filmRoadMargin: FILM_ROAD_MARGIN,
+      filmRoadClear: FILM_ROAD_CLEAR,
+      filmRoadBaseMax: FILM_ROAD_BASE_MAX,
+      beachFronts: AUTHORED_BEACH_FRONTS
+    }),
+    createInlandSurface: createInlandSurface,
 
     /**
      * Build the sea and add it to the scene. Call ONCE, and only after the
@@ -5726,26 +5923,10 @@ window.addEventListener('unhandledrejection', (e) => {
       if (body) return body;
       THREE = three;
       sceneRef = scene;
+      waterClockStart = performance.now();
 
       const uniforms = function () {
-        return THREE.UniformsUtils.merge([
-          THREE.UniformsLib.fog,
-          {
-            uDeep:      { value: new THREE.Color(0x05131d) },
-            uShallow:   { value: new THREE.Color(0x0d3346) },
-            uCrest:     { value: new THREE.Color(0x27607d) },
-            uSand:      { value: new THREE.Color(0x1b3038) },
-            uFoam:      { value: new THREE.Color(0xa8c6d0) },
-            uSun:       { value: new THREE.Vector3(SUN[0], SUN[1], SUN[2]) },
-            uTime:      { value: 0 },
-            uSeaY:      { value: SEA_Y },
-            uCam:       { value: new THREE.Vector2() },
-            uCamPos:    { value: new THREE.Vector3() },
-            uShore:     { value: null },
-            uShoreRect: { value: new THREE.Vector4(0, 0, 1, 1) },
-            uHasShore:  { value: 0 }
-          }
-        ]);
+        return makeSurfaceUniforms(SEA_Y, null, null);
       };
       const plane = function () {
         const g = new THREE.PlaneGeometry(SIZE, SIZE, 64, 64);
@@ -5764,6 +5945,7 @@ window.addEventListener('unhandledrejection', (e) => {
         uniforms: uniforms(), vertexShader: VERT, fragmentShader: FRAG,
         defines: { FILM: '' },
         fog: true, transparent: true, depthTest: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
         side: THREE.FrontSide
       }));
       film.name = 'sea-surface';
@@ -5921,6 +6103,8 @@ window.addEventListener('unhandledrejection', (e) => {
         murk: +murk.material.opacity.toFixed(2),
         world: activeId,
         grid: g ? { cells: g.nx + 'x' + g.nz, buildMs: g.ms, landTris: g.tris, pitCells: g.pits } : null,
+        guardedRoadCells: g ? g.guardedRoadCells : 0,
+        inlandSurfaces: inlandSurfaces.length,
         coast: activeCoast ? activeCoast.stats : null
       } : null;
     }
@@ -12016,7 +12200,7 @@ window.addEventListener('unhandledrejection', (e) => {
     b.landmark('OCEAN BOWL', SX, SZ);
     // North-shore arrival: the fixed -Z survey view now crosses 80 units of
     // low beach into the shared ocean instead of looking along the east marina.
-    b.landmark('GLASSWAVE MARINA', 500, 4380);
+    b.landmark('GLASSWAVE MARINA', 500, 4380, Math.PI);
   }
 
   // ========================================================================
@@ -42172,10 +42356,18 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     Object.freeze({ id: 'copper-basin', name: 'COPPER BASIN', x: 10600, z: 2800, bounds: Object.freeze({ minX: 9400, maxX: 12650, minZ: 1800, maxZ: 5200 }), fog: 0x251b15, tint: Object.freeze([.98, .78, .60, .20]), carMul: .16, pedMul: .02, keep: 1680, pedKeep: 480, burst: 2 })
   ]);
 
-  // Arrival markers are viewpoints, not structure centres. Heading uses the
-  // engine's atan2(dx,dz) convention and points back at the authored geometry.
+  const RESERVOIR_WATER = Object.freeze({
+    id: 'mercy-reservoir-water', x: 9250, z: 1260, y: 5.2, radiusX: 710, radiusZ: 540
+  });
+
+  // Arrival markers are viewpoints, not structure centres. The reservoir
+  // overlook stays on the verified dry crest/shore point and now faces across
+  // the water body instead of back into the dam wall.
   const LANDMARK_ARRIVALS = Object.freeze({
-    reservoir: Object.freeze({ x: 8680, z: 1640, heading: Math.atan2(8615-8680,1260-1640) }),
+    reservoir: Object.freeze({
+      x: 8680, z: 1640,
+      heading: Math.atan2(RESERVOIR_WATER.x - 8680, RESERVOIR_WATER.z - 1640)
+    }),
     hillSign: Object.freeze({ x: 9330, z: -960, heading: Math.PI }),
     mine: Object.freeze({ x: 10710, z: 3085, heading: Math.PI })
   });
@@ -42639,8 +42831,13 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   }
 
   function buildReservoirDam(builder,handle) {
-    const T=builder.THREE,g=new T.Group();g.name='mercy-reservoir-dam';handle.landmarkRoot.add(g);const H=builder.terrain.heightAt.bind(builder.terrain),waterY=5.2;
-    const water=new T.Mesh(new T.CircleGeometry(1,48),handle.material(PALETTE.water,'water'));water.scale.set(710,540,1);water.rotation.x=-Math.PI/2;water.position.set(9250,waterY,1260);water.renderOrder=2;g.add(water);
+    const T=builder.THREE,g=new T.Group();g.name='mercy-reservoir-dam';handle.landmarkRoot.add(g);const H=builder.terrain.heightAt.bind(builder.terrain),waterY=RESERVOIR_WATER.y;
+    const sea=typeof window!=='undefined'&&window.GameSea;
+    if(sea&&sea.createInlandSurface)sea.createInlandSurface({
+      parent:g,name:RESERVOIR_WATER.id,x:RESERVOIR_WATER.x,z:RESERVOIR_WATER.z,y:waterY,
+      radiusX:RESERVOIR_WATER.radiusX,radiusZ:RESERVOIR_WATER.radiusZ
+    });
+    else{const water=new T.Mesh(new T.CircleGeometry(1,48),handle.material(PALETTE.water,'water'));water.scale.set(RESERVOIR_WATER.radiusX,RESERVOIR_WATER.radiusZ,1);water.rotation.x=-Math.PI/2;water.position.set(RESERVOIR_WATER.x,waterY,RESERVOIR_WATER.z);water.renderOrder=2;g.add(water);}
     const damX=8615,damZ=1260,damY=H(damX,damZ);addLocalBox(T,g,handle.material(PALETTE.concrete),34,30,650,damX,damY+15,damZ,0);addWorldCollider(builder,damX,damZ,34,650,30,damY,0);for(let z=980;z<=1540;z+=80){addLocalBox(T,g,handle.material(PALETTE.concreteDark),16,18,6,damX-22,damY+9,z);}
     addLocalBox(T,g,handle.material(PALETTE.steel,'metal'),9,7,16,damX+8,damY+22,damZ);addSignCanvas(T,g,'MERCY DAM','#20e3ff',18,5,damX-17,damY+25,damZ,Math.PI/2);g.userData.saCull={x:9000,z:1260,r:950};handle.landmarks.push(g);builder.landmark('MERCY RESERVOIR',LANDMARK_ARRIVALS.reservoir.x,LANDMARK_ARRIVALS.reservoir.z,LANDMARK_ARRIVALS.reservoir.heading);return g;
   }
@@ -42789,6 +42986,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     palette: PALETTE,
     districts: DISTRICTS,
     arrivals: LANDMARK_ARRIVALS,
+    waterBodies: Object.freeze([RESERVOIR_WATER]),
     pois: POIS,
     races: RACES,
     roads: ROAD_ROUTES,
