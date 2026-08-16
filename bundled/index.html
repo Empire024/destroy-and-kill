@@ -27010,7 +27010,7 @@ Assumptions that may not hold after integration:
       });
       // The engine swallows its keydown once a system consumes the key, so the
       // held state for auto fire is tracked here rather than read off ctx.input.
-      window.addEventListener('keyup', e => { if ((e.key || '').toLowerCase() === 'f') inv.fireHeld = false; });
+      window.addEventListener('keyup', e => { if ((e.key || '').toLowerCase() === 'f') inv.fireHeld = false; }, true);
       window.addEventListener('blur', () => { inv.fireHeld = false;aimHeld=false; });
     },
 
@@ -27071,6 +27071,7 @@ Assumptions that may not hold after integration:
       postRoadblock(rb){return postRoadblock(rb);},clearRoadblockPosts(rb){clearRoadblockPosts(rb);},releaseCopOccupants(cop,force){releaseCopOccupants(cop,force!==false);},
       fire(){return tryFire(ctxRef);},
       ordnanceDebug(){return ordnance?{contracts:ordnance.contractProbe(),backblastTrace:ordnance.probeBackblastTrace()}:null;},
+      clearInputState(){inv.fireHeld=false;aimHeld=false;qaLookActive=false;qaLookTimer=0;if(ordnance)ordnance.player.setTrigger(false);return true;},weaponWheelOpen(){return weaponWheelOpen;},
       isFirstPerson(){return firstPersonActive();},mouseLookActive(){return mouseLookActive();},aiming(){return aimHeld;},heading(){return mouseLookActive()?aimYaw:(ctxRef?ctxRef.player.heading:0);},pitch(){return mouseLookActive()?aimPitch:0;},
       turn(yaw,pitch){aimYaw+=Number(yaw)||0;aimPitch=clamp(aimPitch+(Number(pitch)||0),-.72,.72);return{yaw:aimYaw,pitch:aimPitch};},
       cameraYaw(){return aimYaw;},
@@ -28671,8 +28672,13 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   const PHYS=Object.freeze({gravity:22,liftReference:36,takeoffSpeed:20,airDrag:.18,rollRate:2.3,pitchRate:1.25,bankTurnRate:1.35,autoLevel:1.6,heliVertical:18,heliAccel:34,heliYaw:1.9,step:2.5,maxSteps:28,roofClearance:1.7,impactDamage:14,touchdownDamage:16,damageScale:.38,exitAgl:2.7,exitSpeed:11,enterRadius:12,respawn:48,burnMin:3,burnMax:5});
   const HELP={plane:[['W / S','Throttle'],['↑ / ↓','Pitch'],['A / D','Roll'],['Q / E','Yaw'],['F / LMB','Fire mounted weapon'],['X','Cycle mounted weapon'],['Shift','Hydra afterburner'],['E near ground','Exit']],heli:[['W / S','Ascend / descend'],['↑ / ↓','Forward / back'],['A / D','Strafe'],['Q / E','Yaw'],['F / LMB','Fire mounted weapon'],['X','Rockets / minigun'],['E near ground','Exit']]};
   let ctx=null,current=null,aircraft=[],pads=[],hud=null,prompt=null,helpTimer=0,airAudio=null;
-  const controlKeys=Object.create(null),meshCache=new Map(),tmpDesired={x:0,y:0,z:0},tmpTarget={x:0,y:0,z:0};
+  const controlKeys=Object.create(null),controlLastEvent=Object.create(null),meshCache=new Map(),tmpDesired={x:0,y:0,z:0},tmpTarget={x:0,y:0,z:0};
   let keyDown=null,keyUp=null,mouseDown=null,mouseUp=null,aircraftMouseFire=false;
+  const AIR_CONTINUOUS=['w','KeyW','s','KeyS','a','KeyA','d','KeyD','q','KeyQ','e','KeyE','arrowup','ArrowUp','arrowdown','ArrowDown','shift','ShiftLeft','ShiftRight'];
+  function controlAliases(e){const a=[],k=(e&&e.key||'').toLowerCase(),code=e&&e.code||'';if(k)a.push(k);if(code&&!a.includes(code))a.push(code);return a;}
+  function setControlEvent(e,down){const now=performance.now();for(const a of controlAliases(e)){controlKeys[a]=!!down;if(down)controlLastEvent[a]=now;else delete controlLastEvent[a];}}
+  function clearControlKeys(){for(const k of Object.keys(controlKeys))controlKeys[k]=false;for(const k of Object.keys(controlLastEvent))delete controlLastEvent[k];aircraftMouseFire=false;if(current&&current._ordnanceLoadout)current._ordnanceLoadout.setTrigger('secondary',false);return true;}
+  function healControlKeys(){const now=performance.now();for(const k of AIR_CONTINUOUS){if(!controlKeys[k])continue;const last=controlLastEvent[k]||0;if(!last||now-last>1200){clearControlKeys();if(ctx&&ctx.input&&ctx.input.breakLatch)ctx.input.breakLatch(k,last?'aircraft-timeout':'aircraft-missing-timestamp');return true;}}return false;}
 
   function geo(key,factory){if(!meshCache.has('g:'+key))meshCache.set('g:'+key,factory());return meshCache.get('g:'+key);}
   function mat(key,factory){if(!meshCache.has('m:'+key))meshCache.set('m:'+key,factory());return meshCache.get('m:'+key);}
@@ -28754,7 +28760,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
     else if(a.y<=surface){touchdown=wasAir?-vy:0;a.y=surface;nowGround=true;vy=0;}
     a.vx=vel.x;a.vz=vel.z;a.vy=vy;a.speed=vel.x*fx+vel.z*fz;a.grounded=nowGround;a.agl=Math.max(0,a.y-surface);return{speed:Math.hypot(vel.x,vel.z),stall:false,grounded:nowGround,touchdown,impact,water};
   }
-  function controlsFor(a){const k=controlKeys,m=ctx.input.mobileInput||{},H=window.NEON_HANDEDNESS;return{throttle:(k.w||m.gas?1:0)-(k.s||m.brake?1:0),pitch:(k.arrowup?1:0)-(k.arrowdown?1:0),roll:(k.d||m.right?1:0)-(k.a||m.left?1:0),yaw:H?H.aircraftYaw(!!k.q,!!k.e):(k.q?1:0)-(k.e?1:0),afterburner:!!k.shift};}
+  function controlsFor(a){healControlKeys();const k=controlKeys,m=ctx.input.mobileInput||{},H=window.NEON_HANDEDNESS,w=!!(k.w||k.KeyW),s=!!(k.s||k.KeyS),aa=!!(k.a||k.KeyA),d=!!(k.d||k.KeyD),q=!!(k.q||k.KeyQ),e=!!(k.e||k.KeyE),up=!!(k.arrowup||k.ArrowUp),down=!!(k.arrowdown||k.ArrowDown);return{throttle:(w||m.gas?1:0)-(s||m.brake?1:0),pitch:(up?1:0)-(down?1:0),roll:(d||m.right?1:0)-(aa||m.left?1:0),yaw:H?H.aircraftYaw(q,e):(q?1:0)-(e?1:0),afterburner:!!(k.shift||k.ShiftLeft||k.ShiftRight)};}
   function sync(a,dt){
     const m=a.mesh;if(!m)return;m.position.set(a.x,a.y,a.z);m.rotation.y=a.heading;m.rotation.x=-a.pitch;m.rotation.z=-a.roll;
     const spin=a.kind==='heli'?(a.parked?2.2:18+Math.abs(a.vy)*.25):(a.parked?0:12+Math.abs(a.speed)*.28);a.rotorSpin=(a.rotorSpin||0)+spin*(dt||0);
@@ -28799,12 +28805,12 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   function resetCurrent(){if(!current)return false;const a=current;respawn(a,true);a.parked=false;a.solid=false;current=a;ctx.player.beginAircraft(a,true);document.body.classList.add('aircraft-active');hud.root.classList.add('on');ctx.fx.toast('Aircraft reset to spawn','#20e3ff');return true;}
 
   GameSystems.register({id:'aircraft',order:56,requires:['nav'],alwaysUpdate:true,
-    init(c){ctx=c;ensureUi();keyDown=e=>{controlKeys[e.key.toLowerCase()]=true;};keyUp=e=>{const k=e.key.toLowerCase();controlKeys[k]=false;if(k==='f'&&current&&current._ordnanceLoadout)current._ordnanceLoadout.setTrigger('secondary',false);};mouseDown=e=>{if(current&&current._ordnanceLoadout&&e.button===0){aircraftMouseFire=true;e.preventDefault();}};mouseUp=e=>{if(e.button===0){aircraftMouseFire=false;if(current&&current._ordnanceLoadout)current._ordnanceLoadout.setTrigger('secondary',false);}};addEventListener('keydown',keyDown);addEventListener('keyup',keyUp);c.renderer.domElement.addEventListener('mousedown',mouseDown,{passive:false});addEventListener('mouseup',mouseUp);for(const s of SPAWNS){createPad(s);const a=spawnOne(s),nav=GameSystems.api('nav');if(nav)nav.addPOI({id:'aircraft-'+s.id,worldId:'neon',x:s.x,z:s.z,icon:a.kind==='plane'?'✈':'H',label:s.label+' · '+a.style.name,kind:'aircraft',color:a.kind==='plane'?'#20e3ff':'#ffd23f',state:()=>({available:a.parked&&!a.dead&&!a.burning})});}const help=GameSystems.api('help');if(help){help.addControls('AIRCRAFT — PLANE',HELP.plane);help.addControls('AIRCRAFT — HELICOPTER',HELP.heli);}},
+    init(c){ctx=c;ensureUi();keyDown=e=>{setControlEvent(e,true);};keyUp=e=>{const k=(e.key||'').toLowerCase();setControlEvent(e,false);if(k==='f'&&current&&current._ordnanceLoadout)current._ordnanceLoadout.setTrigger('secondary',false);};mouseDown=e=>{if(current&&current._ordnanceLoadout&&e.button===0){aircraftMouseFire=true;e.preventDefault();}};mouseUp=e=>{if(e.button===0){aircraftMouseFire=false;if(current&&current._ordnanceLoadout)current._ordnanceLoadout.setTrigger('secondary',false);}};addEventListener('keydown',keyDown);addEventListener('keyup',keyUp,true);c.renderer.domElement.addEventListener('mousedown',mouseDown,{passive:false});addEventListener('mouseup',mouseUp);for(const s of SPAWNS){createPad(s);const a=spawnOne(s),nav=GameSystems.api('nav');if(nav)nav.addPOI({id:'aircraft-'+s.id,worldId:'neon',x:s.x,z:s.z,icon:a.kind==='plane'?'✈':'H',label:s.label+' · '+a.style.name,kind:'aircraft',color:a.kind==='plane'?'#20e3ff':'#ffd23f',state:()=>({available:a.parked&&!a.dead&&!a.burning})});}const help=GameSystems.api('help');if(help){help.addControls('AIRCRAFT — PLANE',HELP.plane);help.addControls('AIRCRAFT — HELICOPTER',HELP.heli);}},
     onKey(k){if(!current||!current._ordnanceLoadout)return false;if(k==='x')return cycleMountedWeapon();if(k==='f'){controlKeys.f=true;return true;}return false;},
     worldChanged(w){const live=w&&w.id==='neon';for(const a of aircraft)a.mesh.visible=live&&!a.dead;for(const p of pads)p.visible=live;if(!live&&current)forceLeave(current,'Aircraft returned to Northstar');},
     update(dt){helpTimer=Math.max(0,helpTimer-dt);for(const a of aircraft){if(a.dead){a.respawnTimer-=dt;if(a.respawnTimer<=0)respawn(a,false);continue;}if(a.burning){a.burnFuse-=dt;if(a.fire){const pulse=.8+Math.sin(performance.now()*.025)*.3;a.fire.scale.setScalar(pulse);}if(Math.random()<dt*8)ctx.fx.spawnTireSmoke(a.x,a.z,1);if(a.burnFuse<=0)explode(a);continue;}if(a!==current)sync(a,dt);}updateHud();},
-    dispose(){removeEventListener('keydown',keyDown);removeEventListener('keyup',keyUp);removeEventListener('mouseup',mouseUp);if(ctx&&ctx.renderer&&ctx.renderer.domElement)ctx.renderer.domElement.removeEventListener('mousedown',mouseDown);if(current)forceLeave(current);const nav=GameSystems.api('nav');for(const a of aircraft){if(a._ordnanceLoadout){a._ordnanceLoadout.dispose();a._ordnanceLoadout=null;}const i=ctx.actors.extraCollidables.indexOf(a);if(i>=0)ctx.actors.extraCollidables.splice(i,1);if(a.mesh.parent)a.mesh.parent.remove(a.mesh);if(nav)nav.removePOI('aircraft-'+a.spawn.id);}for(const p of pads)if(p.parent)p.parent.remove(p);if(hud&&hud.root.parentNode)hud.root.parentNode.removeChild(hud.root);if(prompt&&prompt.parentNode)prompt.parentNode.removeChild(prompt);document.body.classList.remove('aircraft-active');},
-    api:{definitions:()=>DEFINITIONS.slice(),spawnAt(id,x,z,y,heading){const style=BY_ID.get(id);if(!style)return false;const spawn={id:'admin-'+id+'-'+Date.now(),aircraftId:id,label:'ADMIN',x,z,y:y==null?ctx.world.groundHeightAt(x,z,0):y,heading:heading||0};const a=spawnOne(spawn);a.parked=true;a.solid=true;return a;},spawns:()=>aircraft.map(a=>({id:a.id,aircraftId:a.style.id,name:a.style.name,kind:a.kind,x:a.x,y:a.y,z:a.z,parked:a.parked,dead:a.dead,burning:a.burning,hp:a.hitPoints})),current:()=>current,enterNearest,exitCurrent,updatePlayer,updateCamera,resetCurrent,agl:aglOf,stepWithControls(a,controls,dt){if(!a||a.dead||a.burning)return null;const result=a.kind==='plane'?planePhysics(a,controls||{},dt):heliPhysics(a,controls||{},dt);damage(a,result);sync(a,dt);return result;},damageCurrent(n){if(!current)return false;const a=current;a.hitPoints-=Math.max(0,+n||0);const hp=a.hitPoints;if(hp<=0)ignite(a);return hp;}}
+    dispose(){removeEventListener('keydown',keyDown);removeEventListener('keyup',keyUp,true);removeEventListener('mouseup',mouseUp);if(ctx&&ctx.renderer&&ctx.renderer.domElement)ctx.renderer.domElement.removeEventListener('mousedown',mouseDown);if(current)forceLeave(current);const nav=GameSystems.api('nav');for(const a of aircraft){if(a._ordnanceLoadout){a._ordnanceLoadout.dispose();a._ordnanceLoadout=null;}const i=ctx.actors.extraCollidables.indexOf(a);if(i>=0)ctx.actors.extraCollidables.splice(i,1);if(a.mesh.parent)a.mesh.parent.remove(a.mesh);if(nav)nav.removePOI('aircraft-'+a.spawn.id);}for(const p of pads)if(p.parent)p.parent.remove(p);if(hud&&hud.root.parentNode)hud.root.parentNode.removeChild(hud.root);if(prompt&&prompt.parentNode)prompt.parentNode.removeChild(prompt);document.body.classList.remove('aircraft-active');},
+    api:{clearControls:clearControlKeys,definitions:()=>DEFINITIONS.slice(),spawnAt(id,x,z,y,heading){const style=BY_ID.get(id);if(!style)return false;const spawn={id:'admin-'+id+'-'+Date.now(),aircraftId:id,label:'ADMIN',x,z,y:y==null?ctx.world.groundHeightAt(x,z,0):y,heading:heading||0};const a=spawnOne(spawn);a.parked=true;a.solid=true;return a;},spawns:()=>aircraft.map(a=>({id:a.id,aircraftId:a.style.id,name:a.style.name,kind:a.kind,x:a.x,y:a.y,z:a.z,parked:a.parked,dead:a.dead,burning:a.burning,hp:a.hitPoints})),current:()=>current,enterNearest,exitCurrent,updatePlayer,updateCamera,resetCurrent,agl:aglOf,stepWithControls(a,controls,dt){if(!a||a.dead||a.burning)return null;const result=a.kind==='plane'?planePhysics(a,controls||{},dt):heliPhysics(a,controls||{},dt);damage(a,result);sync(a,dt);return result;},damageCurrent(n){if(!current)return false;const a=current;a.hitPoints-=Math.max(0,+n||0);const hp=a.hitPoints;if(hp<=0)ignite(a);return hp;}}
   });
 })();
 </script>
@@ -29824,8 +29830,8 @@ function css(){const st=document.createElement('style');st.id='pausePhoneStyles'
 body.game-paused #mobileControls,body.game-paused #cbMobile,body.paint-spray-active #mobileControls{display:none!important}
 @media(max-width:650px){.pauseCard{min-height:0;padding:16px}.pauseCard h1{font-size:28px}.pauseGrid{grid-template-columns:1fr}.pauseNav{display:grid;grid-template-columns:repeat(2,1fr)}.pausePane{min-height:190px}.phoneShell{transform:scale(.82)}}`;document.head.appendChild(st);}
 function releaseMouse(){try{if(document.pointerLockElement)document.exitPointerLock();}catch(_){} }
-function paused(v){pauseOpen=!!v;pause.classList.toggle('open',pauseOpen);document.body.classList.toggle('game-paused',pauseOpen||phoneOpen);if(v){releaseMouse();Object.keys(ctx.input.keys).forEach(k=>ctx.input.keys[k]=false);renderPause('main');}}
-function phoneSet(v){phoneOpen=!!v;phone.classList.toggle('open',phoneOpen);document.body.classList.toggle('game-paused',pauseOpen||phoneOpen);if(v){releaseMouse();Object.keys(ctx.input.keys).forEach(k=>ctx.input.keys[k]=false);showApps();setPhoneFocus(0);}}
+function paused(v){pauseOpen=!!v;pause.classList.toggle('open',pauseOpen);document.body.classList.toggle('game-paused',pauseOpen||phoneOpen);if(v){releaseMouse();renderPause('main');}if(ctx.input.clearAll)ctx.input.clearAll(v?'pause-open':'pause-close');}
+function phoneSet(v){phoneOpen=!!v;phone.classList.toggle('open',phoneOpen);document.body.classList.toggle('game-paused',pauseOpen||phoneOpen);if(v){releaseMouse();showApps();setPhoneFocus(0);}if(ctx.input.clearAll)ctx.input.clearAll(v?'phone-open':'phone-close');}
 function safeReload(){if(location.protocol==='file:'&&window.top!==window.self){ctx.fx.toast('Close the preview frame and open the HTML directly','#ffd23f');return;}location.reload();}
 function removeOwnFileFrames(){if(location.protocol!=='file:')return;const own=location.href.split('#')[0];for(const f of document.querySelectorAll('iframe[src]')){try{if(new URL(f.src,location.href).href.split('#')[0]===own)f.remove();}catch(_){}}}
 function phoneButtons(){return phone?[...phone.querySelectorAll('.phoneBody button:not([disabled]),.phoneBack')].filter(b=>b.offsetParent!==null):[];}
@@ -29882,7 +29888,7 @@ function buildDoor(source){const def=Object.assign({},source,{style:source.style
 function sync(){for(const d of doors)d.g.visible=(d.def.worldId||'neon')===ctx.world.id;}
 function spraySound(){if(document.hidden||ctx.audio.muted)return;if(!ctx.audio.ctx){try{ctx.audio.ensure();}catch(_){}}const ac=ctx.audio.ctx;if(!ac)return;const len=Math.floor(ac.sampleRate*.22),b=ac.createBuffer(1,len,ac.sampleRate),data=b.getChannelData(0);for(let i=0;i<len;i++)data[i]=(Math.random()*2-1)*(1-i/len);const src=ac.createBufferSource(),f=ac.createBiquadFilter(),g=ac.createGain();src.buffer=b;f.type='highpass';f.frequency.value=2300;g.gain.setValueAtTime(.13,ac.currentTime);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+.22);src.connect(f);f.connect(g);g.connect(ac.destination);src.start();}
 function puff(color){const T=ctx.THREE,m=new T.Mesh(new T.SphereGeometry(.55,6,5),new T.MeshBasicMaterial({color,transparent:true,opacity:.32,depthWrite:false}));m.position.set(ctx.player.x+(Math.random()-.5)*5,ctx.carState.y+1+Math.random()*2.2,ctx.player.z+(Math.random()-.5)*5);ctx.scene.add(m);puffs.push({m,t:.7,vx:(Math.random()-.5)*2,vy:1+Math.random(),vz:(Math.random()-.5)*2});}
-function start(def,door){const now=performance.now();if(door.cool&&now<door.cool)return;door.cool=now+7000;const old=ctx.vehicles.color;let col=old;for(let i=0;i<10&&col===old;i++)col=COLORS[(Math.random()*COLORS.length)|0];active={def,door,t:0,color:col,wanted:ctx.stats.wanted,painted:false,repaired:false,lastSpray:0};document.body.classList.add('paint-spray-active');Object.keys(ctx.input.keys).forEach(k=>ctx.input.keys[k]=false);ctx.carState.speed=0;ctx.carState.vx=0;ctx.carState.vz=0;ctx.engine.setWanted(0);ctx.actors.cops.forEach((cop,i)=>{const away=Math.atan2(cop.x-ctx.player.x,cop.z-ctx.player.z)+(i-(ctx.actors.cops.length-1)*.5)*.12;cop.heading=away;cop.vx=Math.sin(away)*28;cop.vz=Math.cos(away)*28;cop.ramCd=Math.max(cop.ramCd||0,3.5);});const radio=GameSystems.api('radio');if(radio&&radio.duck)radio.duck(4);ctx.fx.banner('PAINT & SPRAY','DOORS CLOSING', '#'+def.style.accent.toString(16).padStart(6,'0'));}
+function start(def,door){const now=performance.now();if(door.cool&&now<door.cool)return;door.cool=now+7000;const old=ctx.vehicles.color;let col=old;for(let i=0;i<10&&col===old;i++)col=COLORS[(Math.random()*COLORS.length)|0];active={def,door,t:0,color:col,wanted:ctx.stats.wanted,painted:false,repaired:false,lastSpray:0};document.body.classList.add('paint-spray-active');if(ctx.input.clearAll)ctx.input.clearAll('paint-spray-open');ctx.carState.speed=0;ctx.carState.vx=0;ctx.carState.vz=0;ctx.engine.setWanted(0);ctx.actors.cops.forEach((cop,i)=>{const away=Math.atan2(cop.x-ctx.player.x,cop.z-ctx.player.z)+(i-(ctx.actors.cops.length-1)*.5)*.12;cop.heading=away;cop.vx=Math.sin(away)*28;cop.vz=Math.cos(away)*28;cop.ramCd=Math.max(cop.ramCd||0,3.5);});const radio=GameSystems.api('radio');if(radio&&radio.duck)radio.duck(4);ctx.fx.banner('PAINT & SPRAY','DOORS CLOSING', '#'+def.style.accent.toString(16).padStart(6,'0'));}
 function finish(){const a=active;if(!a)return;ctx.engine.setWanted(Math.max(0,a.wanted-2));ctx.fx.banner('FRESH PAINT','REPAIRED · WANTED REDUCED','#3bff8b');document.body.classList.remove('paint-spray-active');ctx.camera.fov=70;ctx.camera.updateProjectionMatrix();a.door.cool=performance.now()+5000;active=null;}
 function updatePuffs(dt){for(let i=puffs.length-1;i>=0;i--){const p=puffs[i];p.t-=dt;p.m.position.x+=p.vx*dt;p.m.position.y+=p.vy*dt;p.m.position.z+=p.vz*dt;p.m.material.opacity=Math.max(0,p.t*.42);p.m.scale.multiplyScalar(1+dt*1.5);if(p.t<=0){p.m.geometry.dispose();p.m.material.dispose();if(p.m.parent)p.m.parent.remove(p.m);puffs.splice(i,1);}}}
 function tick(dt){updatePuffs(dt);sync();if(!active){if(ctx.player.onFoot||ctx.player.dead||ctx.player.dying||ctx.engine.selectionOpen||document.body.classList.contains('game-paused'))return;for(const d of doors){if(!d.g.visible)continue;const q=local(d.def,ctx.player.x,ctx.player.z);if(Math.abs(q.x)<6.2&&q.z>-1.5&&q.z<6.6&&ctx.player.mph<42){start(d.def,d);break;}}return;}
@@ -31608,7 +31614,7 @@ function prepareAutomaticDrive(reason){
   setDriveMode();autoShiftLock=0;reverseEngaged=false;driveGear=1;pendingGear=0;pendingPowerShift=false;gearDragTimer=0;shiftKick=0;gearElapsed=0;shiftPromptTimer=0;shiftNeeded=false;autoDownshiftTimer=0;autoRevBlipTimer=0;autoRevBlipRpm=0;autoRevBlipStrength=0;
   fakeRpm=engineIdleRpm();audioRpm=fakeRpm;throttleResponse=0;drivenWheelSpin=0;drivenWheelRpm=0;brakeReverseTimer=0;reverseHoldTimer=0;limiterActive=false;limiterHoldTimer=0;limiterPlayTimer=0;
   for(const k of Object.keys(keys))keys[k]=false;Object.assign(mobileInput,{gas:false,brake:false,left:false,right:false,handbrake:false,nitro:false,shiftUp:false,shiftDown:false});
-  if(benchmark){keys['w']=heldW;keys['arrowup']=heldArrow;mobileInput.gas=heldGas;}
+  if(benchmark){keys['w']=heldW;keys['arrowup']=heldArrow;mobileInput.gas=heldGas;const now=performance.now();if(heldW)keyLastEvent['w']=keyLastEvent['KeyW']=now;if(heldArrow)keyLastEvent['arrowup']=keyLastEvent['ArrowUp']=now;acknowledgeInputBoundaries();}
   engineBlown=false;engineSeized=false;claimVehicleAudio();return{reason:reason||'automatic-ready',driveMode,gear:driveGear,reverse:reverseEngaged,handbrake:false,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas)};
 }
 function selectReverse(manual=true){
@@ -32010,8 +32016,8 @@ function refreshWheelDevices(){
   const remembered=pads.find(p=>p.id===wheelConfig.gamepadId)||pads.find(p=>String(p.index)===previous)||pads[0];wheelDeviceSelect.value=String(remembered.index);wheelConfig.gamepadIndex=remembered.index;wheelConfig.gamepadId=remembered.id;
   const haptics=wheelHapticActuators(remembered),hasHaptics=haptics.length>0;wheelHapticsEl.disabled=!hasHaptics;wheelHapticsStrengthEl.disabled=!hasHaptics;document.getElementById('wheelTestHaptics').disabled=!hasHaptics;wheelDeviceStatus.textContent='Connected · '+remembered.axes.length+' axes · '+remembered.buttons.length+' buttons · '+(hasHaptics?'BROWSER RUMBLE EXPOSED':'INPUT ONLY · NO RUMBLE MOTOR EXPOSED');wheelDeviceStatus.classList.toggle('good',true);updateWheelBindingLabels();
 }
-function openWheelSetup(){wheelSetupOpen=true;wheelPanel.classList.add('open');refreshWheelDevices();updateWheelControlsUI();}
-function closeWheelSetup(){wheelSetupOpen=false;wheelBindCapture=null;wheelPanel.classList.remove('open');document.querySelectorAll('[data-wheel-bind],[data-wheel-button-bind]').forEach(b=>b.classList.remove('binding'));}
+function openWheelSetup(){wheelSetupOpen=true;wheelPanel.classList.add('open');clearAllInputState('wheel-panel-open');refreshWheelDevices();updateWheelControlsUI();}
+function closeWheelSetup(){wheelSetupOpen=false;wheelBindCapture=null;wheelPanel.classList.remove('open');clearAllInputState('wheel-panel-close');document.querySelectorAll('[data-wheel-bind],[data-wheel-button-bind]').forEach(b=>b.classList.remove('binding'));}
 function saveWheelConfig(){try{localStorage.setItem(WHEEL_SAVE_KEY,JSON.stringify(wheelConfig));}catch(e){}}
 function axisLabel(i){return i>=0?'AXIS '+i:'NOT BOUND';}
 function buttonLabel(i){return i>=0?'BUTTON '+i:'OPTIONAL';}
@@ -32136,7 +32142,7 @@ const TAU=Math.PI*2;
 // Wheels spin on x and steer on y; both rely on the YXZ rotation order set in
 // makeCar. The roll wraps at a full turn so it cannot drift into the range where
 // float precision makes a spinning wheel stutter.
-function animatePlayerWheelMeshes(steer,speed,dt,spin=0){if(!car||!car.userData.frontWheels)return;const angle=steer*.58,blend=clamp(dt*14,0,1),base=speed*dt*.32,extra=Math.sign(speed||1)*spin*dt*(8+Math.abs(fakeRpm-engineIdleRpm())*.0018),frontDriven=vehicleTune.drive==='FWD'||vehicleTune.drive==='AWD',rearDriven=vehicleTune.drive==='RWD'||vehicleTune.drive==='AWD',front=car.userData.frontWheels||[],rear=car.userData.rearWheels||[];for(let i=0;i<front.length;i++){const w=front[i],flat=i===0?tireBurst.fl:tireBurst.fr;w.rotation.y=lerp(w.rotation.y,angle+(flat?(i===0?-.14:.14):0),blend);w.rotation.x=(w.rotation.x+base+(frontDriven?extra:0))%TAU;}for(let i=0;i<rear.length;i++){const w=rear[i],flat=i===0?tireBurst.rl:tireBurst.rr;w.rotation.y=lerp(w.rotation.y,flat?(i===0?-.10:.10):0,blend);w.rotation.x=(w.rotation.x+base+(rearDriven?extra:0))%TAU;}applyBurstTireVisuals();}
+function animatePlayerWheelMeshes(steer,speed,dt,spin=0){if(!car||!car.userData.frontWheels)return;const centred=Math.abs(steer)<.0005,angle=centred?0:steer*.58,blend=clamp(dt*(centred?22:14),0,1),base=speed*dt*.32,extra=Math.sign(speed||1)*spin*dt*(8+Math.abs(fakeRpm-engineIdleRpm())*.0018),frontDriven=vehicleTune.drive==='FWD'||vehicleTune.drive==='AWD',rearDriven=vehicleTune.drive==='RWD'||vehicleTune.drive==='AWD',front=car.userData.frontWheels||[],rear=car.userData.rearWheels||[];for(let i=0;i<front.length;i++){const w=front[i],flat=i===0?tireBurst.fl:tireBurst.fr,target=angle+(flat?(i===0?-.14:.14):0);w.rotation.y=lerp(w.rotation.y,target,blend);if(centred&&!flat&&Math.abs(w.rotation.y)<.0015)w.rotation.y=0;w.rotation.x=(w.rotation.x+base+(frontDriven?extra:0))%TAU;}for(let i=0;i<rear.length;i++){const w=rear[i],flat=i===0?tireBurst.rl:tireBurst.rr,target=flat?(i===0?-.10:.10):0;w.rotation.y=lerp(w.rotation.y,target,blend);if(!flat&&Math.abs(w.rotation.y)<.0015)w.rotation.y=0;w.rotation.x=(w.rotation.x+base+(rearDriven?extra:0))%TAU;}applyBurstTireVisuals();}
 wheelSetupButton.addEventListener('click',openWheelSetup);document.getElementById('wheelRefresh').addEventListener('click',refreshWheelDevices);document.getElementById('wheelClose').addEventListener('click',closeWheelSetup);
 document.getElementById('wheelSave').addEventListener('click',()=>{const gp=selectedGamepad();if(!gp||wheelConfig.steerAxis<0||wheelConfig.throttleAxis<0||wheelConfig.brakeAxis<0){wheelDeviceStatus.textContent='Bind steering, gas and brake before enabling the wheel.';wheelDeviceStatus.classList.remove('good');return;}wheelConfig.enabled=true;wheelConfig.gamepadIndex=gp.index;wheelConfig.gamepadId=gp.id;saveWheelConfig();closeWheelSetup();addToast('🏁 Wheel and pedals active','#20e3ff');});
 document.getElementById('wheelTestHaptics').addEventListener('click',testWheelHaptics);
@@ -32168,12 +32174,35 @@ addEventListener('gamepadconnected',()=>{refreshWheelDevices();if(wheelConfig.en
 
 // ---------- Input ----------
 const keys={};
+const keyLastEvent=Object.create(null),INPUT_LATCH_MS=1200;
+const inputLatchBreaks={count:0,byKey:Object.create(null),lastKey:null,lastSource:null,lastAt:0,lastReset:null};
+const INPUT_LATCH_GROUPS=[
+  {name:'left',aliases:['a','KeyA','arrowleft','ArrowLeft']},
+  {name:'right',aliases:['d','KeyD','arrowright','ArrowRight']},
+  {name:'throttle',aliases:['w','KeyW','arrowup','ArrowUp']},
+  {name:'brake',aliases:['s','KeyS','arrowdown','ArrowDown']}
+];
+let inputBoundarySig=null,inputModeSig=null;
+function inputAliases(e){const out=[],k=(e&&e.key||'').toLowerCase(),code=e&&e.code||'';if(k)out.push(k);if(code&&!out.includes(code))out.push(code);return out;}
+function noteKeyEvent(e,down){const now=performance.now();for(const a of inputAliases(e)){keys[a]=!!down;if(down)keyLastEvent[a]=now;else delete keyLastEvent[a];}}
+function debugKeyEvent(k,down){const raw=String(k||''),low=raw.toLowerCase(),codes={a:'KeyA',d:'KeyD',w:'KeyW',s:'KeyS',arrowleft:'ArrowLeft',arrowright:'ArrowRight',arrowup:'ArrowUp',arrowdown:'ArrowDown',' ':'Space',shift:'ShiftLeft'},code=/^(Key|Arrow|Shift|Space)/.test(raw)?raw:(codes[low]||raw);noteKeyEvent({key:low==='space'?' ':low,code},down);return !!down;}
+function registerLatchBreak(key,source){inputLatchBreaks.count++;inputLatchBreaks.byKey[key]=(inputLatchBreaks.byKey[key]||0)+1;inputLatchBreaks.lastKey=key;inputLatchBreaks.lastSource=source||'main';inputLatchBreaks.lastAt=performance.now();return inputLatchBreaks.count;}
+function clearLatchGroup(group,source){for(const a of group.aliases){keys[a]=false;delete keyLastEvent[a];}registerLatchBreak(group.name,source||'main');const air=window.GameSystems&&GameSystems.api('aircraft');if(air&&air.clearControls)air.clearControls();return true;}
+function breakExternalLatch(key,source){const group=INPUT_LATCH_GROUPS.find(g=>g.aliases.includes(key)||g.name===key);if(group){for(const a of group.aliases){keys[a]=false;delete keyLastEvent[a];}}return registerLatchBreak(group?group.name:key,source||'external');}
+function breakStaleDriveInput(now){now=Number.isFinite(now)?now:performance.now();for(const group of INPUT_LATCH_GROUPS){let held=false,last=0;for(const a of group.aliases){if(keys[a])held=true;last=Math.max(last,keyLastEvent[a]||0);}if(held&&(!last||now-last>INPUT_LATCH_MS))clearLatchGroup(group,last?'timeout':'missing-timestamp');}}
+function apiFlag(id,key){try{const a=window.GameSystems&&GameSystems.api(id);if(!a)return false;const v=a[key];return typeof v==='function'?!!v.call(a):!!v;}catch(_){return false;}}
+function inputModalSignature(){const b=document.body.classList;return [carSelectionOpen,showFullMap,wheelSetupOpen,b.contains('game-paused'),b.contains('paint-spray-active'),b.contains('shop-open'),b.contains('ammu-open'),b.contains('facility-open'),b.contains('help-open'),apiFlag('progression','radialOpen'),apiFlag('pausephone','pauseOpen'),apiFlag('pausephone','phoneOpen'),apiFlag('admin','isOpen'),apiFlag('carInfo','open'),apiFlag('bodyshop','panelOpen'),apiFlag('ammu','isOpen'),apiFlag('facilities','isOpen'),apiFlag('help','isOpen'),apiFlag('combat','weaponWheelOpen')].map(v=>v?1:0).join('');}
+function inputModeSignature(){return playerAircraft?'aircraft':onFoot?'foot':'car';}
+function clearAllInputState(reason){for(const k of Object.keys(keys))keys[k]=false;for(const k of Object.keys(keyLastEvent))delete keyLastEvent[k];releaseAllMobileInput();if(wheelState){wheelState.steer=0;wheelState.throttle=0;wheelState.brake=0;}const air=window.GameSystems&&GameSystems.api('aircraft');if(air&&air.clearControls)air.clearControls();const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.clearInputState)combat.clearInputState();inputLatchBreaks.lastReset=reason||'reset';return true;}
+function acknowledgeInputBoundaries(){inputBoundarySig=inputModalSignature();inputModeSig=inputModeSignature();}
+function inputGuardTick(){const boundary=inputModalSignature(),mode=inputModeSignature();if(inputBoundarySig===null)inputBoundarySig=boundary;else if(boundary!==inputBoundarySig){inputBoundarySig=boundary;clearAllInputState('modal-transition');inputBoundarySig=inputModalSignature();}if(inputModeSig===null)inputModeSig=mode;else if(mode!==inputModeSig){inputModeSig=mode;clearAllInputState('mode-transition');inputModeSig=inputModeSignature();}breakStaleDriveInput(performance.now());}
+function inputDebugState(){return{keys:Object.fromEntries(Object.entries(keys).filter(([,v])=>!!v)),lastEvent:Object.assign({},keyLastEvent),latchBreaks:{count:inputLatchBreaks.count,byKey:Object.assign({},inputLatchBreaks.byKey),lastKey:inputLatchBreaks.lastKey,lastSource:inputLatchBreaks.lastSource,lastAt:inputLatchBreaks.lastAt,lastReset:inputLatchBreaks.lastReset},mode:inputModeSignature(),modal:inputModalSignature()};}
 let carSelectionOpen=true,playerSirenOn=false,playerSirenAudioT=0,policeSirenAudioT=0;
 function closeTopOverlayV25(){
   const candidates=[],push=(el,open,close)=>{if(open&&el)candidates.push({el,close,z:parseInt(getComputedStyle(el).zIndex)||0,order:[...document.querySelectorAll('body *')].indexOf(el)});},api=id=>window.GameSystems&&GameSystems.api(id);
   const phone=api('pausephone'),admin=api('admin'),info=api('carInfo'),ammu=api('ammu'),fac=api('facilities'),shop=api('bodyshop'),help=api('help');
   push(document.getElementById('fullmap'),showFullMap,()=>toggleFullMap(false));push(document.getElementById('gamePhone'),phone&&phone.phoneOpen,()=>phone.closePhone());push(document.getElementById('gamePause'),phone&&phone.pauseOpen,()=>phone.closePause());push(document.getElementById('carInfoV22'),info&&info.open,()=>info.close());push(document.getElementById('adminV20'),admin&&admin.isOpen,()=>admin.close());push(document.getElementById('ammuV16'),ammu&&ammu.isOpen,()=>ammu.close());push(document.getElementById('facilityV11'),fac&&fac.isOpen,()=>fac.close());push(document.getElementById('shopRoot'),shop&&shop.panelOpen,()=>shop.closePanel(false));push(document.getElementById('helpRoot'),help&&help.isOpen,()=>help.close());push(wheelPanel,wheelSetupOpen,closeWheelSetup);
-  if(!candidates.length)return false;candidates.sort((a,b)=>b.z-a.z||b.order-a.order);candidates[0].close();return true;
+  if(!candidates.length)return false;candidates.sort((a,b)=>b.z-a.z||b.order-a.order);clearAllInputState('modal-close-begin');candidates[0].close();clearAllInputState('modal-close-end');acknowledgeInputBoundaries();return true;
 }
 addEventListener('keydown',e=>{ const k=e.key.toLowerCase();if(k==='escape'&&closeTopOverlayV25()){e.preventDefault();e.stopImmediatePropagation();return;}
   if(k==='f2'){e.preventDefault();wheelSetupOpen?closeWheelSetup():openWheelSetup();return;}
@@ -32188,7 +32217,7 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();if(k==='escape'&&clo
   if(k==='e'&&onFoot){const interact=window.GameSystems&&GameSystems.api('interact');if(interact&&interact.active&&interact.active()&&interact.trigger&&interact.trigger()){e.preventDefault();return;}const interiors=window.GameSystems&&GameSystems.api('interiors');if(interiors&&interiors.handleUseKey&&interiors.handleUseKey(true)){e.preventDefault();return;}const aa=window.GameSystems&&GameSystems.api('aircraft');if(aa&&aa.enterNearest&&aa.enterNearest()){e.preventDefault();return;}enterNearestCar();e.preventDefault();return;}
   if(window.GameSystems&&!DRIVE_KEYS.includes(k)&&GameSystems.onKey(k,e)){e.preventDefault();return;}
   if(k==='escape'&&started){e.preventDefault();const pm=window.GameSystems&&GameSystems.api('pausephone');if(pm&&pm.openPause)pm.openPause();return;}
-  keys[k]=true;
+  noteKeyEvent(e,true);
   if([' ','arrowup','arrowdown','arrowleft','arrowright','tab'].includes(k)) e.preventDefault();
   if(dead||dying) return;   // no controls once the car is on fire, nor on the WASTED screen
   if(k==='c'){camMode=(camMode+1)%4;cameraSmoothingReady=false;}
@@ -32205,7 +32234,10 @@ addEventListener('keydown',e=>{ const k=e.key.toLowerCase();if(k==='escape'&&clo
   if(!e.repeat&&(k==='x'||k==='u')) requestManualShift(1);
   if(!e.repeat&&(k==='y'||k==='z')) requestManualShift(-1);
 });
-addEventListener('keyup',e=>{const k=e.key.toLowerCase(),interiors=window.GameSystems&&GameSystems.api('interiors');if(k==='e'&&interiors&&interiors.handleUseKey)interiors.handleUseKey(false);keys[k]=false;});
+addEventListener('keyup',e=>{const k=(e.key||'').toLowerCase(),interiors=window.GameSystems&&GameSystems.api('interiors');if(k==='e'&&interiors&&interiors.handleUseKey)interiors.handleUseKey(false);noteKeyEvent(e,false);},true);
+addEventListener('blur',()=>clearAllInputState('window-blur'),true);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)clearAllInputState('visibility-hidden');},true);
+document.addEventListener('pointerlockchange',()=>clearAllInputState('pointerlockchange'),true);
 function resetCar(){
   resetBurstTires();if(onFoot){ carState.x=foot.x; carState.z=foot.z; }
   // if we're out of bounds or wedged under the map, go back to the world spawn
@@ -32318,25 +32350,25 @@ function respawnAtHospital(){
 // ---------- On foot: enter / exit / jack ----------
 function exitCar(force=false){
   const emergency=force||carState.burning||carState.hp<=0;if(!emergency&&(carState.airborne||Math.abs(carState.speed)>20)){addToast('Slow down to get out','#ff6b3b');return false;}
-  const speed=Math.abs(carState.speed);releaseVehicleAudio(.035);onFoot=true;footChar.visible=true;const rx=Math.cos(carState.heading),rz=-Math.sin(carState.heading),side=speed>18?6.5:4.5,_fp=WORLD_clampToBounds(carState.x+rx*side,carState.z+rz*side);foot.x=_fp.x;foot.z=_fp.z;foot.heading=carState.heading;foot.walk=0;
+  clearAllInputState('vehicle-exit');const speed=Math.abs(carState.speed);releaseVehicleAudio(.035);onFoot=true;footChar.visible=true;const rx=Math.cos(carState.heading),rz=-Math.sin(carState.heading),side=speed>18?6.5:4.5,_fp=WORLD_clampToBounds(carState.x+rx*side,carState.z+rz*side);foot.x=_fp.x;foot.z=_fp.z;foot.heading=carState.heading;foot.walk=0;
   if(emergency&&speed>24){const amount=clamp((speed-20)*.25,0,18),combat=window.GameSystems&&GameSystems.api('combat'),left=combat&&combat.absorbPlayerDamage?combat.absorbPlayerDamage(amount,{source:'bailout'}):amount;playerHealth=Math.max(0,playerHealth-left);stats.health=playerHealth;}
   if(carState.burning)detachBurningCar();else{carState.speed=0;carState.vx=0;carState.vz=0;resetDriftPhysics();}
   addToast(emergency?'Emergency bail-out · burning wreck left behind':'On foot — walk to any car and press E',emergency?'#ff922b':'#20e3ff');return true;
 }
 function enterNearestCar(){
-  if(car&&dist2(foot.x,foot.z,carState.x,carState.z)<9){onFoot=false;footChar.visible=false;claimVehicleAudio();addToast('Back in your ride','#20e3ff');return;}
+  if(car&&dist2(foot.x,foot.z,carState.x,carState.z)<9){clearAllInputState('vehicle-enter');onFoot=false;footChar.visible=false;claimVehicleAudio();addToast('Back in your ride','#20e3ff');return;}
   let copBest=null,copD=10;for(const c of cops){if(!c._inert||c._driverAlive||c._driverDeployed||c._occupants&&c._occupants.some(o=>o.alive))continue;const d=dist2(foot.x,foot.z,c.x,c.z);if(d<copD){copD=d;copBest=c;}}
   if(copBest){jackCopCar(copBest);return;}
   let best=-1,bd=10;for(let i=0;i<traffic.length;i++){const t=traffic[i];if(t.dead)continue;const d=dist2(foot.x,foot.z,t.x,t.z);if(d<bd){bd=d;best=i;}}if(best>=0){jackCar(best);return;}addToast('No car nearby','#9ab');
 }
 function PLAYER_crime(type,x,z,severity,immediate,sourceActor){const api=window.GameSystems&&GameSystems.api('crime');if(!api)return null;return api.report(type,{perpetrator:'player',actor:sourceActor||carState,x:x===undefined?playerX:x,z:z===undefined?playerZ:z,severity:severity||1,immediate:!!immediate,witnessRadius:135});}
 function jackCopCar(c){
-  const bikeApi=window.GameSystems&&GameSystems.api('bikes');if(c._bike&&bikeApi)bikeApi.adoptPoliceBike(c);
+  clearAllInputState('vehicle-carjack');const bikeApi=window.GameSystems&&GameSystems.api('bikes');if(c._bike&&bikeApi)bikeApi.adoptPoliceBike(c);
   const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.releaseCopOccupants)combat.releaseCopOccupants(c,true);const i=cops.indexOf(c);if(i>=0)cops.splice(i,1);car=c.mesh;car.userData.playerOwned=true;car.userData.policeActor=null;car.userData.policeVehicle=true;playerSirenOn=false;vehicleTuneKey=hydrateVehicleProfile('rally',true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey]||VEHICLE_TUNES.gripper||VEHICLE_TUNES.commuter;resetEngineHeat();loadPowertrainCondition();car.userData.vehicleTuneKey=vehicleTuneKey;carState.x=c.x;carState.z=c.z;carState.y=c.y;carState.heading=c.heading;carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;carState.hp=72;carState.burning=false;carState.fire=null;resetBurstTires();onFoot=false;footChar.visible=false;claimVehicleAudio();boom(c.x,c.z,0x2b6bff,10,c.y+2);addToast('🚓 Empty police car stolen','#ffd23f');{const crime=window.GameSystems&&GameSystems.api('crime'),witnessed=cops.some(o=>o!==c&&!o._inert&&!o._hidden&&dist2(o.x,o.z,c.x,c.z)<190);if(crime)crime.report('police-vehicle-theft',{perpetrator:'player',actor:carState,x:c.x,z:c.z,severity:2,priority:witnessed,immediate:witnessed,witnessRadius:190});}
   if(c._bike&&bikeApi){vehicleTuneKey=hydrateVehicleProfile(c._bikeId,true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];car.userData.vehicleTuneKey=vehicleTuneKey;resetEngineHeat();loadPowertrainCondition();}
 }
 function jackCar(i){
-  const t=traffic[i],bikeApi=window.GameSystems&&GameSystems.api('bikes');if(t._bike&&bikeApi)bikeApi.adoptTrafficBike(t);resetBurstTires();
+  clearAllInputState('vehicle-carjack');const t=traffic[i],bikeApi=window.GameSystems&&GameSystems.api('bikes');if(t._bike&&bikeApi)bikeApi.adoptTrafficBike(t);resetBurstTires();
   if(carState.burning) detachBurningCar();       // leave your burning car behind
   car=t.mesh;car.userData.policeVehicle=false;playerSirenOn=false; // old car mesh is left parked in the scene
   vehicleTuneKey=hydrateVehicleProfile(t._bike&&bikeApi?t._bikeId:'commuter',true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];resetEngineHeat();loadPowertrainCondition();car.userData.vehicleTuneKey=vehicleTuneKey;
@@ -32381,6 +32413,7 @@ function updateFoot(dt){
 // ---------- Update ----------
 let started=false;
 function update(dt){
+  inputGuardTick();
   if(!started){releaseVehicleAudio(.04);return;}enforceVehicleAudioLifecycle();
   if(document.body.classList.contains('game-paused')){if(engineGain&&audioCtx)engineGain.gain.setTargetAtTime(0,audioCtx.currentTime,.06);return;}
   if(carSelectionOpen){if(engineGain&&audioCtx){engineGain.gain.setTargetAtTime(0,audioCtx.currentTime,.08);silenceAuxAudio(.08);}return;}
@@ -32925,12 +32958,12 @@ function updateDrive(dt){
   carSurface=resolveCarSurface();   // one resolution per frame; physics, FX and audio all read this
   const bikeApi=window.GameSystems&&GameSystems.api('bikes'),bikeActive=!!(bikeApi&&bikeApi.playerActive());
   const controlsLocked=wheelSetupOpen||carSelectionOpen||document.body.classList.contains('paint-spray-active')||document.body.classList.contains('game-paused'),eventApi=window.GameSystems&&GameSystems.api('events'),raceNeutral=!!(eventApi&&eventApi.movementLocked&&eventApi.movementLocked());
-  const keyboardForward=!controlsLocked&&!!(keys['w']||(!bikeActive&&keys['arrowup'])||mobileInput.gas),backInput=!controlsLocked&&!!(keys['s']||(!bikeActive&&keys['arrowdown'])||mobileInput.brake);
-  const H=window.NEON_HANDEDNESS,keyboardSteer=!controlsLocked?H.carSteer(!!(keys['a']||keys['arrowleft']),!!(keys['d']||keys['arrowright'])):0,mobileSteering=!controlsLocked&&MOBILE_UI?mobileSteerInput(dt):0;
+  const keyboardForward=!controlsLocked&&!!(keys['w']||keys['KeyW']||(!bikeActive&&(keys['arrowup']||keys['ArrowUp']))||mobileInput.gas),backInput=!controlsLocked&&!!(keys['s']||keys['KeyS']||(!bikeActive&&(keys['arrowdown']||keys['ArrowDown']))||mobileInput.brake);
+  const H=window.NEON_HANDEDNESS,keyboardSteer=!controlsLocked?H.carSteer(!!(keys['a']||keys['KeyA']||keys['arrowleft']||keys['ArrowLeft']),!!(keys['d']||keys['KeyD']||keys['arrowright']||keys['ArrowRight'])):0,mobileSteering=!controlsLocked&&MOBILE_UI?mobileSteerInput(dt):0;
   const wheelActive=!controlsLocked&&wheelConfig.enabled&&wheelState.connected;
   const pedalThrottle=wheelActive?wheelState.throttle:0,pedalBrake=wheelActive?wheelState.brake:0;
   const forwardAmount=Math.max(keyboardForward?1:0,pedalThrottle),forwardInput=forwardAmount>.015;
-  const steerIn=Math.abs(keyboardSteer)>.001?keyboardSteer:Math.abs(mobileSteering)>.001?mobileSteering:(wheelActive?wheelState.steer:0);
+  const rawSteerIn=Math.abs(keyboardSteer)>.001?keyboardSteer:Math.abs(mobileSteering)>.001?mobileSteering:(wheelActive?wheelState.steer:0),steerIn=Math.abs(rawSteerIn)<.001?0:rawSteerIn;
   const braking=!controlsLocked&&!!((!bikeActive&&keys[' '])||mobileInput.handbrake);
   let vx=carState.vx,vz=carState.vz,dirx=Math.sin(carState.heading),dirz=Math.cos(carState.heading),sp=Math.hypot(vx,vz);
   let signedFwd=vx*dirx+vz*dirz;const flat=tireDamageProfile();
@@ -33662,7 +33695,7 @@ function drawMap(){ renderMap(mctx,190,false); if(showFullMap) renderMap(fctx,fu
 function focusFullMap(x,z,zoom=3.5){fullMapFocus={x:+x,z:+z,zoom:clamp(+zoom||3.5,1,7)};if(showFullMap)drawMap();return true;}
 function clearFullMapFocus(){fullMapFocus=null;}
 function toggleFullMap(force){
-  showFullMap=force===undefined?!showFullMap:!!force;const wrap=document.getElementById('fullmap');wrap.style.display=showFullMap?'flex':'none';
+  showFullMap=force===undefined?!showFullMap:!!force;clearAllInputState(showFullMap?'fullmap-open':'fullmap-close');const wrap=document.getElementById('fullmap');wrap.style.display=showFullMap?'flex':'none';
   if(!wrap.dataset.mapGuard){wrap.dataset.mapGuard='1';for(const type of ['pointerdown','pointerup','click','dblclick','contextmenu','wheel'])wrap.addEventListener(type,e=>e.stopPropagation());}
   if(showFullMap){try{if(document.pointerLockElement)document.exitPointerLock();}catch(_){}fullCanvas.tabIndex=0;fullCanvas.style.pointerEvents='auto';fullCanvas.style.cursor='grab';fullCanvas.focus({preventScroll:true});drawMap();}
   else{fullMapDrag=null;fullMapFocus=null;fullCanvas.style.cursor='';fullCanvas.dataset.mapDragged='0';}
@@ -33927,7 +33960,10 @@ window.GAME_DEBUG={
   pickVehicle(k){selectPlayerVehicle(k);resetCar();return vehicleTuneKey;},
   /** Full "map + car + go" in one call, for automated playtests. */
   start(mapId,vehicleKey){ if(mapId)activateWorld(mapId); selectPlayerVehicle(vehicleKey||'proDrift'); resetCar(); begin(); return this.car; },
-  press(k,down){keys[String(k).toLowerCase()]=!!down;},
+  press(k,down){return debugKeyEvent(k,down);},
+  get inputLatchBreaks(){return inputLatchBreaks.count;},
+  inputLatchState(){return inputDebugState().latchBreaks;},
+  inputState(){return inputDebugState();},
   /** Last n skid marks with the ground height under each — the only way to catch
       a mark that has been laid at the wrong height on sloped or elevated terrain. */
   markSample(n){return tireMarks.slice(-(n||5)).map(m=>({x:+m.mesh.position.x.toFixed(1),y:+m.mesh.position.y.toFixed(2),z:+m.mesh.position.z.toFixed(1),
@@ -34014,13 +34050,13 @@ updateWheelControlsUI();refreshWheelDevices();
 function openVehicleSelection(forceMap){
   if(started&&!forceMap){const pm=window.GameSystems&&GameSystems.api('pausephone');if(pm&&pm.openPause){pm.openPause();return;}}
   if(wheelSetupOpen)closeWheelSetup();if(showFullMap)toggleFullMap();
-  carSelectionOpen=true;document.body.classList.add('car-select-open');Object.keys(keys).forEach(k=>keys[k]=false);Object.keys(mobileInput).forEach(k=>mobileInput[k]=false);carState.speed=0;carState.vx=0;carState.vz=0;pendingGear=0;shiftKick=0;limiterActive=false;breakDriftCombo?.();
+  carSelectionOpen=true;document.body.classList.add('car-select-open');clearAllInputState('car-selection-open');carState.speed=0;carState.vx=0;carState.vz=0;pendingGear=0;shiftKick=0;limiterActive=false;breakDriftCombo?.();
   overlay.classList.remove('fade');
   showMapStage();
 }
 function begin(){
   const firstStart=!started;if(firstStart){started=true;last=performance.now();initAudio();claimVehicleAudio();WORLD_updateStreaming(carState.x,carState.z,1);}
-  carSelectionOpen=false;document.body.classList.remove('car-select-open');overlay.classList.add('fade');cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
+  carSelectionOpen=false;document.body.classList.remove('car-select-open');clearAllInputState('car-selection-close');acknowledgeInputBoundaries();overlay.classList.add('fade');cameraSmoothingReady=false;setBanner(vehicleTune.name,vehicleTune.drive,'#ff3b3b');
 }
 // ---------- Map selection ----------
 const mapSelectEl=document.getElementById('mapSelect'),overlayTitleEl=document.getElementById('overlayTitle');
@@ -34092,7 +34128,7 @@ if(window.GameSystems){
     quality:{mobile:MOBILE_UI,get tier(){return MOBILE_UI?'low':'high';}},
     dom:{ui:document.getElementById('systemsUI'),overlay,fullmap:document.getElementById('fullmap'),
          fullmapCanvas:fullCanvas,minimapCanvas:mapCanvas},
-    input:{keys,mobileInput,get muted(){return muted;}},
+    input:{keys,mobileInput,clearAll:clearAllInputState,breakLatch:breakExternalLatch,debug:inputDebugState,get muted(){return muted;}},
 
     player:{
       get x(){return PLAYER_x();},get z(){return PLAYER_z();},get y(){return PLAYER_y();},
@@ -34102,8 +34138,8 @@ if(window.GameSystems){
       get carMesh(){return car;},get footMesh(){return footChar;},foot,
       get health(){return playerHealth;},
       get hearts(){return playerHealth/100*3;},   // legacy unit, derived — kept for compat
-      beginAircraft(a,force){if(playerAircraft&&!force)return false;if(!force&&!onFoot)return false;playerAircraft=a;onFoot=false;if(footChar)footChar.visible=false;cameraSmoothingReady=false;return true;},
-      leaveAircraft(a,x,z,heading){if(playerAircraft!==a)return false;playerAircraft=null;onFoot=true;if(footChar)footChar.visible=true;const p=WORLD_clampToBounds(x,z);foot.x=p.x;foot.z=p.z;foot.heading=heading||0;foot.walk=0;playerX=foot.x;playerZ=foot.z;cameraSmoothingReady=false;return true;},
+      beginAircraft(a,force){if(playerAircraft&&!force)return false;if(!force&&!onFoot)return false;clearAllInputState('aircraft-enter');playerAircraft=a;onFoot=false;if(footChar)footChar.visible=false;cameraSmoothingReady=false;acknowledgeInputBoundaries();return true;},
+      leaveAircraft(a,x,z,heading){if(playerAircraft!==a)return false;clearAllInputState('aircraft-exit');playerAircraft=null;onFoot=true;if(footChar)footChar.visible=true;const p=WORLD_clampToBounds(x,z);foot.x=p.x;foot.z=p.z;foot.heading=heading||0;foot.walk=0;playerX=foot.x;playerZ=foot.z;cameraSmoothingReady=false;return true;},
       enterNearestCar,exitCar
     },
     carState,stats,   // live references, deliberately: the damage + progression systems co-own these
@@ -34222,6 +34258,7 @@ if(window.GameSystems){
     /** Read only live engine state; no simulation shortcut. */
     /** Stable mode strings: vehicle, on-foot, on-foot-aim, on-foot-first-person, plane, helicopter. */
     getState(){const combat=GameSystems.api('combat'),bikes=GameSystems.api('bikes'),mode=playerAircraft?(playerAircraft.kind==='heli'?'helicopter':'plane'):onFoot?(combat&&combat.aiming&&combat.aiming()?'on-foot-aim':combat&&combat.isFirstPerson&&combat.isFirstPerson()?'on-foot-first-person':'on-foot'):'vehicle',cameraYaw=onFoot&&combat&&combat.cameraYaw?combat.cameraYaw():PLAYER_heading();return{mode,playerX:PLAYER_x(),playerZ:PLAYER_z(),playerHeading:PLAYER_heading(),cameraYaw,vehicleId:vehicleTuneKey,vehicleSpeed:gameCtx.player.speed,driveMode,gear:reverseEngaged?'R':driveGear,engineOn:!engineBlown&&!engineSeized,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas),bikeActive:!!(bikes&&bikes.playerActive&&bikes.playerActive()),wantedStars:stats.wanted,hp:playerHealth};},
+    inputState(){return inputDebugState();},
     /** Hold a synthetic key through the real window keydown/keyup listeners. */
     pressKey(code,ms=60){ms=Math.max(0,Number(ms)||0);qaDispatch(code,'keydown');const frames=Math.max(1,Math.ceil(ms/(1000/60)));if(window.GAME_DEBUG&&window.GAME_DEBUG.step)window.GAME_DEBUG.step(frames,1/60);qaDispatch(code,'keyup');return Promise.resolve(true);},
     /** Inject a delta into the installed combat mousemove handler. */
