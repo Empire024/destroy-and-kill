@@ -6661,7 +6661,7 @@ window.addEventListener('unhandledrejection', (e) => {
       /**
        * Optional surface hint for the engine's off-road traction: 'paved'
        * short-circuits the road-corridor test. Downtown, the docks, retail,
-       * Northstar airport, Tidelight Island and Crown Heights are intentionally
+       * Northstar airport, Tidelight Island and Hills City are intentionally
        * poured edge to edge. Everything else answers null and the engine falls
        * back to distance-from-road: open hills, quarry dirt and the outer coast
        * remain genuinely loose surfaces.
@@ -6672,7 +6672,7 @@ window.addEventListener('unhandledrejection', (e) => {
         if (x > 1500 && x < 3900 && z > -1000 && z < 1000) return 'paved';    // retail strip
         if (x > 650 && x < 5350 && z > -5350 && z < -2450) return 'paved';    // Northstar airport
         if (x > -1650 && x < 1550 && z > 4300 && z < 5780) return 'paved';    // Tidelight island
-        if (x > -5820 && x < -4250 && z > -2520 && z < 720) return 'paved';   // Crown Heights
+        if (x > -5820 && x < -4250 && z > -2520 && z < 720) return 'paved';   // Hills City
         return null;
       },
 
@@ -11637,7 +11637,7 @@ window.addEventListener('unhandledrejection', (e) => {
  * Three resident districts extend the authored map beyond the original rim:
  *   1. NORTHSTAR INTERNATIONAL — runway, terminal, cargo hangars and tower.
  *   2. TIDELIGHT ISLAND — Ocean Bowl stadium, marina, lighthouse and boardwalk.
- *   3. CROWN HEIGHTS — cliff-top villas reached by two elevated canyon bridges.
+ *   3. HILLS CITY — steep grid city and suspension bridge on the west slope.
  *
  * Roads are registered through Builder.road(), so traffic, cops, navigation,
  * races and the minimap all consume the same centrelines. Every bridge is a
@@ -11912,78 +11912,101 @@ window.addEventListener('unhandledrejection', (e) => {
   }
 
   // ========================================================================
-  // CROWN HEIGHTS
+  // HILLS CITY — the steep west-side city. One analytical slope owns visuals,
+  // roads and physics; there is no decorative terrain layer fighting groundAt.
   // ========================================================================
   function buildVillas(b, r) {
-    const X0 = -5820, X1 = -4250, Z0 = -2520, Z1 = 720, EDGE = 210, TOP = 154;
-    b.terrain.addZone((x, z) => edgePlateau(x, z, X0, X1, Z0, Z1, EDGE, TOP));
-    b.terrainPatch(X0, Z0, X1, Z1, 58, (x, z) => ((x / 110 + z / 110) | 0) & 1 ? 0x22382f : 0x294137);
-    const H = (x, z) => b.terrain.heightAt(x, z);
+    const X0=-5820,X1=-4250,Z0=-2520,Z1=720,EDGE=190;
+    function hillsHeight(x,z){
+      if(x<X0||x>X1||z<Z0||z>Z1)return 0;
+      const ux=clamp01((x-X0)/(X1-X0)),west=smooth((x-X0)/EDGE),north=smooth((z-Z0)/EDGE),south=smooth((Z1-z)/EDGE),edge=Math.min(west,north,south);
+      const grade=10+178*smooth(ux),ridgeA=8.5*Math.exp(-Math.pow((x+5070)/78,2)),ridgeB=5.8*Math.exp(-Math.pow((x+4690)/62,2));
+      const cross=(3.6*Math.sin((z+1190)*.0046)+1.8*Math.sin((z-80)*.0091))*smooth(ux);
+      return Math.max(0,(grade+ridgeA+ridgeB+cross)*edge);
+    }
+    b.terrain.addZone(hillsHeight);
+    b.terrainPatch(X0,Z0,X1,Z1,46,(x,z)=>(((x+z)/92|0)&1)?0x26333b:0x2c3b43);
+    const H=(x,z)=>b.terrain.heightAt(x,z),road={width:36,color:0x29313a,curbColor:0x697582,lineColor:0xd7c889},avenue={width:42,color:0x252d36,curbColor:0x72808d,lineColor:0xe7d58b},tramRoad={width:40,color:0x27313a,curbColor:0x71808a,lineColor:0xc0b98b};
+    const XS=[-5620,-5335,-5050,-4765,-4480],ZS=[-2160,-1640,-1120,-600,-80,360];
+    function sampled(x0,z0,x1,z1,spacing){const len=Math.hypot(x1-x0,z1-z0),n=Math.max(1,Math.ceil(len/(spacing||78))),out=[];for(let i=0;i<=n;i++){const t=i/n,x=x0+(x1-x0)*t,z=z0+(z1-z0)*t;out.push([x,z,H(x,z)+.12]);}return out;}
+    for(const x of XS)b.road(sampled(x,ZS[0],x,ZS[ZS.length-1],72),road);
+    for(const z of ZS)b.road(sampled(XS[0],z,XS[XS.length-1],z,68),z===-600?tramRoad:avenue);
 
-    const existingSummit = roadPoint(b, -3405, -1598, 198);
-    const existingLowerN = b.roads.nearest(-3350, -545);
-    const existingLower = existingLowerN ? [existingLowerN.x, existingLowerN.z, existingLowerN.y] : [-3350, -545, 160];
-    const bridge = { width: 42, color: 0x242b39, curbColor: 0x697587, lineColor: 0xffd17a, deck: true };
-    const estateRoad = { width: 38, color: 0x29323d, curbColor: 0x626c78, lineColor: 0xe5cf8a };
-    const northLanding = [-4550, -1720, H(-4550, -1720) + .08];
-    const southLanding = [-4550, -520, H(-4550, -520) + .08];
-    b.road([existingSummit, [-3730, -1690, existingSummit[2] + 10], [-4070, -1700, 183], northLanding], bridge);
-    b.road([existingLower, [-3720, -600, existingLower[2] + 15], [-4100, -560, 172], southLanding], bridge);
+    // Two true switchback avenues climb the face without erasing the grid. Their
+    // alternating turns give slower cars a viable ascent while the straight grid
+    // remains the high-risk jump route.
+    const switchNorth=[[-5610,-2350],[-5280,-2170],[-5400,-1880],[-5010,-1760],[-5130,-1450],[-4740,-1320],[-4860,-1010],[-4490,-900]];
+    const switchSouth=[[-5590,250],[-5350,80],[-5450,-240],[-5110,-390],[-5210,-710],[-4870,-850],[-4970,-1180],[-4630,-1330],[-4480,-1500]];
+    b.road(roadY(b,switchNorth,.16),{width:32,color:0x2b343d,curbColor:0x66727e,lineColor:0x78d7e8});
+    b.road(roadY(b,switchSouth,.16),{width:32,color:0x2b343d,curbColor:0x66727e,lineColor:0x78d7e8});
 
-    const loop = [[-4550, -1720], [-5000, -2180], [-5500, -1900], [-5580, -900], [-5480, 180],
-      [-5000, 430], [-4550, -520], [-4550, -1720]];
-    b.road(roadY(b, loop, .16), estateRoad);
-    b.road(roadY(b, [[-4550, -1120], [-5580, -1120]], .16), estateRoad);
-    b.road(roadY(b, [[-5050, -2180], [-5050, 430]], .16), { width: 34, color: 0x2b3440, curbColor: 0x59636e, lineColor: 0x72dbff });
-
-    function villa(x, z, rot, scale, color) {
-      const y = H(x, z), c = Math.cos(rot), s = Math.sin(rot);
-      b.box({ x, z, y, w: 92 * scale, h: 20 * scale, d: 68 * scale, rot, color });
-      const ux = x + Math.cos(rot) * 18 * scale, uz = z - Math.sin(rot) * 18 * scale;
-      b.box({ x: ux, z: uz, y: y + 20 * scale, w: 58 * scale, h: 17 * scale, d: 48 * scale, rot,
-        color: dim(color, .83), noCollide: true });
-      const gx = x + Math.sin(rot) * 34 * scale, gz = z + Math.cos(rot) * 34 * scale;
-      b.box({ x: gx, z: gz, y: y + 8 * scale, w: 54 * scale, h: 9 * scale, d: 2, rot,
-        color: 0x65dfff, emissive: true, noCollide: true });
-      const px = x - Math.cos(rot) * 58 * scale, pz = z + Math.sin(rot) * 58 * scale;
-      slab(b, px - 28 * scale, pz - 18 * scale, px + 28 * scale, pz + 18 * scale, y + .18, 0x2a89a5, true);
-      b.box({ x: px, z: pz, y: y - 2, w: 60 * scale, h: 2.1, d: 40 * scale, rot, color: 0x1e566d, noCollide: true });
-      parkedCar(b, x + c * 62 * scale, z - s * 62 * scale, y, rot + Math.PI / 2,
-        [0x20262d, 0xd5d3cc, 0x70313c, 0x2f4c72][(r() * 4) | 0]);
+    // Small crest lips reinforce the analytical ridges. They are low enough to be
+    // normal streets at commuter speed, but a fast approach unloads the suspension.
+    for(const z of [-1640,-1120,-80]){
+      b.ramp({x:-5055,z,dir:Math.PI/2,w:24,len:44,height:3.6,baseY:H(-5077,z)-.15,color:0x303943});
+      b.ramp({x:-4690,z,dir:Math.PI/2,w:23,len:38,height:2.8,baseY:H(-4709,z)-.15,color:0x303943});
     }
 
-    const villas = [
-      [-4750, -1960, .28, 1.05], [-5220, -2020, -.18, .92], [-5480, -1650, -.35, 1.0],
-      [-4740, -1380, .05, .95], [-5220, -1450, .12, 1.08], [-5480, -1260, -.12, .88],
-      [-4740, -820, -.2, 1.0], [-5220, -780, .2, .94], [-5480, -600, .36, 1.04],
-      [-4780, -180, -.1, .95], [-5200, -130, .15, 1.0], [-5480, 70, -.25, .9]
-    ];
-    const villaColors = [0xc7c2b6, 0x9ca6ad, 0xd0bfa9, 0x87939c];
-    for (let i = 0; i < villas.length; i++) {
-      const v = villas[i];
-      villa(v[0], v[1], v[2], v[3], villaColors[i % villaColors.length]);
+    // Dense stepped housing: small footprints in the slope direction keep every
+    // building grounded instead of floating across a 15% grade.
+    const wallColors=[0xa7a39a,0x8e9aa2,0xb6a18e,0x7f8f96,0xb8b2a4,0x927f85];
+    function rowHouse(x,z,seed){
+      const y=H(x,z),w=54+(seed%3)*5,d=92+((seed>>2)%3)*9,h=18+((seed>>4)%4)*4,c=wallColors[seed%wallColors.length],base=y-5.5;
+      b.box({x,z,y:base,w,h:h+5.5,d,color:c});
+      b.box({x,z,y:base+h+5.5,w:w+3,h:2.4,d:d+3,color:dim(c,.58),noCollide:true});
+      const west=x-w*.5-.18;
+      for(let f=0;f<2;f++)b.box({x:west,z:z+(f?20:-20),y:y+5.2,w:.45,h:3.2,d:13,color:0xb7dddf,emissive:true,noCollide:true});
+      b.box({x:x+w*.5+.2,z,y:y+2.4,w:.5,h:3.8,d:12,color:0x33404d,noCollide:true});
+    }
+    let seed=7;
+    for(let ix=0;ix<XS.length-1;ix++)for(let iz=0;iz<ZS.length-1;iz++){
+      const xl=XS[ix]+34,xr=XS[ix+1]-34,za=ZS[iz]+42,zb=ZS[iz+1]-42;
+      for(const xt of [.30,.70])for(const zt of [.30,.70])rowHouse(xl+(xr-xl)*xt,za+(zb-za)*zt,seed++);
     }
 
-    // Crown Club / helipad silhouette at the plateau centre.
-    const CX = -5050, CZ = -1120, CY = H(CX, CZ);
-    b.box({ x: CX, z: CZ, y: CY, w: 190, h: 24, d: 120, color: 0x5d6874 });
-    b.box({ x: CX, z: CZ, y: CY + 24, w: 140, h: 18, d: 84, color: 0x75818c, noCollide: true });
-    b.box({ x: CX, z: CZ - 61, y: CY + 10, w: 150, h: 8, d: 2, color: 0xff4aa0, emissive: true, noCollide: true });
-    slab(b, CX - 74, CZ - 42, CX + 74, CZ + 42, CY + 42.3, 0x252d37);
-    slab(b, CX - 35, CZ - 4, CX + 35, CZ + 4, CY + 42.5, 0xffd94e, true);
-    slab(b, CX - 4, CZ - 34, CX + 4, CZ + 34, CY + 42.5, 0xffd94e, true);
+    // Stair alleys are pedestrian shortcuts between contour streets. Physics still
+    // walks the shared sloped ground below; these are visual treads, not a second
+    // collision staircase that could snag cars beside the kerb.
+    function stairs(x0,x1,z){const n=18;for(let i=0;i<n;i++){const t=(i+.5)/n,x=x0+(x1-x0)*t,y=H(x,z)+.07;b.box({x,z,y,w:Math.abs(x1-x0)/n+.8,h:.34,d:9,color:(i&1)?0x66717b:0x73808a,noCollide:true});}}
+    stairs(-5335,-5050,-1380);stairs(-5050,-4765,-860);stairs(-4765,-4480,-340);stairs(-5620,-5335,170);
 
-    // Cliff-edge lighting, palms and low walls make the plateau legible at speed.
-    for (let z = -2200; z <= 350; z += 230) {
-      lampInstance(b, 'v6-villa', -4460, z, H(-4460, z), 0xffb8e2);
-      if ((z / 230 | 0) % 2 === 0) palmInstance(b, -4380, z + 70, H(-4380, z + 70), .95);
+    // Cable-car line on Fogline Street. Twin rails follow the same sampled grade;
+    // overhead wire and three cars make the route legible from across the valley.
+    function ribbon(a,c,width,color,glow){const dx=c[0]-a[0],dz=c[2]-a[2],len=Math.hypot(dx,dz)||1,nx=dz/len*width,nz=-dx/len*width;b.quad([a[0]+nx,a[1],a[2]+nz],[c[0]+nx,c[1],c[2]+nz],[c[0]-nx,c[1],c[2]-nz],[a[0]-nx,a[1],a[2]-nz],color,!!glow);}
+    const tram=sampled(-5580,-600,-4500,-600,55);
+    for(let i=0;i<tram.length-1;i++){
+      const a=tram[i],c=tram[i+1],dx=c[0]-a[0],dz=c[1]-a[1],len=Math.hypot(dx,dz)||1,nx=dz/len*2.55,nz=-dx/len*2.55;
+      ribbon([a[0]+nx,a[2]+.22,a[1]+nz],[c[0]+nx,c[2]+.22,c[1]+nz],.18,0x9fa7ad,true);
+      ribbon([a[0]-nx,a[2]+.22,a[1]-nz],[c[0]-nx,c[2]+.22,c[1]-nz],.18,0x9fa7ad,true);
+      ribbon([a[0],a[2]+14,a[1]],[c[0],c[2]+14,c[1]],.12,0x9fc9dd,true);
     }
-    for (let x = -5650; x <= -4450; x += 180) {
-      b.box({ x, z: 560, y: H(x, 520), w: 150, h: 4.5, d: 5, color: 0x727b86 });
-      b.box({ x, z: 557, y: H(x, 520) + 3.1, w: 130, h: 1.1, d: 1, color: 0x61dfff, emissive: true, noCollide: true });
-    }
+    for(let x=-5520;x<=-4560;x+=160){const y=H(x,-600);b.box({x,z:-600,y,w:.75,h:16,d:.75,color:0x596775,noCollide:true});b.box({x,z:-600,y:y+15.5,w:10,h:.55,d:.55,color:0x718596,noCollide:true});}
+    for(const x of [-5440,-5050,-4660]){const y=H(x,-600);b.box({x,z:-600,y:y+.22,w:18,h:6.6,d:7.4,color:x===-5050?0xd6b24a:0x9b3949});b.box({x,z:-600,y:y+6.7,w:18,h:1.1,d:7.4,color:0x27313b,noCollide:true});b.box({x,z:-596.2,y:y+2,w:13,h:2.4,d:.35,color:0xc7ecff,emissive:true,noCollide:true});}
 
-    b.landmark('CROWN HEIGHTS', CX, CZ);
+    // Roadside life: cool lamps and angled parked cars. The cars deliberately sit
+    // on the grade streets rather than a flat lot, so the neighbourhood reads as
+    // occupied even when traffic streaming is between bursts.
+    const carColors=[0x26384d,0x8b3544,0xd8d4c9,0x2d2f35,0xb17b35,0x496657,0x6b4e77];
+    for(let zi=0;zi<ZS.length;zi++)for(let xi=0;xi<XS.length;xi+=2){const x=XS[xi],z=ZS[zi];lampInstance(b,'hills-city-lamp',x+21,z+34,H(x+21,z+34),0x67e7ff);}
+    let pc=0;for(const z of [-1900,-1380,-860,-340,180])for(const x of [-5480,-5190,-4905,-4620]){const side=(pc&1)?1:-1,zz=z+side*22;parkedCar(b,x,zz,H(x,zz)+.08,Math.PI/2+side*.13,carColors[pc++%carColors.length]);}
+
+    // Two physical overlooks back the map POIs. Low rails preserve the vista and
+    // keep the deck useful as a photo/meeting point instead of a decorative label.
+    function overlook(x,z,name){const y=H(x,z)+.18;slab(b,x-34,z-26,x+34,z+26,y,0x39454f);b.box({x:x+34,z,y:y+.1,w:2,h:4,d:54,color:0x74818c});b.box({x,z:z-26,y:y+.1,w:70,h:4,d:2,color:0x74818c});b.box({x,z:z+26,y:y+.1,w:70,h:4,d:2,color:0x74818c});b.landmark(name,x,z);}
+    overlook(-4470,-2050,'TWIN PEAK VIEW');overlook(-4485,250,'FOGLINE OVERLOOK');
+
+    // AURORA SPAN — one continuous drivable suspension bridge from the upper grid
+    // into the existing Hillside road network. Towers/cables are authored scenery;
+    // the deck itself is the engine's real DeckSystem surface and RoadNet segment.
+    const summit=roadPoint(b,-3405,-1598,198),start=[-4480,-1640,H(-4480,-1640)+.18],p1=[-4260,-1620,184],p2=[-3940,-1607,190],p3=[-3650,-1601,195];
+    b.road([start,p1,p2,p3,summit],{width:48,color:0x242d38,curbColor:0x788896,lineColor:0xffd27b,deck:true});
+    function deckYAt(x){const t=clamp01((x-start[0])/(summit[0]-start[0]));return start[2]+(summit[2]-start[2])*t;}
+    function tower(x,z){const y=deckYAt(x);for(const side of [-1,1]){b.box({x,z:z+side*31,y,w:7,h:112,d:7,color:0x596875});b.box({x,z:z+side*31,y:y+112,w:11,h:8,d:11,color:0x81909b,noCollide:true});}b.box({x,z,y:y+73,w:7,h:6,d:70,color:0x657581,noCollide:true});b.box({x,z,y:y+104,w:7,h:6,d:70,color:0x657581,noCollide:true});}
+    tower(-4220,-1618);tower(-3665,-1601);
+    function bridgeCable(side){const zoff=side*29,nodes=[[-4480,deckYAt(-4480)+20,-1640+zoff],[-4220,deckYAt(-4220)+108,-1618+zoff],[-3940,deckYAt(-3940)+52,-1607+zoff],[-3665,deckYAt(-3665)+108,-1601+zoff],[-3405,deckYAt(-3405)+20,-1598+zoff]];for(let i=0;i<nodes.length-1;i++)ribbon(nodes[i],nodes[i+1],.34,0xb6c9d4,true);for(let x=-4180;x<=-3710;x+=78){const t=(x+4180)/470,zz=-1616+(15*t)+zoff,dy=deckYAt(x),cy=dy+52+56*Math.pow(Math.abs(t-.5)*2,2);b.box({x,z:zz,y:dy+3,w:.55,h:Math.max(4,cy-dy-3),d:.55,color:0x9fb5c2,noCollide:true});}}
+    bridgeCable(-1);bridgeCable(1);
+    b.landmark('AURORA SPAN',-3940,-1607);
+    b.landmark('HILLS CITY',-5050,-1120);
   }
 
   function build(b) {
@@ -11993,7 +12016,7 @@ window.addEventListener('unhandledrejection', (e) => {
     buildVillas(b, r);
   }
 
-  window.NeonDistricts.push({ id: 'v6-expansion', name: 'NORTHSTAR / TIDELIGHT / CROWN HEIGHTS', build });
+  window.NeonDistricts.push({ id: 'v6-expansion', name: 'NORTHSTAR / TIDELIGHT / HILLS CITY', build });
 })();
 
 
@@ -12868,23 +12891,23 @@ window.addEventListener('unhandledrejection', (e) => {
   window.VEHICLE_TUNE_PRESETS = PRESETS;
   window.VEHICLE_PAINTS = PAINTS;
 
-  /* v31 stock benchmark anchors. `topSpeed` intentionally uses the same raw
+  /* v33 benchmark reconciliation. `topSpeed` uses the same raw
    * __QA.getState().vehicleSpeed units written by dragtimes.csv; HUD mph is x1.6.
-   * The measured v30 axis is preserved until the owner supplies the clean v31
-   * rerun. Missing/changed cars use the exact drivetrain integrator calibrated
-   * against the three valid automatics: FWD 0-60 x0.637795, AWD x1.483784,
-   * RWD x1.734694; 22s top-speed model x0.963450 fleet mean. */
+   * The current measured axis is the valid v32 pair: PEPPER GT and GRAVEL RS.
+   * Their 0-60/top values are ground truth; no current trustworthy 0-100 axis
+   * exists, so the graph falls back to measured 0-60. Other cars remain clearly
+   * labelled model-calibrated-v31 until the next complete clean rerun. */
   window.VEHICLE_BENCHMARKS = Object.freeze({
-    axis:Object.freeze({zeroTo60Fast:2.7,zeroTo60Slow:4.25,zeroTo100Fast:3.66,zeroTo100Slow:4.25,topSlow:83,topFast:124}),
+    axis:Object.freeze({zeroTo60Fast:3.2,zeroTo60Slow:4.26,zeroTo100Fast:null,zeroTo100Slow:null,topSlow:85,topFast:101}),
     calibration:Object.freeze({fwd60:.637795,awd60:1.483784,rwd60:1.734694,top:.963450}),
     cars:Object.freeze({
       commuter:Object.freeze({zeroTo60:8.84,zeroTo100:null,topSpeed:45.4,source:'model-calibrated-v31'}),
       streetDrift:Object.freeze({zeroTo60:5.41,zeroTo100:13.30,topSpeed:91.2,source:'model-calibrated-v31'}),
       proDrift:Object.freeze({zeroTo60:2.83,zeroTo100:7.95,topSpeed:152.3,source:'model-calibrated-v31'}),
       hauler:Object.freeze({zeroTo60:6.71,zeroTo100:null,topSpeed:47.8,source:'model-calibrated-v31'}),
-      hotHatch:Object.freeze({zeroTo60:4.16,zeroTo100:6.41,topSpeed:91.3,source:'model-calibrated-v31',measuredV30:Object.freeze({zeroTo60:2.7,zeroTo100:null,topSpeed:83})}),
+      hotHatch:Object.freeze({zeroTo60:3.2,zeroTo100:null,topSpeed:85,source:'measured-v32',measuredV30:Object.freeze({zeroTo60:2.7,zeroTo100:null,topSpeed:83})}),
       muscleV8:Object.freeze({zeroTo60:4.08,zeroTo100:7.86,topSpeed:100.5,source:'model-calibrated-v31'}),
-      rally:Object.freeze({zeroTo60:3.64,zeroTo100:6.65,topSpeed:108.4,source:'model-calibrated-v31',measuredV30:Object.freeze({zeroTo60:3.66,zeroTo100:3.66,topSpeed:115})}),
+      rally:Object.freeze({zeroTo60:4.26,zeroTo100:null,topSpeed:101,source:'measured-v32',measuredV30:Object.freeze({zeroTo60:3.66,zeroTo100:3.66,topSpeed:115})}),
       trackCoupe:Object.freeze({zeroTo60:4.25,zeroTo100:4.25,topSpeed:124,source:'measured-v30'}),
       gripper:Object.freeze({zeroTo60:2.67,zeroTo100:5.00,topSpeed:172.2,source:'model-calibrated-v31'})
     })
@@ -13257,18 +13280,33 @@ window.RACES = [
     ]
   },
 
-  // Lower canyon road, south bridge and a full climb through the villa plateau.
+  // Hills City hill climb: low switchback entry, steep grid crests, upper bridge approach.
   {
-    id: 'nr-crown-ascent', worldId: 'neon', name: 'CROWN ASCENT', raceType: 'HILLCLIMB', laps: 1,
-    difficulty: 4, reward: 4500, firstWinBonus: 2300, entryFee: 200, rubberBand: 0.075,
-    anchors: [{ x: -3350, z: -545 }, { x: -4100, z: -560 }, { x: -4550, z: -520 },
-              { x: -5000, z: 430 }, { x: -5480, z: 180 }, { x: -5580, z: -900 },
-              { x: -5050, z: -1120 }],
+    id: 'nr-crown-ascent', worldId: 'neon', name: 'FOGLINE HILL CLIMB', raceType: 'HILLCLIMB', laps: 1,
+    difficulty: 4, reward: 4700, firstWinBonus: 2400, entryFee: 200, rubberBand: 0.07,
+    anchors: [{ x: -5620, z: 360 }, { x: -5335, z: -80 }, { x: -5050, z: -600 },
+              { x: -5050, z: -1120 }, { x: -4765, z: -1640 }, { x: -4480, z: -1640 },
+              { x: -3940, z: -1607 }],
     opponents: [
-      { name: 'INFINITY', skill: 0.58, aggression: 0.24, mistakes: 0.28, tuneKey: 'streetDrift', color: 0xd8d3c6 },
-      { name: 'PENTHOUSE', skill: 0.67, aggression: 0.38, mistakes: 0.19, tuneKey: 'proDrift', color: 0x65dfff },
-      { name: 'HELIPAD', skill: 0.76, aggression: 0.48, mistakes: 0.13, tuneKey: 'proDrift', color: 0xff4a9d },
-      { name: 'CROWN', skill: 0.84, aggression: 0.36, mistakes: 0.09, tuneKey: 'gripper', color: 0xffd23f }
+      { name: 'BELL', skill: 0.58, aggression: 0.22, mistakes: 0.27, tuneKey: 'streetDrift', color: 0xd8d3c6 },
+      { name: 'FOGLINE', skill: 0.67, aggression: 0.34, mistakes: 0.18, tuneKey: 'hotHatch', color: 0x65dfff },
+      { name: 'CREST', skill: 0.76, aggression: 0.44, mistakes: 0.12, tuneKey: 'rally', color: 0xff4a9d },
+      { name: 'AURORA', skill: 0.83, aggression: 0.34, mistakes: 0.09, tuneKey: 'trackCoupe', color: 0xffd23f }
+    ]
+  },
+
+  // Downhill race runs the opposite discipline: brake points and gravity matter
+  // more than power, and the last switchback punishes a car that arrives crossed-up.
+  {
+    id: 'nr-hills-gravity', worldId: 'neon', name: 'GRAVITY LINE', raceType: 'DESCENT', laps: 1,
+    difficulty: 3, reward: 3900, firstWinBonus: 1900, entryFee: 150, rubberBand: 0.055,
+    anchors: [{ x: -4480, z: -80 }, { x: -4765, z: -600 }, { x: -5050, z: -600 },
+              { x: -5050, z: -1120 }, { x: -5335, z: -1640 }, { x: -5620, z: -2160 }],
+    opponents: [
+      { name: 'BRAKE LIGHT', skill: 0.53, aggression: 0.18, mistakes: 0.30, tuneKey: 'streetDrift', color: 0xf0ece2 },
+      { name: 'CABLE', skill: 0.63, aggression: 0.30, mistakes: 0.21, tuneKey: 'hotHatch', color: 0x67e7ff },
+      { name: 'DROP', skill: 0.72, aggression: 0.38, mistakes: 0.14, tuneKey: 'rally', color: 0xff7abf },
+      { name: 'NO LIFT', skill: 0.79, aggression: 0.42, mistakes: 0.10, tuneKey: 'trackCoupe', color: 0xffd23f }
     ]
   },
 
@@ -16627,7 +16665,12 @@ body.help-open #mobileControls{display:none!important}
     {id:'hospitals',label:'HOSPITALS',kinds:['hospital'],color:'#ff3b3b'},
     {id:'aircraft',label:'AIRCRAFT',kinds:['aircraft'],color:'#20e3ff'}
   ];
-  const DISTRICTS={neon:[['DOWNTOWN',-600,120],['THE STRIP',2200,520],['DOCKS',-730,2480],['AIRPORT',1300,-4380],['HILLS',-2580,-930],['CROWN',-4750,-1380],['LINK DISTRICT',2550,-1100],['ISLAND',480,5480]],prague:[['OLD TOWN',0,0],['RIVER DISTRICT',700,900],['INDUSTRIAL',-1100,1250]]};
+  const DISTRICTS={neon:[['DOWNTOWN',-600,120],['THE STRIP',2200,520],['DOCKS',-730,2480],['AIRPORT',1300,-4380],['HILLSIDE',-2580,-930],['HILLS CITY',-5050,-1120],['LINK DISTRICT',2550,-1100],['ISLAND',480,5480]],prague:[['OLD TOWN',0,0],['RIVER DISTRICT',700,900],['INDUSTRIAL',-1100,1250]]};
+  const HILLS_CITY_POIS=[
+    {id:'hc-aurora-span',worldId:'neon',x:-3940,z:-1607,icon:'═',label:'AURORA SPAN',kind:'poi',color:'#a7d7ff'},
+    {id:'hc-twin-peak',worldId:'neon',x:-4470,z:-2050,icon:'▲',label:'TWIN PEAK VIEW',kind:'poi',color:'#b8d9ff'},
+    {id:'hc-fogline',worldId:'neon',x:-4485,z:250,icon:'▲',label:'FOGLINE OVERLOOK',kind:'poi',color:'#b8d9ff'}
+  ];
   const KIND_FILTER = Object.create(null);
   for (const f of FILTER_DEFS) for (const k of f.kinds) KIND_FILTER[k] = f.id;
 
@@ -17122,6 +17165,7 @@ body.mobile-ui #mapCategoriesV25{left:6px;top:6px;bottom:6px;width:min(270px,70v
       }
       const bikes = window.BikesModule;
       if (bikes) bikes.registerPOIs({ addPOI });
+      for(const poi of HILLS_CITY_POIS)addPOI(poi);
       buildCompass();
       const cv = ctx.dom.fullmapCanvas;
       if (cv) {
@@ -27060,7 +27104,7 @@ Assumptions that may not hold after integration:
   const STORES=Object.freeze([
     Object.freeze({id:'ammu-downtown',name:'AMMU-NATION · DOWNTOWN',x:-760,z:430,accent:0xff3b6b,stock:['ammo:pistol','weapon:bat','weapon:knife','weapon:smg','ammo:smg','armour:25']}),
     Object.freeze({id:'ammu-strip',name:'AMMU-NATION · THE STRIP',x:2260,z:330,accent:0xffd23f,stock:['ammo:pistol','weapon:crowbar','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','armour:50']}),
-    Object.freeze({id:'ammu-crown',name:'AMMU-NATION · CROWN',x:-4680,z:-860,accent:0x20e3ff,stock:['weapon:knife','weapon:crowbar','weapon:smg','ammo:smg','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','weapon:rpg','ammo:rpg','weapon:minigun','ammo:minigun','armour:50']})
+    Object.freeze({id:'ammu-crown',name:'AMMU-NATION · HILLS CITY',x:-5050,z:-860,accent:0x20e3ff,stock:['weapon:knife','weapon:crowbar','weapon:smg','ammo:smg','weapon:shotgun','ammo:shotgun','weapon:rifle','ammo:rifle','weapon:rpg','ammo:rpg','weapon:minigun','ammo:minigun','armour:50']})
   ]);
   const WEAPON_LABELS=Object.assign({pistol:'PISTOL',smg:'NEON SMG',shotgun:'PUMP SHOTGUN',rifle:'CARBINE'},MeleeCombatModule.shopLabels(),HeavyOrdnanceModule.shopLabels()),WEAPON_PRICES=Object.assign({smg:1600,shotgun:2400,rifle:4200},MeleeCombatModule.shopPrices(),HeavyOrdnanceModule.shopPrices()),AMMO=Object.assign({pistol:{amount:24,cost:120},smg:{amount:60,cost:360},shotgun:{amount:18,cost:270},rifle:{amount:60,cost:540}},HeavyOrdnanceModule.ammoProducts());
   let ctx=null,combat=null,prog=null,nav=null,interact=null,root=null,panel=null,open=null,selection=0,markers=[];
@@ -28319,7 +28363,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
       destination:{x:1320,z:5150,label:'Glasswave Marina'}
     },
     {
-      id:'crown-to-cargo',title:'CROWN TO CARGO',brief:'Carry a high-value case from Crown Heights to airport cargo.',
+      id:'crown-to-cargo',title:'HILLS TO CARGO',brief:'Carry a high-value case from Hills City to airport cargo.',
       x:-5050,z:-1120,reward:3600,time:220,requiresCar:true,
       destination:{x:4450,z:-3840,label:'Northstar cargo apron'},minHp:45,
       prerequisite:{missions:2,completed:['northstar-courier']}
@@ -28351,7 +28395,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
       x:-1200,z:4520,reward:5400,time:430,requiresCar:true,
       prerequisite:{missions:4},
       checkpoints:[
-        {x:-5050,z:-1120,label:'Crown Heights'},
+        {x:-5050,z:-1120,label:'Hills City'},
         {x:1900,z:130,label:'The Strip'},
         {x:250,z:810,label:'Downtown'},
         {x:530,z:2860,label:'Freight Docks'},
@@ -28388,7 +28432,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
   const FACILITY_DEFINITIONS=[
     {id:'garage-downtown',kind:'garage',name:'DOWNTOWN LOCKUP',x:-1030,z:830,spawnX:-995,spawnZ:830,heading:Math.PI/2,slots:5},
     {id:'garage-docks',kind:'garage',name:'DOCKS WAREHOUSE',x:-730,z:2480,spawnX:-690,spawnZ:2480,heading:Math.PI/2,slots:5},
-    {id:'garage-crown',kind:'garage',name:'CROWN MOTOR HOUSE',x:-4750,z:-1380,spawnX:-4708,spawnZ:-1380,heading:Math.PI/2,slots:4},
+    {id:'garage-crown',kind:'garage',name:'HILLS CITY MOTOR HOUSE',x:-4765,z:-1320,spawnX:-4765,spawnZ:-1278,heading:Math.PI/2,slots:4},
     {id:'garage-island',kind:'garage',name:'TIDELIGHT LOCKUP',x:480,z:5480,spawnX:480,spawnZ:5442,heading:Math.PI,slots:4},
     {id:'dealer-retail',kind:'dealer',name:'CANYON MOTORS',x:1810,z:760,spawnX:1848,spawnZ:760,heading:Math.PI/2,stock:[
       {id:'commuter',price:450},{id:'hauler',price:1500},{id:'hotHatch',price:3600,missions:1},{id:'muscleV8',price:5600,missions:3}
@@ -28396,7 +28440,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
     {id:'dealer-airport',kind:'dealer',name:'NORTHSTAR FLEET',x:4450,z:-3840,spawnX:4410,spawnZ:-3840,heading:-Math.PI/2,stock:[
       {id:'hauler',price:1400},{id:'hotHatch',price:3400,missions:1},{id:'rally',price:6800,missions:4}
     ]},
-    {id:'dealer-crown',kind:'dealer',name:'CROWN ELITE MOTORS',x:-5480,z:-600,spawnX:-5438,spawnZ:-600,heading:Math.PI/2,stock:[
+    {id:'dealer-crown',kind:'dealer',name:'HILLS CITY AUTOS',x:-5335,z:-360,spawnX:-5335,spawnZ:-318,heading:-Math.PI/2,stock:[
       {id:'proDrift',price:8500,raceWins:3},{id:'trackCoupe',price:9800,raceWins:6},{id:'gripper',price:22000,raceWins:10,missions:8}
     ]}
   ];
@@ -29174,8 +29218,8 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
    const t=ctx.vehicles.tune,p=GameSystems.api('progression'),up=GameSystems.api('vehicleUpgrades'),id=p&&p.currentVehicle?p.currentVehicle():ctx.vehicles.currentKey,
      entry=p&&p.entry?p.entry(id):null,preset=p&&p.presetOf?p.presetOf(id):'stock',protect=up&&up.state?up.state(id):{armor:0,proofTires:false},pt=ctx.engine.powertrain?ctx.engine.powertrain():{},
      pack=window.VEHICLE_BENCHMARKS||{},axis=pack.axis||{},bench=pack.cars&&pack.cars[id]||null,handling=ctx.engine.vehicleHandlingTelemetry?ctx.engine.vehicleHandlingTelemetry(id,true):null,ranges=fleetHandlingRanges();
-   const n60=bench?normTime(bench.zeroTo60,axis.zeroTo60Fast,axis.zeroTo60Slow):0,n100=bench&&Number.isFinite(bench.zeroTo100)?normTime(bench.zeroTo100,axis.zeroTo100Fast,axis.zeroTo100Slow):n60,
-     accel=n60*.65+n100*.35,top=bench&&axis.topFast>axis.topSlow?clamp((bench.topSpeed-axis.topSlow)/(axis.topFast-axis.topSlow),0,1):0,
+   const n60=bench?normTime(bench.zeroTo60,axis.zeroTo60Fast,axis.zeroTo60Slow):0,has100=Number.isFinite(axis.zeroTo100Fast)&&Number.isFinite(axis.zeroTo100Slow)&&axis.zeroTo100Slow>axis.zeroTo100Fast,n100=bench&&has100&&Number.isFinite(bench.zeroTo100)?normTime(bench.zeroTo100,axis.zeroTo100Fast,axis.zeroTo100Slow):n60,
+     accel=has100?n60*.65+n100*.35:n60,top=bench&&axis.topFast>axis.topSlow?clamp((bench.topSpeed-axis.topSlow)/(axis.topFast-axis.topSlow),0,1):0,
      durability=clamp(((pt.engineCondition||100)+(pt.transmissionCondition||100))/200*.65+(protect.armor||0)*.12,0,1);
    return{id,name:entry&&entry.displayName||t.name,preset,installed:t.installedHardware||[],ecu:t.extremeTune?'EXTREME':t.hardwareStage?('STAGE '+t.hardwareStage):'FACTORY',protection:protect,nitrousInstalled:!!pt.nitrousInstalled,forcedInduction:pt.forcedInduction||'na',bench,handling,
      values:[accel,top,handling?normUp(handling.gripMetric,ranges.grip):0,handling?normUp(handling.driftMetric,ranges.drift):0,handling?normUp(handling.steerMetric,ranges.steer):0,handling?normUp(handling.recoveryMetric,ranges.recovery):0,durability]};
@@ -29188,7 +29232,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
    g.fillStyle='rgba(32,227,255,.18)';g.strokeStyle='#20e3ff';g.shadowColor='#20e3ff';g.shadowBlur=12;g.beginPath();for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length,x=cx+Math.cos(a)*R*d.values[i],y=cy+Math.sin(a)*R*d.values[i];i?g.lineTo(x,y):g.moveTo(x,y);}g.closePath();g.fill();g.stroke();g.shadowBlur=0;
    for(let i=0;i<labels.length;i++){const a=-Math.PI/2+i*Math.PI*2/labels.length;g.fillStyle='#cdd9e9';g.fillText(labels[i],cx+Math.cos(a)*(R+42),cy+Math.sin(a)*(R+28)+7);}
    const b=d.bench||{},src=String(b.source||'unbenchmarked').toUpperCase().replace(/-/g,' '),benchLine=d.bench?('STOCK BENCH 0-60 '+fmtBench(b.zeroTo60)+'s · 0-100 '+fmtBench(b.zeroTo100)+'s · TOP '+fmtBench(b.topSpeed)+' QA'):'STOCK BENCH unavailable';
-   text.textContent=d.name+' · '+d.preset.toUpperCase()+'\n'+benchLine+'\nSOURCE '+src+' · GRAPH SCALE = VALID V30 MEASURED FLEET\nECU '+d.ecu+' · HARDWARE '+(d.installed.length?d.installed.join(', '):'STOCK')+'\nNITRO '+(d.nitrousInstalled?'INSTALLED':'NOT INSTALLED')+' · TURBO '+(d.forcedInduction==='turbo'?'INSTALLED':d.forcedInduction==='supercharger'?'SUPERCHARGED':'NATURALLY ASPIRATED')+'\nARMOUR TIER '+(d.protection.armor||0)+' · PUNCTURE-PROOF '+(d.protection.proofTires?'YES':'NO');
+   text.textContent=d.name+' · '+d.preset.toUpperCase()+'\n'+benchLine+'\nSOURCE '+src+' · GRAPH SCALE = VALID V32 MEASURED RUNS\nECU '+d.ecu+' · HARDWARE '+(d.installed.length?d.installed.join(', '):'STOCK')+'\nNITRO '+(d.nitrousInstalled?'INSTALLED':'NOT INSTALLED')+' · TURBO '+(d.forcedInduction==='turbo'?'INSTALLED':d.forcedInduction==='supercharger'?'SUPERCHARGED':'NATURALLY ASPIRATED')+'\nARMOUR TIER '+(d.protection.armor||0)+' · PUNCTURE-PROOF '+(d.protection.proofTires?'YES':'NO');
  }
  function openPanel(){if(ctx.player.onFoot||ctx.player.inAircraft)return false;ensure();open=true;root.classList.add('on');draw();return true;}function close(){open=false;if(root)root.classList.remove('on');}
  GameSystems.register({id:'carInfo',order:108,alwaysUpdate:true,init(c){ctx=c;ensure();},onKey(k){if(k==='i'&&!ctx.player.onFoot&&!ctx.player.inAircraft){open?close():openPanel();return true;}if(open&&k==='escape'){close();return true;}return open;},update(dt){if(open&&(ctx.player.onFoot||ctx.player.inAircraft)){close();return;}if(open&&(tick-=dt)<=0){tick=.2;draw();}},api:{open:openPanel,close,toggle(){return open?close():openPanel();},get open(){return open;}}});
@@ -29825,7 +29869,7 @@ window.PAINT_SHOPS_V20=Object.freeze([
   Object.freeze({id:'paint-airport',name:'AIRPORT PAINT & SPRAY',x:690,z:2820,heading:0,style:{accent:0x20e3ff}}),
   Object.freeze({id:'paint-retail',name:'RETAIL PAINT & SPRAY',x:1980,z:920,heading:Math.PI,style:{accent:0xff7abf}}),
   Object.freeze({id:'paint-hills',name:'HILLS PAINT & SPRAY',x:-2310,z:-1210,heading:Math.PI/2,style:{accent:0x3bff8b}}),
-  Object.freeze({id:'paint-crown',name:'CROWN PAINT & SPRAY',x:-4460,z:-1110,heading:Math.PI,style:{accent:0xffd23f}}),
+  Object.freeze({id:'paint-crown',name:'HILLS CITY PAINT & SPRAY',x:-4480,z:-860,heading:Math.PI/2,style:{accent:0x67e7ff}}),
   Object.freeze({id:'paint-island',name:'ISLAND PAINT & SPRAY',x:690,z:5200,heading:Math.PI/2,style:{accent:0x20e3ff}}),
   Object.freeze({id:'paint-links',name:'LINKS PAINT & SPRAY',x:2440,z:-760,heading:0,style:{accent:0xff2d9b}})
 ]);
@@ -30358,7 +30402,7 @@ function trafficDistrictAt(x,z){
   if(activeWorld&&activeWorld.id==='neon'){
     if(x>650&&z<-2450)return'airport';
     if(z>4250&&x>-1800&&x<1750)return'island';
-    if(x<-4200)return'crown';
+    if(x<-4200&&z>-2800&&z<900)return'hillsCity';
     if(z>1500&&z<4200&&Math.abs(x)<1750)return'docks';
     if(Math.abs(x)<1450&&Math.abs(z)<1450)return'downtown';
     if(x>1450&&x<4100&&Math.abs(z)<1250)return'retail';
@@ -30370,9 +30414,9 @@ function trafficVehicleSpecAt(x,z){
   if(district==='docks'||district==='airport'){
     style=r<.38?CAR_STYLES[3]:r<.72?CAR_STYLES[5]:r<.88?CAR_STYLES[2]:CAR_STYLES[0];
     color=pick([0xe5e0d4,0x586372,0xd28b35,0x2f5269,0x8c3d36]);kind=r<.72?'freight':'service';cruise=.88;pullout=.018;
-  }else if(district==='crown'){
-    style=r<.38?CAR_STYLES[1]:r<.68?CAR_STYLES[4]:r<.88?CAR_STYLES[2]:CAR_STYLES[0];
-    color=pick([0xf0ede4,0x1b222d,0x31577d,0x7f293d,0xb8954e]);kind='luxury';cruise=1.12;pullout=.065;
+  }else if(district==='hillsCity'){
+    style=r<.34?CAR_STYLES[0]:r<.58?CAR_STYLES[1]:r<.78?CAR_STYLES[4]:r<.91?CAR_STYLES[2]:CAR_STYLES[3];
+    color=pick([0xe7e2d8,0x31485f,0x723847,0x8a8f93,0xb28a4e,0x405d54]);kind='hill-city';cruise=.76;pullout=.032;
   }else if(district==='downtown'){
     if(r<.34){style=CAR_STYLES[0];color=0xffc22e;kind='taxi';cruise=.96;}
     else{style=r<.70?CAR_STYLES[0]:r<.86?CAR_STYLES[2]:r<.94?CAR_STYLES[3]:CAR_STYLES[1];color=pick(trafficColors);kind='city';}
@@ -30890,7 +30934,7 @@ function populationTargets(px,pz){
   // 72 is where the city reads as busy with most of a 60fps frame still free.
   // Expansion districts scale the same streamed pool instead of owning parallel
   // actor lists: airport roads carry service traffic but few walkers, the island
-  // is lively around the stadium/marina, and Crown Heights stays intentionally quiet.
+  // is lively around the stadium/marina, while Hills City packs walkers onto steep blocks.
   const base=MOBILE_UI?40:72,pedBase=MOBILE_UI?30:72;
   let carMul=1,pedMul=.9,keep=1150,pedKeep=850,burst=6;
   if(activeWorld&&activeWorld.id==='neon'){
@@ -30898,7 +30942,7 @@ function populationTargets(px,pz){
     else if(Math.abs(px)<1750&&pz>1500&&pz<4200){carMul=1.04;pedMul=.26;keep=1200;pedKeep=690;burst=5;}
     else if(px>650&&pz<-2450){carMul=.88;pedMul=.18;keep=1320;pedKeep=650;burst=5;}
     else if(pz>4250&&px>-1800&&px<1750){carMul=.72;pedMul=.48;keep=1080;pedKeep=760;burst=5;}
-    else if(px<-4200){carMul=.62;pedMul=.36;keep=1050;pedKeep=700;burst=4;}
+    else if(px<-4200&&pz>-2800&&pz<900){carMul=.78;pedMul=1.16;keep=980;pedKeep=790;burst=6;}
     else if(px>1450&&px<4100&&Math.abs(pz)<1250){carMul=1.05;pedMul=1.02;}
   }
   const county=window.SanAndreasCountyModule,rural=county&&county.populationProfileAt(px,pz);
@@ -31560,10 +31604,12 @@ function rpmForGearAtMph(mph,gear){const ceil=(GEAR_CEILS[gear]||GEAR_CEILS[MAX_
 function setManualMode(){ driveMode='M'; manualModeTimer=6.5; manualModeHardTimer=14; shiftHoldTimer=0; shiftPromptTimer=0; }
 function setDriveMode(){driveMode='D';manualModeTimer=0;manualModeHardTimer=0;shiftHoldTimer=0;autoShiftLock=.45;}
 function prepareAutomaticDrive(reason){
+  const benchmark=reason==='qa-benchmark',heldW=benchmark&&!!keys['w'],heldArrow=benchmark&&!!keys['arrowup'],heldGas=benchmark&&!!mobileInput.gas;
   setDriveMode();autoShiftLock=0;reverseEngaged=false;driveGear=1;pendingGear=0;pendingPowerShift=false;gearDragTimer=0;shiftKick=0;gearElapsed=0;shiftPromptTimer=0;shiftNeeded=false;autoDownshiftTimer=0;autoRevBlipTimer=0;autoRevBlipRpm=0;autoRevBlipStrength=0;
   fakeRpm=engineIdleRpm();audioRpm=fakeRpm;throttleResponse=0;drivenWheelSpin=0;drivenWheelRpm=0;brakeReverseTimer=0;reverseHoldTimer=0;limiterActive=false;limiterHoldTimer=0;limiterPlayTimer=0;
   for(const k of Object.keys(keys))keys[k]=false;Object.assign(mobileInput,{gas:false,brake:false,left:false,right:false,handbrake:false,nitro:false,shiftUp:false,shiftDown:false});
-  engineBlown=false;engineSeized=false;claimVehicleAudio();return{reason:reason||'automatic-ready',driveMode,gear:driveGear,reverse:reverseEngaged,handbrake:false};
+  if(benchmark){keys['w']=heldW;keys['arrowup']=heldArrow;mobileInput.gas=heldGas;}
+  engineBlown=false;engineSeized=false;claimVehicleAudio();return{reason:reason||'automatic-ready',driveMode,gear:driveGear,reverse:reverseEngaged,handbrake:false,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas)};
 }
 function selectReverse(manual=true){
   if(manual&&fakeRpm>2200)return false;reverseEngaged=true;driveGear=1;pendingGear=0;gearDragTimer=0;shiftKick=0;gearElapsed=0;fakeRpm=Math.max(900,Math.min(fakeRpm,2200));brakeReverseTimer=0;reverseHoldTimer=0;if(manual)setManualMode();addToast('R · REVERSE','#ffd23f');return true;
@@ -34118,7 +34164,7 @@ if(window.GameSystems){
         const aa=window.GameSystems&&GameSystems.api('aircraft');if(playerAircraft&&aa&&aa.exitCurrent)aa.exitCurrent();
         selectPlayerVehicle(id,{stock:true});resetCar();this.teleportCar(pose.x,pose.z,pose.heading||0,pose.y);
         carState.hp=100;stats.health=playerHealth=100;engineCondition=100;transmissionCondition=100;engineDamage=0;engineBlown=false;engineSeized=false;resetEngineHeat();restorePlayerVehicleDamage(null,true);
-        ensurePlayerPossession('qa-benchmark',{x:pose.x,z:pose.z,y:pose.y,heading:pose.heading||0});prepareAutomaticDrive('qa-benchmark');return true;
+        ensurePlayerPossession('qa-benchmark',{x:pose.x,z:pose.z,y:pose.y,heading:pose.heading||0});const ready=prepareAutomaticDrive('qa-benchmark'),bikes=window.GameSystems&&GameSystems.api('bikes');if(bikes&&bikes.isBike&&bikes.isBike(id)&&bikes.preparePlayerSpawn)ready.bike=bikes.preparePlayerSpawn(id);return ready;
       },
       deliverCurrentCar(pose){if(!pose)return false;if(carState.burning&&car)detachBurningCar();if(!car){car=makePlayerVehicleMesh(vehicleTuneKey,carColor);car.userData.vehicleTuneKey=vehicleTuneKey;}car.userData.playerOwned=true;carState.x=pose.x;carState.z=pose.z;carState.heading=pose.heading||0;carState.y=WORLD_groundHeightAt(pose.x,pose.z,pose.y===undefined?carState.y:pose.y);carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;carState.hp=100;carState.burning=false;carState.fuse=0;engineBlown=false;resetBurstTires();if(carState.fire&&car)car.remove(carState.fire);carState.fire=null;restorePlayerVehicleDamage(null,true);car.position.set(carState.x,carState.y,carState.z);car.rotation.set(0,carState.heading,0);cameraSmoothingReady=false;return true;},
       resetCar,reviveForRace,ensurePlayerPossession,playerPossessionValid,vehicleHandlingTelemetry,forceEjectBurningVehicle,burstTire,burstTireAt,burstVehicleTire,vehicleTireCorners(v){return v==='player'||v===carState||v===car?playerTireCorners():genericTireCorners(v);},vehicleTireProfile:genericTireProfile,requestManualShift,vehicleDamageSnapshot:snapshotPlayerVehicleDamage,freshVehicleDamageSnapshot,restoreVehicleDamage(snap,fresh){return restorePlayerVehicleDamage(snap,!!fresh);},repairPowertrain(){engineCondition=100;transmissionCondition=100;engineDamage=0;engineBlown=false;engineSeized=false;resetEngineHeat();savePowertrainCondition(true);},powertrain(){return{engineName:vehicleTune.engineName,engineClass:vehicleTune.engineClass,quality:vehicleTune.engineQuality,safeRpm:engineSafeRpm(),limiterRpm:engineLimiterRpm(),limiterTolerance:vehicleTune.limiterTolerance,overRevTolerance:vehicleTune.overRevTolerance,heatTolerance:vehicleTune.heatTolerance,condition:engineCondition,transmissionCondition,temperature:Math.round(78+engineHeatSeconds*2),misfire:misfireSeverity,stage:vehicleTune.hardwareStage,hardware:(vehicleTune.installedHardware||[]).slice(),forcedInduction:vehicleTune.forcedInduction,nitrousInstalled:!!vehicleTune.nitrousInstalled,wheelspin:drivenWheelSpin,driveMode,gear:reverseEngaged?'R':driveGear};},
@@ -34175,7 +34221,7 @@ if(window.GameSystems){
     startGame(mapIndex=0,vehicleIndex=0){return qaStartGame(mapIndex,vehicleIndex);},
     /** Read only live engine state; no simulation shortcut. */
     /** Stable mode strings: vehicle, on-foot, on-foot-aim, on-foot-first-person, plane, helicopter. */
-    getState(){const combat=GameSystems.api('combat'),mode=playerAircraft?(playerAircraft.kind==='heli'?'helicopter':'plane'):onFoot?(combat&&combat.aiming&&combat.aiming()?'on-foot-aim':combat&&combat.isFirstPerson&&combat.isFirstPerson()?'on-foot-first-person':'on-foot'):'vehicle',cameraYaw=onFoot&&combat&&combat.cameraYaw?combat.cameraYaw():PLAYER_heading();return{mode,playerX:PLAYER_x(),playerZ:PLAYER_z(),playerHeading:PLAYER_heading(),cameraYaw,vehicleSpeed:gameCtx.player.speed,wantedStars:stats.wanted,hp:playerHealth};},
+    getState(){const combat=GameSystems.api('combat'),bikes=GameSystems.api('bikes'),mode=playerAircraft?(playerAircraft.kind==='heli'?'helicopter':'plane'):onFoot?(combat&&combat.aiming&&combat.aiming()?'on-foot-aim':combat&&combat.isFirstPerson&&combat.isFirstPerson()?'on-foot-first-person':'on-foot'):'vehicle',cameraYaw=onFoot&&combat&&combat.cameraYaw?combat.cameraYaw():PLAYER_heading();return{mode,playerX:PLAYER_x(),playerZ:PLAYER_z(),playerHeading:PLAYER_heading(),cameraYaw,vehicleId:vehicleTuneKey,vehicleSpeed:gameCtx.player.speed,driveMode,gear:reverseEngaged?'R':driveGear,engineOn:!engineBlown&&!engineSeized,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas),bikeActive:!!(bikes&&bikes.playerActive&&bikes.playerActive()),wantedStars:stats.wanted,hp:playerHealth};},
     /** Hold a synthetic key through the real window keydown/keyup listeners. */
     pressKey(code,ms=60){ms=Math.max(0,Number(ms)||0);qaDispatch(code,'keydown');const frames=Math.max(1,Math.ceil(ms/(1000/60)));if(window.GAME_DEBUG&&window.GAME_DEBUG.step)window.GAME_DEBUG.step(frames,1/60);qaDispatch(code,'keyup');return Promise.resolve(true);},
     /** Inject a delta into the installed combat mousemove handler. */
@@ -34193,7 +34239,7 @@ if(window.GameSystems){
     spawnVehicle(id){
       id=String(id||'');const row=this.listVehicles().find(v=>v.id===id);if(!row||!VEHICLE_TUNES[id])throw new RangeError('unknown drivable vehicle: '+id);
       const x=PLAYER_x(),z=PLAYER_z(),heading=PLAYER_heading(),y=WORLD_groundHeightAt(x,z,PLAYER_y()),ok=gameCtx.engine.benchmarkSpawnVehicle&&gameCtx.engine.benchmarkSpawnVehicle(id,{x,z,y,heading});
-      if(!ok)return false;const pt=gameCtx.engine.powertrain?gameCtx.engine.powertrain():{};return{id:row.id,name:row.name,class:row.class,x:PLAYER_x(),z:PLAYER_z(),heading:PLAYER_heading(),hp:playerHealth,stock:true,engineOn:!engineBlown&&!engineSeized,driveMode:pt.driveMode||driveMode,gear:pt.gear||driveGear,reverse:!!reverseEngaged,handbrake:false};
+      if(!ok)return false;const pt=gameCtx.engine.powertrain?gameCtx.engine.powertrain():{},bikes=GameSystems.api('bikes'),bike=bikes&&bikes.isBike&&bikes.isBike(id);return{id:row.id,name:row.name,class:row.class,x:PLAYER_x(),z:PLAYER_z(),heading:PLAYER_heading(),hp:playerHealth,stock:true,engineOn:!engineBlown&&!engineSeized,driveMode:pt.driveMode||driveMode,gear:pt.gear||driveGear,reverse:!!reverseEngaged,handbrake:false,throttleHeld:!!(keys['w']||keys['arrowup']||mobileInput.gas),bike:bike?{mounted:!!(ok.bike&&ok.bike.mounted),balanced:!!(ok.bike&&ok.bike.balanced)}:null};
     },
     /** Admin-style relocation without creating or clearing wanted heat. */
     teleport(x,z){x=Number(x);z=Number(z);if(!Number.isFinite(x)||!Number.isFinite(z))throw new TypeError('teleport requires finite x/z');const admin=GameSystems.api('admin');if(admin&&admin.teleport)admin.teleport(x,z,PLAYER_heading());else if(onFoot){const p=WORLD_clampToBounds(x,z);foot.x=p.x;foot.z=p.z;footChar.position.set(p.x,WORLD_groundHeightAt(p.x,p.z,footChar.position.y),p.z);cameraSmoothingReady=false;}else gameCtx.engine.teleportCar(x,z,PLAYER_heading());}
@@ -35267,6 +35313,18 @@ Syntax self-check commands:
       fogMix: 0.52, lightMix: 0.060,
       city: 0.08, wind: 0.50, coast: 0.00, birds: 0.10
     },
+    hillsCity: {
+      id: 'hillsCity',
+      fog: [0x101827, 0x718b9b, 0x8da8b5, 0x666c7d],
+      top: [0x050a16, 0x485f72, 0x6d91ad, 0x363d55],
+      horizon: [0x162536, 0x9fb6b8, 0xb8d0d5, 0x9a8588],
+      low: [0x0b151f, 0x657e87, 0x607d88, 0x585965],
+      tint: [0xd8e8ff, 0xd9eff4, 0xe7f4f6, 0xe4d9e6],
+      density: [1.20, 1.92, 1.08, 1.31],
+      haze: [0.84, 1.78, 0.92, 1.30],
+      fogMix: 0.57, lightMix: 0.064,
+      city: 0.58, wind: 0.42, coast: 0.00, birds: 0.04
+    },
     desert: {
       id: 'desert',
       fog: [0x211714, 0xbd7952, 0xd1a261, 0xb75e3e],
@@ -35314,9 +35372,9 @@ Syntax self-check commands:
   var D_QUARRY = { id: 'quarry', name: 'THE QUARRY', profile: PROFILES.desert, minX: 1450, maxX: 4300, minZ: 1450, maxZ: 4300 };
   var D_AIRPORT = { id: 'airport', name: 'NORTHSTAR AIRPORT', profile: PROFILES.sprawl, minX: 650, maxX: 5700, minZ: -5550, maxZ: -2400 };
   var D_ISLAND = { id: 'island', name: 'TIDELIGHT COAST', profile: PROFILES.coast, minX: -1850, maxX: 1800, minZ: 4200, maxZ: 6000 };
-  var D_CROWN = { id: 'crown', name: 'CROWN HEIGHTS', profile: PROFILES.hills, minX: -6000, maxX: -4150, minZ: -3000, maxZ: 1000 };
+  var D_HILLS_CITY = { id: 'hillsCity', name: 'HILLS CITY', profile: PROFILES.hillsCity, minX: -6000, maxX: -4150, minZ: -3000, maxZ: 1000 };
   var D_BEACH = { id: 'beach', name: 'BEACH', profile: PROFILES.coast };
-  var ZONES = [D_AIRPORT, D_ISLAND, D_CROWN, D_DOCKS, D_HILLS, D_DOWNTOWN, D_STRIP, D_QUARRY];
+  var ZONES = [D_AIRPORT, D_ISLAND, D_HILLS_CITY, D_DOCKS, D_HILLS, D_DOWNTOWN, D_STRIP, D_QUARRY];
 
   var COUNTY = {
     'county-gate': { id: 'county-gate', name: 'COUNTY GATE', profile: PROFILES.sprawl },
@@ -35332,7 +35390,7 @@ Syntax self-check commands:
     docks: D_DOCKS, industrial: D_DOCKS, hills: D_HILLS,
     sprawl: D_STRIP, strip: D_STRIP, quarry: D_QUARRY,
     desert: D_QUARRY, airport: D_AIRPORT, island: D_ISLAND,
-    coast: D_ISLAND, beach: D_BEACH, crown: D_CROWN
+    coast: D_ISLAND, beach: D_BEACH, hillsCity: D_HILLS_CITY, crown: D_HILLS_CITY
   };
   for (var countyId in COUNTY) if (Object.prototype.hasOwnProperty.call(COUNTY, countyId)) DISTRICT_BY_ID[countyId] = COUNTY[countyId];
 
@@ -36409,7 +36467,8 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     island:Object.freeze({chance:.28,weights:Object.freeze({bmx:.40,mountainBike:.18,moped:.31,sportBike:.07,chopper:.04})}),
     docks:Object.freeze({chance:.055,weights:Object.freeze({bmx:.08,mountainBike:.10,moped:.45,sportBike:.22,chopper:.15})}),
     airport:Object.freeze({chance:.018,weights:Object.freeze({bmx:.02,mountainBike:.03,moped:.38,sportBike:.42,chopper:.15})}),
-    crown:Object.freeze({chance:.05,weights:Object.freeze({bmx:.08,mountainBike:.12,moped:.35,sportBike:.30,chopper:.15})}),
+    hillsCity:Object.freeze({chance:.16,weights:Object.freeze({bmx:.15,mountainBike:.18,moped:.46,sportBike:.15,chopper:.06})}),
+    crown:Object.freeze({chance:.16,weights:Object.freeze({bmx:.15,mountainBike:.18,moped:.46,sportBike:.15,chopper:.06})}),
     hills:Object.freeze({chance:.10,weights:Object.freeze({bmx:.10,mountainBike:.40,moped:.24,sportBike:.16,chopper:.10})}),
     county:Object.freeze({chance:.13,weights:Object.freeze({bmx:.08,mountainBike:.45,moped:.30,sportBike:.09,chopper:.08})}),
     general:Object.freeze({chance:.09,weights:Object.freeze({bmx:.17,mountainBike:.14,moped:.45,sportBike:.16,chopper:.08})}),
@@ -36592,12 +36651,18 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     }
 
     function ensurePlayerRider(){const id=playerBikeId(),mesh=ctx.player.carMesh;if(!id||!mesh||ctx.player.onFoot||ejection){if(playerRider){releaseRider('__player__');playerRider=null;}return null;}playerRider=takeRider('__player__',id,mesh);return playerRider;}
+    function preparePlayerSpawn(id){
+      id=id||playerBikeId();if(!isBike(id)||ctx.player.onFoot||ctx.player.inAircraft)return null;ejection=null;const mesh=ctx.player.carMesh;if(!mesh)return null;
+      releaseRider('__player__');playerRider=null;mesh.rotation.x=0;mesh.rotation.z=0;mesh.userData._bikePlayerState={lean:0,pitch:0,pedal:0};lastVehicleId=id;lastPlayerVx=lastPlayerVz=lastPlayerMph=0;chainPhase=0;jumpLatch=false;
+      const rider=ensurePlayerRider();if(rider)poseRider(rider,BALANCE[id],0,0,0,0,false,false);
+      return{bikeId:id,mounted:!!rider,balanced:Math.abs(mesh.rotation.z)<.001&&!ejection};
+    }
 
     function takeBikeMesh(id,color){let pool=bikeMeshPool.get(id);if(!pool){pool=[];bikeMeshPool.set(id,pool);}let mesh=pool.pop();if(!mesh)mesh=createVehicleMesh(T,id,{color:color});else{mesh.visible=true;setBikeColor(mesh,color==null?TUNES[id].color:color);mesh.position.set(0,0,0);mesh.rotation.set(0,0,0);mesh.scale.set(1,1,1);}if(mesh.parent!==ctx.scene)ctx.scene.add(mesh);return mesh;}
     function releaseBikeMesh(id,mesh){if(!mesh||!isBike(id))return false;if(mesh.parent)mesh.parent.remove(mesh);mesh.visible=false;let pool=bikeMeshPool.get(id);if(!pool){pool=[];bikeMeshPool.set(id,pool);}if(pool.length<MAX_MESH_PER_ID)pool.push(mesh);else disposeBikeMesh(mesh);return true;}
     function disposeBikeMesh(mesh){if(!mesh)return;if(mesh.parent)mesh.parent.remove(mesh);const geos=new Set(),mats=new Set();mesh.traverse(function(o){if(o.geometry&&!geos.has(o.geometry)){geos.add(o.geometry);if(o.geometry.dispose)o.geometry.dispose();}const arr=o.material?(Array.isArray(o.material)?o.material:[o.material]):[];for(const m of arr)if(m&&!mats.has(m)){mats.add(m);if(m.dispose)m.dispose();}});}
 
-    function districtKey(x,z){if(x>5600)return'county';if(z>4300&&x>-1800&&x<1750)return'island';if(x>650&&z<-2450)return'airport';if(x<-4200)return'crown';if(Math.abs(x)<1750&&z>1500&&z<4200)return'docks';if(x>1450&&x<4100&&Math.abs(z)<1250)return'retail';if(x<-1700&&z<500)return'hills';if(Math.abs(x)<1500&&Math.abs(z)<1500)return'downtown';return'general';}
+    function districtKey(x,z){if(x>5600)return'county';if(z>4300&&x>-1800&&x<1750)return'island';if(x>650&&z<-2450)return'airport';if(x<-4200&&z>-2800&&z<900)return'hillsCity';if(Math.abs(x)<1750&&z>1500&&z<4200)return'docks';if(x>1450&&x<4100&&Math.abs(z)<1250)return'retail';if(x<-1700&&z<500)return'hills';if(Math.abs(x)<1500&&Math.abs(z)<1500)return'downtown';return'general';}
     function weightedBike(weights,r){let total=0;for(const id of BIKE_IDS)total+=weights[id]||0;let q=r*total;for(const id of BIKE_IDS){q-=weights[id]||0;if(q<=0)return id;}return'moped';}
     function trafficSpecAt(x,z,baseSpec,road){const key=districtKey(x,z),row=NPC_DENSITY[key]||NPC_DENSITY.general;let chance=row.chance;const type=road&&(road.roadType||road.type);if(type==='highway'||type==='mountain')chance*=NPC_DENSITY.highwayMultiplier;if(type==='freeway'||(road&&road.width>48))chance*=NPC_DENSITY.freewayMultiplier;if(Math.random()>=chance)return null;const id=weightedBike(row.weights,Math.random()),s=BALANCE[id],t=TUNES[id];return Object.assign({},baseSpec||{},{bikeId:id,kind:'bike',color:t.color,cruise:(baseSpec&&baseSpec.cruise||1)*s.npcCruise,pullout:baseSpec&&baseSpec.pullout||0,district:key,_bike:true});}
     function takeTrafficMesh(spec){return takeBikeMesh(spec.bikeId,spec.color);}
@@ -36661,6 +36726,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
       version:VERSION,
       playerActive:playerActive,
       playerBikeId:playerBikeId,
+      preparePlayerSpawn:preparePlayerSpawn,
       playerCollisionShape:playerCollisionShape,
       reportImpact:reportImpact,
       ejectPlayer:ejectPlayer,
@@ -36698,6 +36764,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
       api:{
         playerActive:function(){return!!(systemRuntime&&systemRuntime.playerActive());},
         playerBikeId:function(){return systemRuntime&&systemRuntime.playerBikeId();},
+        preparePlayerSpawn:function(id){return systemRuntime&&systemRuntime.preparePlayerSpawn(id);},
         playerCollisionShape:function(){return systemRuntime&&systemRuntime.playerCollisionShape();},
         reportImpact:function(impact,meta){return!!(systemRuntime&&systemRuntime.reportImpact(impact,meta));},
         ejectPlayer:function(impact,meta){return!!(systemRuntime&&systemRuntime.ejectPlayer(impact,meta));},
@@ -38390,7 +38457,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   const GARAGES=Object.freeze([
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-downtown',facilityId:'garage-downtown',name:'DOWNTOWN LOCKUP WORKSHOP',x:-1030,z:830,side:1,accent:0xff9b2b,theme:'downtown'})}),
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-docks',facilityId:'garage-docks',name:'DOCKS WAREHOUSE WORKSHOP',x:-730,z:2480,side:-1,accent:0xff9b2b,theme:'docks'})}),
-    Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-crown',facilityId:'garage-crown',name:'CROWN MOTOR HOUSE WORKSHOP',x:-4750,z:-1380,side:1,accent:0xffd23f,theme:'crown'})}),
+    Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-crown',facilityId:'garage-crown',name:'HILLS CITY MOTOR HOUSE WORKSHOP',x:-4765,z:-1320,side:1,accent:0x67e7ff,theme:'hills'})}),
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-island',facilityId:'garage-island',name:'TIDELIGHT LOCKUP WORKSHOP',x:480,z:5480,side:-1,accent:0x20e3ff,theme:'island'})})
   ]);
 
@@ -38401,7 +38468,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-airport',paintShopId:'paint-airport',name:'AIRPORT PAINT & SPRAY · FLOOR',x:690,z:2820,side:-1,accent:0x20e3ff})}),
     Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-retail',paintShopId:'paint-retail',name:'RETAIL PAINT & SPRAY · FLOOR',x:1980,z:920,side:1,accent:0xff7abf})}),
     Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-hills',paintShopId:'paint-hills',name:'HILLS PAINT & SPRAY · FLOOR',x:-2310,z:-1210,side:-1,accent:0x3bff8b})}),
-    Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-crown',paintShopId:'paint-crown',name:'CROWN PAINT & SPRAY · FLOOR',x:-4460,z:-1110,side:1,accent:0xffd23f})}),
+    Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-crown',paintShopId:'paint-crown',name:'HILLS CITY PAINT & SPRAY · FLOOR',x:-4480,z:-860,side:1,accent:0x67e7ff})}),
     Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-island',paintShopId:'paint-island',name:'ISLAND PAINT & SPRAY · FLOOR',x:690,z:5200,side:-1,accent:0x20e3ff})}),
     Object.freeze({kind:'paint',def:Object.freeze({id:'int-paint-links',paintShopId:'paint-links',name:'LINKS PAINT & SPRAY · FLOOR',x:2440,z:-760,side:1,accent:0xff2d9b})})
   ]);
@@ -38409,17 +38476,19 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   const AMMU=Object.freeze([
     Object.freeze({kind:'ammu',def:Object.freeze({id:'int-ammu-downtown',ammuId:'ammu-downtown',name:'AMMU-NATION · DOWNTOWN FLOOR',x:-760,z:430,side:-1,accent:0xff3b6b})}),
     Object.freeze({kind:'ammu',def:Object.freeze({id:'int-ammu-strip',ammuId:'ammu-strip',name:'AMMU-NATION · THE STRIP FLOOR',x:2260,z:330,side:1,accent:0xffd23f})}),
-    Object.freeze({kind:'ammu',def:Object.freeze({id:'int-ammu-crown',ammuId:'ammu-crown',name:'AMMU-NATION · CROWN FLOOR',x:-4680,z:-860,side:-1,accent:0x20e3ff})})
+    Object.freeze({kind:'ammu',def:Object.freeze({id:'int-ammu-crown',ammuId:'ammu-crown',name:'AMMU-NATION · HILLS CITY FLOOR',x:-5050,z:-860,side:-1,accent:0x20e3ff})})
   ]);
 
   const EXTRA_SAFE=Object.freeze([
-    Object.freeze({kind:'safehouse',def:Object.freeze({id:'safe-island-shack',name:'TIDELIGHT BEACH SHACK',x:940,z:5260,side:1,accent:0x20e3ff,contentTheme:'beach'})})
+    Object.freeze({kind:'safehouse',def:Object.freeze({id:'safe-island-shack',name:'TIDELIGHT BEACH SHACK',x:940,z:5260,side:1,accent:0x20e3ff,contentTheme:'beach'})}),
+    Object.freeze({kind:'safehouse',def:Object.freeze({id:'safe-hills-city',name:'FOGLINE ROW HOUSE',x:-5335,z:-860,side:1,accent:0x67e7ff,contentTheme:'hills'})})
   ]);
 
   const SAFE_THEMES=Object.freeze({
     'safe-downtown':'studio',
     'safe-docks':'loft',
     'safe-hills':'hills',
+    'safe-hills-city':'hills',
     'safe-strip':'studio',
     'safe-island-shack':'beach'
   });
