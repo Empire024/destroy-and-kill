@@ -15,7 +15,7 @@ The in-game versions are heavily simplified, procedural adaptations optimized fo
      have nothing to dodge. user-scalable=no stops a double-tap zooming the HUD mid-corner. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <link rel="icon" href="data:,">
-<title>DESTROY AND KILL — NEON CITY</title>
+<title>NEON STATE</title>
 <style>
   :root{--neon:#ff2d9b;--cyan:#20e3ff;--gold:#ffd23f;--danger:#ff3b3b;--green:#3bff8b;}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -539,7 +539,7 @@ S</span>
 <div class="hud" id="wantedState" aria-live="polite"></div>
 <div id="overlay">
   <h1 id="overlayTitle">CHOOSE YOUR MAP</h1>
-  <div class="sub">DESTROY AND KILL</div>
+  <div class="sub">WELCOME TO THE STATE OF NEON</div>
   <div id="mapSelect"></div>
   <div id="vehicleSelect" style="display:none">
     <button class="vehicleCard" data-vehicle="streetDrift" style="--card:#ff7abf">
@@ -4710,11 +4710,11 @@ window.addEventListener('unhandledrejection', (e) => {
   // channel (cells-to-water over LAND, `wdist`), and the visuals, the sand
   // physics and the furniture all read that.
   const WDIST_CAP = 6;          // BFS is capped: nothing past the band cares
-  const BEACH_BAND = 2;         // land cells within this many of water are beach
+  const BEACH_BAND = 3;         // 120-unit land strip: enough room to read as a beach
   const BEACH_LO = -0.8;        // ground must sit in this window around the
   const BEACH_HI = 3.0;         // waterline — a clifftop 40 up is not a beach
-  const SAND_LIFT = 0.05;       // above the terrain quad, under the road quad (0.06)
-  const SAND_DIP = 0.55;        // how far the waterline edge of the sand goes under
+  const SAND_LIFT = 0.10;       // clear the terrain without z-fighting
+  const SAND_DIP = 0.38;        // gentle first-water-cell slope, not a cliff        // how far the waterline edge of the sand goes under
   const BEACH_CLAIM_CLEAR = 3;  // above this over the sand you are on a bridge
   const ROAD_CLEAR = 2.5;       // sand keeps this clear of a road's own surface
   const FURN_ROAD_CLEAR = 14;   // furniture keeps this much clear of one
@@ -4762,10 +4762,15 @@ window.addEventListener('unhandledrejection', (e) => {
 
   // ---------------------------------------------------------------- shaders
   const VERT = [
+    'uniform float uTime;',
     'varying vec2 vXZ;',
     '#include <fog_pars_vertex>',
     'void main() {',
     '  vec4 world = modelMatrix * vec4( position, 1.0 );',
+    '  float ripple = sin( world.x * 0.0104 + world.z * 0.0046 + uTime * 0.42 ) * 0.13',
+    '               + sin( world.x * 0.0212 - world.z * 0.0305 + uTime * 0.63 ) * 0.07',
+    '               + sin( world.x * 0.0850 + world.z * 0.0510 + uTime * 1.70 ) * 0.025;',
+    '  world.y += ripple;',
     '  vXZ = world.xz;',
     '  vec4 mvPosition = viewMatrix * world;',
     '  #include <fog_vertex>',
@@ -4811,10 +4816,11 @@ window.addEventListener('unhandledrejection', (e) => {
     '  float shore = 1.0;',
     '  if ( uHasShore > 0.5 ) {',
     '    vec2 uv = ( vXZ - uShoreRect.xy ) * uShoreRect.zw;',
-    '    shore = texture2D( uShore, uv ).r;',
+    '    if ( all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) ) ) shore = texture2D( uShore, uv ).r;',
     '  }',
     '  float h = A1 * a1 + A2 * a2 + A3 * a3;',
-    '  vec3 base = mix( uShallow, uDeep, smoothstep( 0.03, 0.60, shore ) );',
+    '  float depth = smoothstep( 0.025, 0.72, shore );',
+    '  vec3 base = mix( uShallow, uDeep, depth );',
     // The swell has to show as COLOUR, not only as a lit normal: a chase camera
     // sits 13 up and looks along the water, and at that angle a 0.6-amplitude
     // wave lights almost identically everywhere. Banding the crests lighter is
@@ -5328,6 +5334,17 @@ window.addEventListener('unhandledrejection', (e) => {
         cand.push(i);
       }
     }
+    // Render one water cell beyond the drivable land band. v28 stopped the sand
+    // exactly at the mask edge, so the coast ended as a hard geometry seam.
+    const sandCells=cand.slice(),sandSeen=new Uint8Array(nx*nz);
+    for(let k=0;k<cand.length;k++)sandSeen[cand[k]]=1;
+    for(let k=0;k<cand.length;k++){
+      const i=cand[k],ix=i%nx,iz=(i/nx)|0;
+      for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dz)continue;const x=ix+dx,z=iz+dz;if(x<0||z<0||x>=nx||z>=nz)continue;
+        const j=z*nx+x;if(!g.mask[j]&&!sandSeen[j]){sandSeen[j]=1;sandCells.push(j);}
+      }
+    }
 
     // ---- 2. the sand mesh --------------------------------------------------
     // Corner heights are cached and shared, so neighbouring quads cannot open a
@@ -5343,17 +5360,16 @@ window.addEventListener('unhandledrejection', (e) => {
       if (!cornDone[ci]) {
         cornDone[ci] = 1;
         const wx = minX + ix * CELL, wz = minZ + iz * CELL;
-        let wet = 0;
+        let wet = 0, landY = 0, landN = 0;
         for (let dz = -1; dz <= 0; dz++) for (let dx = -1; dx <= 0; dx++) {
           const a = ix + dx, c = iz + dz;
           if (a < 0 || c < 0 || a >= nx || c >= nz) { wet++; continue; }
-          if (!g.mask[c * nx + a]) wet++;
+          const cell=c*nx+a;if(!g.mask[cell])wet++;else{landY+=g.ground[cell];landN++;}
         }
-        const t = wet / 4;
-        const gy = world.groundHeightAt(wx, wz, 0);
-        const y = gy * (1 - t) + (SEA_Y - SAND_DIP) * t;
-        cornY[ci] = Math.min(gy, y) + SAND_LIFT * (1 - t);
-        cornT[ci] = t;
+        const wetFrac=wet/4, slope=Math.max(0,Math.min(1,(wet-1)/3)),ease=slope*slope*(3-2*slope);
+        const gy=landN?landY/landN:world.groundHeightAt(wx,wz,0);
+        const landTop=gy+SAND_LIFT;cornY[ci]=landN?landTop+((SEA_Y-SAND_DIP)-landTop)*ease:(SEA_Y-SAND_DIP);
+        cornT[ci]=wetFrac;
       }
       return ci;
     }
@@ -5372,8 +5388,8 @@ window.addEventListener('unhandledrejection', (e) => {
       return (Math.min(255, r) << 16) | (Math.min(255, gg) << 8) | Math.min(255, b);
     }
     const sand = new Accum();
-    for (let k = 0; k < cand.length; k++) {
-      const i = cand[k], ix = i % nx, iz = (i / nx) | 0;
+    for (let k = 0; k < sandCells.length; k++) {
+      const i = sandCells[k], ix = i % nx, iz = (i / nx) | 0;
       // Per-cell albedo jitter. The band is otherwise one dead-flat plane —
       // it cannot be displaced into dunes, because the car drives on the
       // terrain height field and not on this mesh, so any relief here would be
@@ -5594,7 +5610,7 @@ window.addEventListener('unhandledrejection', (e) => {
     const coast = {
       id: id, group: group, grid: g, colliders: colliders, colliderList: colliderList,
       stats: {
-        beachCells: cand.length, sandTris: sand.tris(), chains: chains.length,
+        beachCells: cand.length, sandCells: sandCells.length, sandTris: sand.tris(), chains: chains.length,
         modules: modules, gaps: gaps, routeSkips: routeSkips, sealedRoutes: coastSealed,
         furnTris: furnTris, colliders: colliderList.length,
         seawall: placed.seawall.length, fence: placed.fence.length, rocks: placed.rocks.length,
@@ -5691,7 +5707,7 @@ window.addEventListener('unhandledrejection', (e) => {
         ]);
       };
       const plane = function () {
-        const g = new THREE.PlaneGeometry(SIZE, SIZE, 1, 1);
+        const g = new THREE.PlaneGeometry(SIZE, SIZE, 64, 64);
         g.rotateX(-Math.PI / 2);                       // baked: normal is +Y
         return g;
       };
@@ -6595,7 +6611,7 @@ window.addEventListener('unhandledrejection', (e) => {
 
     const world = {
       id: 'neon',
-      name: 'NEON CITY',
+      name: 'NEON STATE',
       group: builder.group,
       spawn: builder.spawn,
       bounds: BOUNDS,
@@ -6713,8 +6729,8 @@ window.addEventListener('unhandledrejection', (e) => {
 
   window.GameWorlds.register({
     id: 'neon',
-    name: 'NEON CITY',
-    tagline: 'Neon core, airport runway, marina stadium, cliff villas and quarry jumps.',
+    name: 'NEON STATE',
+    tagline: 'Welcome to the state of neon — city core, airport, marina, hills and quarry.',
     accent: '#ff2d9b',
     fog: 0x120a20,
     create: createNeonWorld
@@ -8971,7 +8987,7 @@ window.addEventListener('unhandledrejection', (e) => {
     b.landmark('STARLINE MOTEL', 3640, -300);
     b.landmark('GALLERIA WEST', 2740, 890);
     b.landmark('MOONLITE DRIVE-IN', 3660, 730);
-    b.landmark('CANYON AUTO SALES', 1810, 760);
+    b.landmark('CANYON MOTORS', 1810, 760);
   }
 
   // ------------------------------------------------------------------- ground
@@ -11004,11 +11020,20 @@ window.addEventListener('unhandledrejection', (e) => {
 
   // ---------------------------------------------------------- the rim (ring)
   /**
-   * The elevated ring. Built as nine separate `road()` calls that share exact
-   * endpoints: splitting it lets me control where the automatic support pillars
-   * land (they go on every third vertex of each call) so none of them ends up
-   * standing in the middle of a street underneath.
+   * The elevated ring. Built as eleven separate viaduct calls. v28 shared only
+   * the centre-point at each split, so the road graph connected numerically but
+   * the outside half of an angled deck join had no turn patch. rimSeam() fills
+   * that wedge and adds a short graph/deck stitch for traffic and high-speed tyres.
    */
+  function rimSeam(b,a,p,c,width){
+    const d0x=p[0]-a[0],d0z=p[1]-a[1],l0=Math.hypot(d0x,d0z)||1,d1x=c[0]-p[0],d1z=c[1]-p[1],l1=Math.hypot(d1x,d1z)||1,
+      u0x=d0x/l0,u0z=d0z/l0,u1x=d1x/l1,u1z=d1z/l1,n0x=u0z,n0z=-u0x,n1x=u1z,n1z=-u1x,hw=width*.5+5,y=p[2]+.065,acc=b.surf();
+    const lA=[p[0]+n0x*hw,y,p[1]+n0z*hw],lB=[p[0]+n1x*hw,y,p[1]+n1z*hw],rA=[p[0]-n0x*hw,y,p[1]-n0z*hw],rB=[p[0]-n1x*hw,y,p[1]-n1z*hw],mid=[p[0],y,p[1]];
+    if(Math.abs(u0x*u1z-u0z*u1x)>.002){acc.tri(mid,lA,lB,C_ROAD);acc.tri(mid,rB,rA,C_ROAD);}
+    const reach=9,ax=p[0]-u0x*reach,az=p[1]-u0z*reach,bx=p[0]+u1x*reach,bz=p[1]+u1z*reach,dx=bx-ax,dz=bz-az,len=Math.hypot(dx,dz)||1;
+    b.roads.addSegment({ax,az,ay:p[2],bx,bz,by:p[2],width});b.stats.roadSegs++;
+    b.decks.add({x:(ax+bx)*.5,z:(az+bz)*.5,w:width+15,d:len+14,rot:Math.atan2(dx,dz),y0:p[2]+.06,y1:p[2]+.06});b.stats.decks++;
+  }
   function rimFreeway(b, THREE) {
     const P = Math.PI;
     const pieces = [
@@ -11025,13 +11050,18 @@ window.addEventListener('unhandledrejection', (e) => {
       arcPts(X0N + RC, Z0 + RC, RC, P, P * 1.5, 14)           // NW corner
     ];
 
-    const full = [];
+    const full = [],built=[];
     for (const raw of pieces) {
       const pts = withY(raw, RING_Y, RING_Y);
+      built.push(pts);
       viaduct(b, THREE, pts, RING_W, { pierEvery: 3 });
       pushPts(full, pts);
     }
     full.push([full[0][0], full[0][1], RING_Y]);   // close the loop
+    for(let i=0;i<built.length;i++){
+      const cur=built[i],next=built[(i+1)%built.length],p=cur[cur.length-1];
+      rimSeam(b,cur[Math.max(0,cur.length-2)],p,next[Math.min(1,next.length-1)],RING_W);
+    }
 
     // The two streets that pass beneath the west leg. If a pier ever lands in
     // one, this shouts about it in the console instead of silently blocking the
@@ -13213,7 +13243,7 @@ window.RACES = [
   // Airport to Tidelight: runway, downtown grid, docks and the east causeway.
   // This is the longest race in NEON and pays accordingly.
   {
-    id: 'nr-cross-city-gp', worldId: 'neon', name: 'NEON CROSS-CITY GP', raceType: 'GRAND PRIX', laps: 1,
+    id: 'nr-cross-city-gp', worldId: 'neon', name: 'NEON CROSS-CITY GP', raceType: 'ENDURANCE', laps: 1,
     difficulty: 5, reward: 6800, firstWinBonus: 3600, entryFee: 500, rubberBand: 0.10,
     anchors: [{ x: 1100, z: -4960 }, { x: 2200, z: -4550 }, { x: 2200, z: -3620 },
               { x: 1560, z: -2150 }, { x: 1090, z: -870 }, { x: 250, z: 810 },
@@ -15940,9 +15970,9 @@ body.help-open #mobileControls{display:none!important}
   /** Reset every catalogue tune to its frozen factory snapshot, then derive the
    * current car from one data profile plus one installed package. Hardware never
    * stacks accidentally and incompatible parts are never invented by the UI. */
-  function applyTuneFields(){
+  function applyTuneFields(idOverride){
     for(const[id,snap]of baseTunes){const live=ctx.vehicles.TUNES[id];if(!live)continue;for(const f of RESET_FIELDS)live[f]=snap[f];if(snap.gearAccel&&snap.gearAccel.length)live.gearAccel=snap.gearAccel.slice();}
-    const id=currentId;if(!id)return;const presetId=presetFor(id),def=presets.get(presetId),live=ctx.vehicles.TUNES[id],snap=baseTunes.get(id),profile=profileFor(id);if(!def||!live||!snap)return;
+    const id=idOverride||currentId;if(!id)return;const presetId=presetFor(id),def=presets.get(presetId),live=ctx.vehicles.TUNES[id],snap=baseTunes.get(id),profile=profileFor(id);if(!def||!live||!snap)return;
     const stage=def.stage||0,extreme=!!def.extreme;
     for(const f of TUNED_FIELDS){const m=Math.min(PRESET_CLAMP.hi,Math.max(PRESET_CLAMP.lo,num(def.mult&&def.mult[f],1)));live[f]=snap[f]*m;}
     live.topSpeed=snap.topSpeed*num(def.mult&&def.mult.topSpeed,1);const thrust=extreme?1.22:1+stage*.04;live.gearAccel=snap.gearAccel.map((v,i)=>i?v*thrust:v);
@@ -15966,11 +15996,11 @@ body.help-open #mobileControls{display:none!important}
     const e = byId.get(id);
     if (!e) { console.error('[progression] selectVehicle: unknown car "' + id + '"'); return false; }
     if (!owned.has(id)) { toast('🔒 ' + e.displayName + ' — ' + progressFor(id).need, '#ffd23f'); return false; }
-    try { ctx.vehicles.select(id); }
-    catch (err) { console.error('[progression] ctx.vehicles.select("' + id + '") threw', err); return false; }
     currentId = id;
+    applyTuneFields(id);                 // engine profile must exist before the raw mesh/powertrain switch
+    try { (ctx.vehicles.selectRaw || ctx.vehicles.select)(id); }
+    catch (err) { console.error('[progression] vehicle switch "' + id + '" threw', err); return false; }
     applyLook(id);
-    applyTuneFields();
     if (!opts || !opts.silent) persist(SP.current, id);
     return true;
   }
@@ -16298,6 +16328,7 @@ body.help-open #mobileControls{display:none!important}
     isUnlocked(id) { return unlocks[id] === true || owned.has(id); },
     unlockProgress(id) { return progressFor(id); },
     currentVehicle() { return currentId; },
+    hydrateVehicle(id, opts) { if (!byId.has(id) || !ctx.vehicles.TUNES[id]) return false; if (opts && opts.syncCurrent) currentId = id; applyTuneFields(id); return true; },
     selectVehicle(id) { return selectVehicle(id); },
     wallet() { return wallet; },
     spend(n, reason) { const ok = spend(n, reason); if (ok) refreshWalletLine(); return ok; },
@@ -27955,7 +27986,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
       targetPoint:{x:1100,z:-4960,label:'RUNWAY 09/27 start'}
     },
     {
-      id:'neon-grand-tour',title:'NEON GRAND TOUR',brief:'Link every new district in one uninterrupted run.',
+      id:'neon-grand-tour',title:'NEON STATE TOUR',brief:'Link every new district in one uninterrupted run.',
       x:-1200,z:4520,reward:5400,time:430,requiresCar:true,
       prerequisite:{missions:4},
       checkpoints:[
@@ -27998,7 +28029,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
     {id:'garage-docks',kind:'garage',name:'DOCKS WAREHOUSE',x:-730,z:2480,spawnX:-690,spawnZ:2480,heading:Math.PI/2,slots:5},
     {id:'garage-crown',kind:'garage',name:'CROWN MOTOR HOUSE',x:-4750,z:-1380,spawnX:-4708,spawnZ:-1380,heading:Math.PI/2,slots:4},
     {id:'garage-island',kind:'garage',name:'TIDELIGHT LOCKUP',x:480,z:5480,spawnX:480,spawnZ:5442,heading:Math.PI,slots:4},
-    {id:'dealer-retail',kind:'dealer',name:'CANYON AUTO SALES',x:1810,z:760,spawnX:1848,spawnZ:760,heading:Math.PI/2,stock:[
+    {id:'dealer-retail',kind:'dealer',name:'CANYON MOTORS',x:1810,z:760,spawnX:1848,spawnZ:760,heading:Math.PI/2,stock:[
       {id:'hauler',price:1200},{id:'hotHatch',price:3000,missions:1},{id:'muscleV8',price:4800,missions:3}
     ]},
     {id:'dealer-airport',kind:'dealer',name:'NORTHSTAR FLEET',x:4450,z:-3840,spawnX:4410,spawnZ:-3840,heading:-Math.PI/2,stock:[
@@ -28685,7 +28716,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 (function(){
  let ctx=null,save=null,prog=null,data={};const KEY='progression.vehicleProtectionV20';
  const ARMOR=[{name:'STOCK',price:0,damage:1,mass:1,grip:1},{name:'REINFORCED',price:2800,damage:.82,mass:1.045,grip:.985},{name:'ARMOURED',price:6200,damage:.65,mass:1.09,grip:.965},{name:'HEAVY ARMOUR',price:10500,damage:.5,mass:1.15,grip:.94}];
- function id(){return prog&&prog.currentVehicle?prog.currentVehicle():ctx&&ctx.vehicles.tuneKey;}
+ function id(){return prog&&prog.currentVehicle?prog.currentVehicle():ctx&&ctx.vehicles.currentKey;}
  function state(v){v=v||id();if(!data[v])data[v]={armor:0,proofTires:false};return data[v];}
  function maxTier(v){const e=prog.entry(v),c=e&&String(e.class||'').toLowerCase();return c&&(/super|race|sports|performance/.test(c))?3:2;}
  function persist(){save.set(KEY,data);save.flush&&save.flush();}
@@ -28728,7 +28759,11 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 /* ---------------------- actual facility architecture ---------------------- */
 (function(){
  let ctx=null,roots=[],doors=[];function box(g,w,h,d,c,x,y,z,em){const T=ctx.THREE,m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshStandardMaterial({color:c,roughness:.72,metalness:.12,emissive:em||0,emissiveIntensity:em?1.2:0}));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;g.add(m);return m;}
- function building(f){const T=ctx.THREE,g=new T.Group(),garage=f.kind==='garage',c=garage?0xff9b2b:0x3b7bff,y=ctx.world.groundHeightAt(f.x,f.z,0),h=f.heading||0;box(g,24,9,18,garage?0x272b32:0x202a3a,0,4.5,0);box(g,26,.8,20,0x12161e,0,9.2,0);box(g,18,.28,15,0x343a43,0,.15,10);box(g,16,6,.45,0x18202a,0,3,9.05);const door=box(g,15.5,5.6,.38,0x515b67,0,3,9.3,c),sign=box(g,15,1.25,.5,c,0,7.45,9.35,c);g.position.set(f.x,y,f.z);g.rotation.y=h;ctx.scene.add(g);roots.push(g);doors.push({f,g,door,baseY:3});}
+ function building(f){const T=ctx.THREE,g=new T.Group(),garage=f.kind==='garage',c=garage?0xff9b2b:0x3b7bff,h=f.heading||0,back=13,gx=f.x-Math.sin(h)*back,gz=f.z-Math.cos(h)*back,y=ctx.world.groundHeightAt(gx,gz,0);
+  box(g,28,9.5,22,garage?0x272b32:0x202a3a,0,4.75,0);box(g,30,.9,24,0x12161e,0,9.65,0);box(g,20,.22,19,0x343a43,0,.12,11.5);box(g,17,6.2,.45,0x18202a,0,3.1,11.05);
+  const door=box(g,16.5,5.8,.38,0x515b67,0,3.1,11.3,c);box(g,16,1.3,.5,c,0,7.8,11.35,c);box(g,5.5,.22,7.5,c,0,.18,15.6,c);box(g,.65,8,.65,0x2b3442,-10,4,15.8);box(g,5.8,1.1,.45,c,-10,8.1,15.8,c);
+  g.position.set(gx,y,gz);g.rotation.y=h;g.userData.facilityId=f.id;ctx.scene.add(g);roots.push(g);doors.push({f,g,door,baseY:3.1});
+}
  function update(dt){for(const d of doors){d.g.visible=ctx.world.id===(d.f.worldId||'neon');if(!d.g.visible)continue;const near=Math.hypot(ctx.player.x-d.f.x,ctx.player.z-d.f.z)<21,target=near?7.2:3;d.door.position.y=lerp(d.door.position.y,target,1-Math.exp(-dt*5));}}
  GameSystems.register({id:'facilityArchitecture',order:102,requires:['facilities'],alwaysUpdate:true,init(c){ctx=c;const f=GameSystems.api('facilities');for(const d of f.list())building(d);},update,dispose(){for(const g of roots)if(g.parent)g.parent.remove(g);roots=[];doors=[];}});
 })();
@@ -28862,7 +28897,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
   let pinching = false, pinchD0 = 0, pinchZoom0 = 1;
 
   let boomT = 1, expanding = false;     // smoothed boom fraction + hysteresis latch
-  let shake = 0, shakePeak = 0, canWriteShake = false;
+  let shake = 0, shakePeak = 0, canWriteShake = false, shakeUnsub = null;
   let lastProbeRays = 1, lastSlide = 0;  // diagnostics only
   // Reused every frame: this runs 60 times a second and must not feed the GC.
   const fanSides = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
@@ -29251,6 +29286,13 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
       // assume, because assigning to a getter-only property throws in strict mode.
       const d = Object.getOwnPropertyDescriptor(ci, 'crashShake');
       canWriteShake = !!(d && d.set);
+      shakeUnsub = ctx.events.on('camera:shake', data => {
+        const amount = clamp(Number(data && data.amount) || 0, 0, 1.25);
+        if (amount <= 0) return;
+        shake = Math.max(shake, amount);
+        shakePeak = Math.max(shakePeak, amount);
+        if (canWriteShake) ci.crashShake = Math.max(Number(ci.crashShake) || 0, amount);
+      });
 
       const save = GameSystems.api('save');
       if (save && save.get) {
@@ -29315,6 +29357,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 
     dispose() {
       ready = false;
+      if (shakeUnsub) { try { shakeUnsub(); } catch (_) {} shakeUnsub = null; }
       if (!canvas) return;
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
@@ -29355,12 +29398,12 @@ function movePhoneFocus(k){const bs=phoneButtons();if(!bs.length)return;let n=ph
 function pane(html){pause.querySelector('.pausePane').innerHTML=html;}
 function renderPause(which){screen=which||'main';pause.querySelectorAll('.pauseNav button').forEach(b=>b.classList.toggle('on',b.dataset.page===screen));
  if(screen==='settings'){pane('<h2>SETTINGS</h2><p>Global sound can be toggled with <b>N</b>. Camera sensitivity is saved immediately.</p><label>Camera sensitivity <input id="pauseSens" type="range" min="40" max="220" value="100"></label><p><button class="pauseAction" id="pauseMute">TOGGLE SOUND</button> <button class="pauseAction" id="pauseDamageNumbers">DAMAGE NUMBERS</button> <button class="pauseAction" id="pauseAdmin">ADMIN MODE</button> <button class="pauseAction" id="openAdmin">OPEN ADMIN PANEL · F10</button></p>');const sl=pause.querySelector('#pauseSens'),cam=GameSystems.api('camera'),dn=GameSystems.api('damageNumbers'),admin=GameSystems.api('admin');sl.oninput=()=>cam&&cam.setSensitivity&&cam.setSensitivity(+sl.value/100);pause.querySelector('#pauseMute').onclick=()=>{window.dispatchEvent(new KeyboardEvent('keydown',{key:'n'}));};const db=pause.querySelector('#pauseDamageNumbers'),ab=pause.querySelector('#pauseAdmin'),ob=pause.querySelector('#openAdmin'),paint=()=>{db.textContent='DAMAGE NUMBERS · '+(dn&&dn.enabled?'ON':'OFF');ab.textContent='ADMIN MODE · '+(admin&&admin.enabled()?'ON':'OFF');ob.disabled=!(admin&&admin.enabled());};db.onclick=()=>{if(dn)dn.toggle();paint();};ab.onclick=()=>{if(admin)admin.toggleEnabled();paint();};ob.onclick=()=>{paused(false);if(admin)admin.open();};paint();}
- else if(screen==='new'){pane('<h2>NEW GAME</h2><p>This clears progression, owned cars, tuning and saved preferences, then restarts in Neon City.</p><button class="pauseAction" id="confirmNew">START NEW GAME</button>');pause.querySelector('#confirmNew').onclick=()=>{const sv=GameSystems.api('save');if(sv&&sv.resetProgression)sv.resetProgression();safeReload();};}
+ else if(screen==='new'){pane('<h2>NEW GAME</h2><p>This clears progression, owned cars, tuning and saved preferences, then restarts in Neon State.</p><button class="pauseAction" id="confirmNew">START NEW GAME</button>');pause.querySelector('#confirmNew').onclick=()=>{const sv=GameSystems.api('save');if(sv&&sv.resetProgression)sv.resetProgression();safeReload();};}
  else if(screen==='load'){pane('<h2>LOAD GAME</h2><p>The game autosaves. Reload the latest persistent state now.</p><button class="pauseAction" id="confirmLoad">LOAD AUTOSAVE</button>');pause.querySelector('#confirmLoad').onclick=safeReload;}
  else if(screen==='controls'){const hp=GameSystems.api('help');if(hp&&hp.open){paused(false);hp.open();return;}pane('<h2>CONTROLS</h2><p>WASD move · mouse look/fire on foot · RMB aim · C camera · E enter/exit · P phone · V garage · H full controls.</p>');}
  else if(screen==='brief'){pane('<h2>BRIEF</h2><p><b>Current vehicle:</b> '+ctx.vehicles.tune.name+'</p><p><b>Location:</b> '+ctx.world.id.toUpperCase()+'</p><p><b>Wanted:</b> '+ctx.stats.wanted+' / 6</p><p>Explore the city, build drift combos, enter street races, use Paint & Spray garages to repair and evade police, and call the mechanic from Contacts when your car is stranded.</p>');}
  else pane('<h2>PAUSED</h2><p>Continue the current game, manage settings, reload your autosave, choose a map, view controls, or read the current brief.</p><p>Press <b>Escape</b> again to resume.</p>');}
-function buildPause(){pause=document.createElement('div');pause.id='gamePause';pause.innerHTML='<div class="pauseCard"><h1>NEON CITY</h1><div class="pauseSub">PAUSE MENU</div><div class="pauseGrid"><div class="pauseNav"><button data-page="main">RESUME</button><button data-page="settings">SETTINGS</button><button data-page="new">NEW GAME</button><button data-page="load">LOAD GAME</button><button data-page="controls">CONTROLS</button><button data-page="brief">BRIEF</button></div><div class="pausePane"></div></div><div class="pauseFoot"><button class="pauseAction" id="pauseResume">RESUME</button></div></div>';ctx.dom.ui.appendChild(pause);pause.querySelectorAll('.pauseNav button').forEach(b=>b.onclick=()=>b.dataset.page==='main'?paused(false):renderPause(b.dataset.page));pause.querySelector('#pauseResume').onclick=()=>paused(false);}
+function buildPause(){pause=document.createElement('div');pause.id='gamePause';pause.innerHTML='<div class="pauseCard"><h1>NEON STATE</h1><div class="pauseSub">PAUSE MENU</div><div class="pauseGrid"><div class="pauseNav"><button data-page="main">RESUME</button><button data-page="settings">SETTINGS</button><button data-page="new">NEW GAME</button><button data-page="load">LOAD GAME</button><button data-page="controls">CONTROLS</button><button data-page="brief">BRIEF</button></div><div class="pausePane"></div></div><div class="pauseFoot"><button class="pauseAction" id="pauseResume">RESUME</button></div></div>';ctx.dom.ui.appendChild(pause);pause.querySelectorAll('.pauseNav button').forEach(b=>b.onclick=()=>b.dataset.page==='main'?paused(false):renderPause(b.dataset.page));pause.querySelector('#pauseResume').onclick=()=>paused(false);}
 function showApps(){const body=phone.querySelector('.phoneBody');body.innerHTML='<div class="appGrid"><button class="app live" data-app="contacts"><i>☎</i>Contacts</button><button class="app"><i>✉</i>Messages</button><button class="app"><i>▣</i>Camera</button><button class="app"><i>♪</i>Music</button><button class="app"><i>⌖</i>Maps</button><button class="app"><i>◎</i>Web</button><button class="app"><i>▦</i>Bank</button><button class="app"><i>⚙</i>Settings</button><button class="app"><i>▤</i>Jobs</button></div>';body.querySelector('[data-app=contacts]').onclick=showContacts;setTimeout(()=>setPhoneFocus(0),0);}
 function showContacts(){phone.querySelector('.phoneBody').innerHTML='<h3>CONTACTS</h3><div class="phoneList"><button id="callMechanic">🔧 Mechanic<br><small>Deliver my current car</small></button><button disabled>Emergency Services</button><button disabled>Taxi</button></div>';phone.querySelector('#callMechanic').onclick=callMechanic;setTimeout(()=>setPhoneFocus(0),0);}
 function mechanicPose(){
@@ -29394,7 +29437,7 @@ window.PAINT_SHOPS_V20=Object.freeze([
   Object.freeze({id:'paint-island',name:'ISLAND PAINT & SPRAY',x:690,z:5200,heading:Math.PI/2,style:{accent:0x20e3ff}}),
   Object.freeze({id:'paint-links',name:'LINKS PAINT & SPRAY',x:2440,z:-760,heading:0,style:{accent:0xff2d9b}})
 ]);
-/* GTA-style automatic Paint & Spray sequence at dedicated standalone shops. */
+/* Automatic Paint & Spray sequence at dedicated standalone shops. */
 (function(){
 'use strict';if(!window.GameSystems)return;
 let ctx=null,active=null,doors=[],puffs=[];const hex=n=>'#'+(n>>>0).toString(16).padStart(6,'0'),COLORS=[0xff2d9b,0x20e3ff,0xffd23f,0x3bff8b,0xff4d3a,0xa66bff,0xf2f5ff,0x161c28,0x2f6bff];
@@ -29579,7 +29622,7 @@ addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.upd
 
 // ---------- Lights ----------
 const moon=new THREE.DirectionalLight(0x9db0ff,0.9);
-// Shadow settings follow the gta6 upstream's scale-up (use authorised by its
+// Shadow settings follow the upstream scale-up (use authorised by its
 // author, same as the traffic signals): 4096 maps + a 1450 frustum give crisp
 // building shadows at speed. Desktop only — 4x the depth-buffer memory is the
 // wrong trade on a phone, which keeps the original 2048/1200.
@@ -29867,6 +29910,11 @@ let car=makeCar(vehicleTune.color,false,CAR_STYLES[vehicleTune.style]);
 const carState={x:0,z:470,heading:0,speed:0,vx:0,vz:0,y:0,vy:0,airborne:false,airtime:0,maxAir:0,rampCd:0,ramp:null,hp:100,burning:false,fuse:0,fire:null};
 let carColor=vehicleTune.color;
 car.position.set(carState.x,0,carState.z);
+function hydrateVehicleProfile(key,syncCurrent=true){
+  const resolved=VEHICLE_TUNES[key]?key:'proDrift',prog=window.GameSystems&&GameSystems.api('progression');
+  if(prog&&prog.hydrateVehicle)prog.hydrateVehicle(resolved,{syncCurrent:!!syncCurrent});
+  return resolved;
+}
 function selectPlayerVehicle(key){
   savePowertrainCondition?.(true);
   resetDriftCombo?.();
@@ -29875,7 +29923,7 @@ function selectPlayerVehicle(key){
   if(dying){ dying=false; engineBlown=false; stats.health=100; playerHealth=100; carState.hp=100; document.body.classList.remove('dying'); }
   clearCarDebris();
   if(carState.fire&&car){car.remove(carState.fire);} carState.fire=null; carState.burning=false;
-  vehicleTuneKey=VEHICLE_TUNES[key]?key:'proDrift';vehicleTune=VEHICLE_TUNES[vehicleTuneKey];carColor=vehicleTune.color;if(!vehicleTune.nitrousInstalled)stats.nitro=0;
+  vehicleTuneKey=hydrateVehicleProfile(key,true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];carColor=vehicleTune.color;if(!vehicleTune.nitrousInstalled)stats.nitro=0;
   if(car)scene.remove(car);car=makeCar(carColor,false,CAR_STYLES[vehicleTune.style]);car.userData.vehicleTuneKey=vehicleTuneKey;
   if(vehicleTuneKey==='gripper')car.scale.set(1.06,1.02,1.08);
   if(vehicleTuneKey==='commuter')car.scale.set(.96,.96,.94);
@@ -30330,7 +30378,8 @@ function updateGenericTraffic(t,dt){
     t.spd+=clamp(want-t.spd,-40*dt,16*dt);
   }else t.spd=Math.max(0,t.spd-24*dt);
   t._avoidBias=lerp(t._avoidBias||0,0,clamp(dt*1.7,0,1));
-  const roadGrip=WORLD_nearestRoad(t.x,t.z),offRoad=!roadGrip||roadGrip.d>roadGrip.width*.58,reverse=t._reverseT>0,driveSign=reverse?-1:1,targetVx=Math.sin(t.heading)*t.spd*driveSign,targetVz=Math.cos(t.heading)*t.spd*driveSign,follow=offRoad?1.45:9.5;
+  const roadGrip=WORLD_nearestRoad(t.x,t.z),offRoad=!roadGrip||roadGrip.d>roadGrip.width*.58,reverse=t._reverseT>0,driveSign=reverse?-1:1,targetVx=Math.sin(t.heading)*t.spd*driveSign,targetVz=Math.cos(t.heading)*t.spd*driveSign;
+  t._contactT=Math.max(0,(t._contactT||0)-dt);const contactBlend=clamp(t._contactT/.78,0,1),follow=offRoad?1.45:lerp(9.5,1.35,contactBlend);
   t._physVx=lerp(t._physVx===undefined?targetVx:t._physVx,targetVx,clamp(follow*dt,0,1));t._physVz=lerp(t._physVz===undefined?targetVz:t._physVz,targetVz,clamp(follow*dt,0,1));
   if(offRoad){const drag=Math.max(0,1-(1.15+clamp((roadGrip?roadGrip.d-roadGrip.width*.5:35)/45,0,1)*1.8)*dt);t._physVx*=drag;t._physVz*=drag;t.spd=Math.min(t.spd,Math.hypot(t._physVx,t._physVz));t.heading+=Math.sin((t._offPhase=(t._offPhase||0)+dt*5.2))*.12*dt;}
   const mv=moveAICircleWorld(t,t._physVx,t._physVz,dt,3.65,DYN_TRAFFIC);t._physVx=mv.vx;t._physVz=mv.vz;t.spd=Math.min(t.spd,Math.hypot(mv.vx,mv.vz));
@@ -30899,6 +30948,24 @@ function resolveCarSurface(){
 // ramp — a keyboard S is a step input and a real pedal is not, and slamming the
 // full force on frame one is most of what made braking feel like an anchor.
 let brakePressure=0,brakeLock=0,bodyPitch=0,absPulse=0,prevThrottleIn=0,throttleSpike=0,counterSteerHold=0,spinWarn=0,throttleResponse=0,drivenWheelSpin=0,drivenWheelRpm=0,burnoutPhase=0,tireBite=0,spinCatch=0;
+let prevDriftSteer=0,feintPulse=0,driftShiftPulse=0,driftRecovery=1,driftInitiation='none',driftInitiationT=0;
+let contactPitch=0,contactRoll=0,contactPitchV=0,contactRollV=0,contactAudioCd=0,lastContactEnergy=0;
+const DRIFT_PERSONALITIES=Object.freeze({
+  streetDrift:Object.freeze({breakMph:14,powerBreak:.84,plateauLo:.52,plateauHi:.76,hold:.98,counter:1.25,recovery:1.22,yaw:.93,feint:1.12,handbrake:1.02,shift:1.10}),
+  proDrift:Object.freeze({breakMph:18,powerBreak:.96,plateauLo:.55,plateauHi:.84,hold:1.10,counter:1.12,recovery:1.00,yaw:1.06,feint:1.10,handbrake:1.08,shift:1.16}),
+  gripper:Object.freeze({breakMph:28,powerBreak:1.30,plateauLo:.42,plateauHi:.64,hold:.70,counter:.96,recovery:1.35,yaw:.72,feint:.72,handbrake:.82,shift:.70}),
+  commuter:Object.freeze({breakMph:20,powerBreak:1.18,plateauLo:.42,plateauHi:.64,hold:.72,counter:1.05,recovery:1.28,yaw:.78,feint:.86,handbrake:.94,shift:.78}),
+  hauler:Object.freeze({breakMph:24,powerBreak:1.30,plateauLo:.36,plateauHi:.54,hold:.58,counter:.92,recovery:1.20,yaw:.62,feint:.58,handbrake:.84,shift:.55}),
+  hotHatch:Object.freeze({breakMph:19,powerBreak:1.25,plateauLo:.40,plateauHi:.60,hold:.66,counter:1.08,recovery:1.24,yaw:.74,feint:.78,handbrake:1.00,shift:.72}),
+  muscleV8:Object.freeze({breakMph:16,powerBreak:.76,plateauLo:.56,plateauHi:.86,hold:1.13,counter:1.00,recovery:.92,yaw:1.12,feint:1.03,handbrake:1.03,shift:1.18}),
+  rally:Object.freeze({breakMph:24,powerBreak:1.12,plateauLo:.48,plateauHi:.70,hold:.82,counter:1.06,recovery:1.22,yaw:.86,feint:.88,handbrake:.90,shift:.86}),
+  trackCoupe:Object.freeze({breakMph:23,powerBreak:1.04,plateauLo:.48,plateauHi:.70,hold:.80,counter:1.13,recovery:1.30,yaw:.84,feint:.82,handbrake:.88,shift:.84}),
+  rwd:Object.freeze({breakMph:18,powerBreak:1.00,plateauLo:.54,plateauHi:.80,hold:1.00,counter:1.12,recovery:1.04,yaw:1.00,feint:1.00,handbrake:1.00,shift:1.00}),
+  awd:Object.freeze({breakMph:26,powerBreak:1.24,plateauLo:.44,plateauHi:.66,hold:.76,counter:1.00,recovery:1.30,yaw:.78,feint:.76,handbrake:.86,shift:.76}),
+  fwd:Object.freeze({breakMph:22,powerBreak:1.28,plateauLo:.38,plateauHi:.58,hold:.64,counter:1.02,recovery:1.34,yaw:.70,feint:.72,handbrake:.92,shift:.68})
+});
+function currentDriftPersonality(){return DRIFT_PERSONALITIES[vehicleTuneKey]||DRIFT_PERSONALITIES[(vehicleTune.drive||'RWD').toLowerCase()]||DRIFT_PERSONALITIES.rwd;}
+function driftUpgradeCeiling(){const hw=vehicleTune.installedHardware||[],stage=vehicleTune.hardwareStage==='EXTREME'?4:(Number(vehicleTune.hardwareStage)||0);return 1+stage*.035+(hw.includes('angle kit') ? .14 : 0)+(hw.includes('differential') ? .045 : 0);}
 let tireEffectIntensity=0,tireSmokeClock=0,tireMarkClock=0,lastRearLeft=null,lastRearRight=null,lastFrontLeft=null,lastFrontRight=null,burnoutActive=false;
 const tireBurst={fl:false,fr:false,rl:false,rr:false};let tireSparkClock=0,tireBurstSerial=0;const VEHICLE_TIRE_KEYS=['fl','fr','rl','rr'];
 function genericTireState(v){if(!v)return null;if(!v._tireBurst)v._tireBurst={fl:false,fr:false,rl:false,rr:false};return v._tireBurst;}
@@ -30981,7 +31048,8 @@ function updateEngineHeat(dt,throttle){
   misfirePopClock-=dt;if(misfireSeverity>.18&&load>.35&&misfirePopClock<=0){playExhaustPop(.22+misfireSeverity*.48);misfirePopClock=lerp(1.1,.24,misfireSeverity);}
 }
 function resetDriftPhysics(){ driftYawRate=0; driftAngle=0; rearSlip=0; frontSlip=0; gripLost=false; gripUsage=0; carSurfacePitch=0; lastRearLeft=lastRearRight=lastFrontLeft=lastFrontRight=null;
-  brakePressure=0;brakeLock=0;bodyPitch=0;absPulse=0;prevThrottleIn=0;throttleSpike=0;counterSteerHold=0;spinWarn=0;throttleResponse=0;drivenWheelSpin=0;drivenWheelRpm=0;burnoutPhase=0;tireBite=0;spinCatch=0; }
+  brakePressure=0;brakeLock=0;bodyPitch=0;absPulse=0;prevThrottleIn=0;throttleSpike=0;counterSteerHold=0;spinWarn=0;throttleResponse=0;drivenWheelSpin=0;drivenWheelRpm=0;burnoutPhase=0;tireBite=0;spinCatch=0;
+  prevDriftSteer=0;feintPulse=0;driftShiftPulse=0;driftRecovery=1;driftInitiation='none';driftInitiationT=0;contactPitch=contactRoll=contactPitchV=contactRollV=0;contactAudioCd=0;lastContactEnergy=0; }
 function rpmForGearAtMph(mph,gear){const ceil=(GEAR_CEILS[gear]||GEAR_CEILS[MAX_GEAR])*vehicleTune.topSpeed,idle=engineIdleRpm(),lim=engineLimiterRpm();return idle+clamp(mph/Math.max(1,ceil),0,1.22)*(lim-idle);}
 function setManualMode(){ driveMode='M'; manualModeTimer=6.5; manualModeHardTimer=14; shiftHoldTimer=0; shiftPromptTimer=0; }
 function setDriveMode(){driveMode='D';manualModeTimer=0;manualModeHardTimer=0;shiftHoldTimer=0;autoShiftLock=.45;}
@@ -30993,7 +31061,7 @@ function beginGearShift(target,manual=false,delay=.28){
   if(engineBlown||onFoot||pendingGear||shiftKick>0||target===driveGear||target<1||target>MAX_GEAR) return false;
   pendingPowerShift=manual&&target>driveGear&&fakeRpm>=5500&&fakeRpm<=7800;
   pendingGear=target; gearDragTimer=delay;
-  if(manual) setManualMode();
+  if(manual){driftShiftPulse=Math.max(driftShiftPulse,(pendingPowerShift ? .92 : .52));driftInitiation='shift-kick';driftInitiationT=.55;setManualMode();}
   return true;
 }
 function requestManualShift(dir){
@@ -31007,7 +31075,7 @@ function requestManualShift(dir){
     const predicted=rpmForGearAtMph(mph,target),safe=engineSafeRpm(),lim=engineLimiterRpm(),hard=lim+Math.max(180,(vehicleTune.overRevTolerance||.5)*650);
     if(predicted>hard&&!carState.airborne){addToast('DOWNSHIFT BLOCKED · OVER-REV','#ff3b3b');playLimiterHit();return;}
     if(carState.airborne&&predicted>safe)airborneOverRevRisk=Math.max(airborneOverRevRisk,(predicted-safe)/1000);
-    pendingGear=0;gearDragTimer=0;pendingPowerShift=false;shiftKick=.10;driveGear=target;gearElapsed=0;autoShiftLock=.42;autoDownshiftTimer=0;
+    pendingGear=0;gearDragTimer=0;pendingPowerShift=false;shiftKick=.10;driftShiftPulse=Math.max(driftShiftPulse,.86);driftInitiation='shift-kick';driftInitiationT=.65;driveGear=target;gearElapsed=0;autoShiftLock=.42;autoDownshiftTimer=0;
     fakeRpm=clamp(predicted,engineIdleRpm(),hard);turboSpool*=.58;turboPsi=turboSpool*vehicleTune.maxPsi;playShiftSound(driveGear,false);
     return;
   }
@@ -31155,7 +31223,7 @@ const playPickup=()=>beep(880,0.09,'square',0.1);
 const playSuccess=()=>chord([523,659,784,1047]);
 const playFail=()=>chord([440,330,220],90,'sawtooth');
 
-// ---------- DESTROY AND KILL scoring ----------
+// ---------- NEON STATE scoring ----------
 function playPointSound(points){
   if(!audioCtx||muted) return;
   const now=audioCtx.currentTime;
@@ -31285,6 +31353,28 @@ function updateDriftCombo(dt,throttle,handbrake,counterSteer=0){
 function playCrash(){ queueWheelHaptic(.82); if(!audioCtx||muted)return; const b=audioCtx.createBuffer(1,4410,44100),d=b.getChannelData(0);
   for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2);
   const s=audioCtx.createBufferSource(); s.buffer=b; const g=audioCtx.createGain(); g.gain.value=0.22; s.connect(g); g.connect(audioCtx.destination); s.start(); }
+
+function vehicleContactEnergy(closing,mA,mB){
+  const a=Math.max(200,Number(mA)||1400),b=Math.max(200,Number(mB)||1500),reduced=a*b/(a+b);
+  return Math.max(0,Number(closing)||0)*Math.sqrt(clamp(reduced/700,.38,2.5));
+}
+function playVehicleContactSound(energy,scrape){
+  queueWheelHaptic(clamp(.08+energy/70,0,1));
+  if(!audioCtx||muted||contactAudioCd>0)return;contactAudioCd=lerp(.075,.16,clamp(energy/55,0,1));
+  const t=audioCtx.currentTime,e=clamp(energy/58,0,1.35),sc=clamp(scrape,0,1),dur=.055+e*.11+sc*.12,len=Math.max(256,Math.floor(audioCtx.sampleRate*dur)),buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<len;i++){const p=i/len,grain=(Math.random()*2-1);d[i]=grain*Math.pow(1-p,sc>.45?1.15:2.6);}
+  const src=audioCtx.createBufferSource(),f=audioCtx.createBiquadFilter(),g=audioCtx.createGain();src.buffer=buf;f.type=sc>.45?'bandpass':'lowpass';f.frequency.value=sc>.45?lerp(850,2600,sc):lerp(260,760,e);f.Q.value=sc>.45?1.1:.55;g.gain.setValueAtTime(.02+e*.16+sc*.035,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);src.connect(f);f.connect(g);g.connect(audioCtx.destination);src.start(t);src.stop(t+dur);
+  if(e>.22){const o=audioCtx.createOscillator(),og=audioCtx.createGain();o.type='sine';o.frequency.setValueAtTime(lerp(92,54,e),t);o.frequency.exponentialRampToValueAtTime(34,t+dur);og.gain.setValueAtTime(.035+e*.11,t);og.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(og);og.connect(audioCtx.destination);o.start(t);o.stop(t+dur);}
+}
+function playerVehicleContactFeedback(closing,mA,mB,nx,nz,tangent){
+  const energy=vehicleContactEnergy(closing,mA,mB),fx=Math.sin(carState.heading),fz=Math.cos(carState.heading),rx=Math.cos(carState.heading),rz=-Math.sin(carState.heading),front=nx*fx+nz*fz,side=nx*rx+nz*rz,
+    kick=clamp(energy/52,0,1.45),scrape=clamp((Number(tangent)||0)/Math.max(1,(Number(tangent)||0)+closing),0,1);
+  lastContactEnergy=energy;contactPitchV-=front*kick*1.15;contactRollV-=side*kick*1.45;
+  const shake=clamp(.012+energy/105,0,.78);crashShake=Math.max(crashShake,shake);
+  if(window.GameSystems)GameSystems.events.emit('camera:shake',{amount:shake,duration:.08+kick*.18,source:'vehicle-contact',energy});
+  playVehicleContactSound(energy,scrape);
+  return energy;
+}
 
 // A real detonation, not playCrash turned up. Three layers, because that is what
 // separates a bang from a boom: a bright shrapnel crack on top, a long filtered
@@ -31683,13 +31773,13 @@ function enterNearestCar(){
 }
 function PLAYER_crime(type,x,z,severity,immediate,sourceActor){const api=window.GameSystems&&GameSystems.api('crime');if(!api)return null;return api.report(type,{perpetrator:'player',actor:sourceActor||carState,x:x===undefined?playerX:x,z:z===undefined?playerZ:z,severity:severity||1,immediate:!!immediate,witnessRadius:135});}
 function jackCopCar(c){
-  const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.releaseCopOccupants)combat.releaseCopOccupants(c,true);const i=cops.indexOf(c);if(i>=0)cops.splice(i,1);car=c.mesh;car.userData.playerOwned=true;car.userData.policeActor=null;car.userData.policeVehicle=true;playerSirenOn=false;vehicleTuneKey='rally';vehicleTune=VEHICLE_TUNES.rally||VEHICLE_TUNES.gripper||VEHICLE_TUNES.commuter;car.userData.vehicleTuneKey=vehicleTuneKey;carState.x=c.x;carState.z=c.z;carState.y=c.y;carState.heading=c.heading;carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;carState.hp=72;carState.burning=false;carState.fire=null;resetBurstTires();onFoot=false;footChar.visible=false;claimVehicleAudio();boom(c.x,c.z,0x2b6bff,10,c.y+2);addToast('🚓 Empty police car stolen','#ffd23f');{const crime=window.GameSystems&&GameSystems.api('crime'),witnessed=cops.some(o=>o!==c&&!o._inert&&!o._hidden&&dist2(o.x,o.z,c.x,c.z)<190);if(crime)crime.report('police-vehicle-theft',{perpetrator:'player',actor:carState,x:c.x,z:c.z,severity:2,priority:witnessed,immediate:witnessed,witnessRadius:190});}
+  const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.releaseCopOccupants)combat.releaseCopOccupants(c,true);const i=cops.indexOf(c);if(i>=0)cops.splice(i,1);car=c.mesh;car.userData.playerOwned=true;car.userData.policeActor=null;car.userData.policeVehicle=true;playerSirenOn=false;vehicleTuneKey=hydrateVehicleProfile('rally',true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey]||VEHICLE_TUNES.gripper||VEHICLE_TUNES.commuter;resetEngineHeat();loadPowertrainCondition();car.userData.vehicleTuneKey=vehicleTuneKey;carState.x=c.x;carState.z=c.z;carState.y=c.y;carState.heading=c.heading;carState.speed=0;carState.vx=0;carState.vz=0;carState.vy=0;carState.airborne=false;carState.hp=72;carState.burning=false;carState.fire=null;resetBurstTires();onFoot=false;footChar.visible=false;claimVehicleAudio();boom(c.x,c.z,0x2b6bff,10,c.y+2);addToast('🚓 Empty police car stolen','#ffd23f');{const crime=window.GameSystems&&GameSystems.api('crime'),witnessed=cops.some(o=>o!==c&&!o._inert&&!o._hidden&&dist2(o.x,o.z,c.x,c.z)<190);if(crime)crime.report('police-vehicle-theft',{perpetrator:'player',actor:carState,x:c.x,z:c.z,severity:2,priority:witnessed,immediate:witnessed,witnessRadius:190});}
 }
 function jackCar(i){
   const t=traffic[i];resetBurstTires();
   if(carState.burning) detachBurningCar();       // leave your burning car behind
   car=t.mesh;car.userData.policeVehicle=false;playerSirenOn=false; // old car mesh is left parked in the scene
-  vehicleTuneKey='commuter';vehicleTune=VEHICLE_TUNES.commuter;car.userData.vehicleTuneKey='commuter';
+  vehicleTuneKey=hydrateVehicleProfile('commuter',true);vehicleTune=VEHICLE_TUNES[vehicleTuneKey];resetEngineHeat();loadPowertrainCondition();car.userData.vehicleTuneKey=vehicleTuneKey;
   carColor=t.mesh.children[0].material.color.getHex();
   carState.x=t.x; carState.z=t.z; carState.heading=t.heading;
   carState.speed=0; carState.vx=0; carState.vz=0; carState.y=0; carState.vy=0; carState.airborne=false; resetDriftPhysics();
@@ -32497,6 +32587,9 @@ function updateDrive(dt){
   const speedNorm=clamp(sp/Math.max(1,(GEAR_CEILS[MAX_GEAR]*vehicleTune.topSpeed)/1.6),0,1),authority=clamp(sp/18,0,1);
   let rightx=Math.cos(carState.heading),rightz=-Math.sin(carState.heading),localFwd=vx*dirx+vz*dirz,localLat=vx*rightx+vz*rightz;
   let rawSlip=Math.atan2(localLat,Math.max(8,Math.abs(localFwd))),steerLoad=Math.abs(steerIn)*authority;
+  const driftP=currentDriftPersonality(),driftCeiling=driftUpgradeCeiling(),steerFlip=prevDriftSteer*steerIn<-.10&&Math.abs(prevDriftSteer)>.34&&Math.abs(steerIn)>.34&&mphBefore>driftP.breakMph;
+  if(steerFlip){feintPulse=Math.max(feintPulse,clamp(Math.abs(prevDriftSteer-steerIn)*.72,0,1));driftInitiation='feint';driftInitiationT=.58;}
+  prevDriftSteer=steerIn;contactAudioCd=Math.max(0,contactAudioCd-dt);feintPulse=Math.max(0,feintPulse-dt*2.45);driftShiftPulse=Math.max(0,driftShiftPulse-dt*2.15);driftInitiationT=Math.max(0,driftInitiationT-dt);if(driftInitiationT<=0)driftInitiation='none';
   const launchAssist=lerp(.54,1,clamp((mphBefore-36)/120,0,1));
   // Stabbing the throttle overwhelms the rear far harder than rolling into it.
   // Real difference, and the one that turns "hold W" into a thing you have to
@@ -32505,6 +32598,8 @@ function updateDrive(dt){
   throttleSpike=Math.max(throttleSpike-dt*3.1,clamp((throttleIn-prevThrottleIn)/Math.max(dt,.001)*.10,0,.55));
   prevThrottleIn=throttleIn;
   const powerDemand=throttle>0?(powerCurve*.30+turboSpool*.32+(nitroOn?.22:0))*launchAssist*throttle+throttleSpike*.42*launchAssist:0;
+  const powerOverInit=vehicleTune.drive==='RWD'&&mphBefore>driftP.breakMph&&throttleIn>driftP.powerBreak?clamp((throttleIn-driftP.powerBreak)/Math.max(.05,1-driftP.powerBreak)+drivenWheelSpin*.72+throttleSpike*.55,0,1):0;
+  if(powerOverInit>.18&&driftInitiationT<.25){driftInitiation='power-over';driftInitiationT=.42;}
   const cornerDemand=steerLoad*(.12+speedNorm*.38),cornerPower=throttle>0?steerLoad*(.10+turboSpool*.24)*throttle:0;
   // Weight transfer. Braking pins the nose and lightens the rear — that is what
   // makes trail-braking rotate a car, and it is also why lifting mid-corner bites.
@@ -32520,6 +32615,7 @@ function updateDrive(dt){
   }else{
     frontTarget=clamp(powerDemand*.68+cornerDemand*.86+cornerPower*.65+Math.max(0,brakePressure-.68)*.8,0,1);rearTarget=braking?1:clamp(.03+brakeRotate*.35,0,.5);
   }
+  if(braking&&mphBefore>driftP.breakMph*.72){driftInitiation='handbrake';driftInitiationT=.48;}
   if(vehicleTune.drive==='RWD')rearTarget=clamp(rearTarget+drivenWheelSpin*.96,0,1);else if(vehicleTune.drive==='FWD')frontTarget=clamp(frontTarget+drivenWheelSpin*.94,0,1);else{rearTarget=clamp(rearTarget+drivenWheelSpin*.38,0,1);frontTarget=clamp(frontTarget+drivenWheelSpin*.30,0,1);}
   // A car that is ALREADY sideways has sliding rear tyres whether or not the
   // driver is still asking for it. Without this term rearTarget is a pure
@@ -32528,10 +32624,20 @@ function updateDrive(dt){
   // .92 -> .35 and the yaw rate collapsed 2.02 -> 0.41 in half a second. A slide
   // you can cancel by letting go of a key is not a slide. Threshold is 11
   // degrees so ordinary cornering slip does not light the rear on its own.
-  const slideFeedback=clamp((Math.abs(rawSlip)-.20)/.60,0,1)*(vehicleTune.drive==='RWD'?.72:.34)*(1-tireBite*.78);
-  rearTarget=clamp(rearTarget+slideFeedback,0,1);
-  const straightHook=Math.abs(steerIn)<.13&&!braking&&Math.abs(rawSlip)<.15;if(straightHook){rearTarget*=.60;frontTarget*=.72;}
-  rearSlip=lerp(rearSlip,rearTarget,clamp((rearTarget>rearSlip?4.0:10.5+tireBite*10.0)*dt,0,1));
+  const slideFeedback=clamp((Math.abs(rawSlip)-.17)/.58,0,1)*(vehicleTune.drive==='RWD'?.76:.34)*(1-tireBite*.72),
+    initiation=clamp(powerOverInit+feintPulse*driftP.feint+driftShiftPulse*driftP.shift+(braking?.92*driftP.handbrake:0),0,1.45);
+  rearTarget=clamp(rearTarget+slideFeedback+feintPulse*.22+driftShiftPulse*.26,0,1);
+  const preSlideSign=Math.abs(rawSlip)>.028?-Math.sign(rawSlip):(steerIn!==0?Math.sign(steerIn):Math.sign(driftYawRate||1)),
+    preCounter=steerIn!==0&&Math.sign(steerIn)!==preSlideSign?clamp(Math.abs(steerIn)*clamp(Math.abs(rawSlip)/.20,0,1),0,1):0,
+    slideAlive=vehicleTune.drive==='RWD'&&(gripLost||rearSlip>.46||Math.abs(rawSlip)>.13);
+  if(slideAlive){
+    const lo=driftP.plateauLo,hi=clamp(driftP.plateauHi*driftCeiling,lo+.05,.94),meter=clamp(throttleIn*.72+initiation*.24-preCounter*.18,0,1),
+      plateau=lerp(lo,hi,meter);
+    rearTarget=Math.max(rearTarget,plateau);
+  }
+  const straightHook=Math.abs(steerIn)<.13&&!braking&&Math.abs(rawSlip)<.13&&!slideAlive;if(straightHook){rearTarget*=.52;frontTarget*=.72;}
+  const rearRise=slideAlive?3.35:4.15,rearFall=slideAlive?(2.05+preCounter*2.1+tireBite*3.0):(10.5+tireBite*10.0);
+  rearSlip=lerp(rearSlip,rearTarget,clamp((rearTarget>rearSlip?rearRise:rearFall)*dt,0,1));
   frontSlip=lerp(frontSlip,frontTarget,clamp((frontTarget>frontSlip?4.6:9.0)*dt,0,1));
   // Braking loads the front axle and unloads the rear: more front bite to steer
   // and brake with, less rear to hold the tail in. Both are the same coin.
@@ -32562,13 +32668,13 @@ function updateDrive(dt){
   // Opposite lock: steering against the way the tail is going. Detecting it lets
   // the front bite harder (you are pointing the tyres where the car is actually
   // travelling, so they have grip to spare) and feeds the drift score.
-  const counterSteer=steerIn!==0&&Math.sign(steerIn)!==slideSign?clamp(Math.abs(steerIn)*clamp(Math.abs(rawSlip)/.22,0,1),0,1):0;
+  const counterSteer=steerIn!==0&&Math.sign(steerIn)!==slideSign?clamp(Math.abs(steerIn)*clamp(Math.abs(rawSlip)/.20,0,1),0,1):0;
   counterSteerHold=counterSteer>.25?Math.min(2.4,counterSteerHold+dt):Math.max(0,counterSteerHold-dt*2);
-  const powerOversteer=vehicleTune.drive==='RWD'?slideSign*Math.max(slipOver,drivenWheelSpin*.72)*Math.max(0,driveThrottle)*(.62+.98*powerCurve+drivenWheelSpin*.7)*vehicleTune.drift:0;
-  const handbrakeAuthority=braking*clamp((sp-2.2)/12,0,1),handbrakeYaw=handbrakeAuthority*(steerIn!==0?steerIn:Math.sign(driftYawRate||1))*1.32*authority;
+  const powerOversteer=vehicleTune.drive==='RWD'?slideSign*Math.max(slipOver,drivenWheelSpin*.68)*Math.max(0,driveThrottle)*(.48+.70*powerCurve+drivenWheelSpin*.52)*vehicleTune.drift*driftP.hold:0;
+  const handbrakeAuthority=braking*clamp((sp-2.2)/12,0,1),handbrakeYaw=handbrakeAuthority*(steerIn!==0?steerIn:Math.sign(driftYawRate||1))*1.32*authority*driftP.handbrake;
   // Countersteer authority. Turning into the slide is worth more than turning
   // with it — that asymmetry is what makes catching one feel like a save.
-  const yawGain=(vehicleTune.drive==='AWD'?4.8:vehicleTune.drive==='FWD'?2.4:3.0)*(1+counterSteer*.55);
+  const yawGain=(vehicleTune.drive==='AWD'?4.8:vehicleTune.drive==='FWD'?2.4:3.0)*(1+counterSteer*.55)*driftP.yaw;
   // Steering commands a yaw RATE here — an arcade shortcut that is fine while the
   // tyres grip, but it also meant centring the wheel commanded zero yaw, i.e. the
   // steering column could stop a slide the tyres had no way of stopping. That
@@ -32576,7 +32682,11 @@ function updateDrive(dt){
   // Turning INTO the slide keeps full authority, because that is the front axle
   // doing real work and it is the thing we want to reward.
   const passiveReturn=counterSteer>0?1:lerp(1,.30,clamp(slipOver,0,1)*(vehicleTune.drive==='RWD'?1:.4));
-  const yawResponse=(desiredYaw-driftYawRate)*yawGain*passiveReturn;
+  const driftMix=vehicleTune.drive==='RWD'?clamp((rearSlip-.40)/.42,0,1):0,
+    eqDrive=clamp(.24+driveThrottle*.58+slipOver*.42-counterSteer*(.34+(1-driveThrottle)*.52)*driftP.counter,0,1.30),
+    equilibriumYaw=slideSign*eqDrive*lerp(.52,1.08,clamp(sp/70,0,1))*driftP.hold*driftCeiling,
+    yawTarget=lerp(desiredYaw,equilibriumYaw,driftMix*.84);
+  const yawResponse=(yawTarget-driftYawRate)*yawGain*passiveReturn;
   // Self-alignment: the rear tyres' restoring moment. It scales with how much
   // rear grip is LEFT, so a fully lit rear axle barely straightens the car at all
   // and the power moment above wins. That collapse is the spin risk. Countersteer
@@ -32597,8 +32707,15 @@ function updateDrive(dt){
   const maxGripAccel=baseGripLimit*(.58+.42*axleCapacity)*(braking?.16:1);gripUsage=lateralDemand/Math.max(1,maxGripAccel);
   if(vehicleTune.drive==='AWD')gripLost=braking||Math.abs(driftAngle)>.36||gripUsage>1.65;
   else if(vehicleTune.drive==='FWD')gripLost=frontSlip>.70||braking;
-  else if(gripLost){if(!braking&&rearSlip<(.42+tireBite*.18)&&Math.abs(driftAngle)<(.075+tireBite*.075)&&gripUsage<(.78+tireBite*.28))gripLost=false;}else if(braking||rearSlip>.63||Math.abs(driftAngle)>.15||gripUsage>1.02)gripLost=true;
-  let lateralGripRate=vehicleTune.drive==='AWD'?10.5:vehicleTune.drive==='FWD'?(6.1*frontCapacity):(gripLost?1.55:6.7);
+  else{
+    if(!gripLost&&(braking||rearSlip>(.65/driftP.hold)||Math.abs(driftAngle)>(vehicleTuneKey==='streetDrift'?.125:.15)||gripUsage>1.02)){gripLost=true;driftRecovery=0;}
+    if(gripLost){
+      const recoverReady=!braking&&rearSlip<(.46+tireBite*.18)&&Math.abs(driftAngle)<(.11+tireBite*.08)&&gripUsage<(.86+tireBite*.28)&&counterSteer<.32;
+      driftRecovery=clamp(driftRecovery+dt*(recoverReady?1.55*driftP.recovery:-2.5),0,1);
+      if(driftRecovery>=.98)gripLost=false;
+    }else driftRecovery=1;
+  }
+  let lateralGripRate=vehicleTune.drive==='AWD'?10.5:vehicleTune.drive==='FWD'?(6.1*frontCapacity):(gripLost?lerp(1.48,6.7,driftRecovery*driftRecovery):6.7);
   if(straightHook)lateralGripRate+=vehicleTune.drive==='AWD'?4:2.2;lateralGripRate+=tireBite*(vehicleTune.drive==='RWD'?5.8:3.0);
   const activeGripLimit=maxGripAccel*(gripLost&&vehicleTune.drive==='RWD'?.70:1);
   let lateralAccel=clamp(-localLat*lateralGripRate,-activeGripLimit,activeGripLimit);
@@ -32608,7 +32725,7 @@ function updateDrive(dt){
   // slide. While the car is still straight, `slideSign` is the steering input, so
   // initiating one is unchanged.
   const rearStepDir=-slideSign;
-  if(vehicleTune.drive==='RWD'&&gripLost)lateralAccel+=rearStepDir*Math.max(slipOver,drivenWheelSpin*.8)*Math.max(0,driveThrottle)*(13+sp*.045+drivenWheelSpin*14)*vehicleTune.drift;
+  if(vehicleTune.drive==='RWD'&&gripLost)lateralAccel+=rearStepDir*Math.max(slipOver,drivenWheelSpin*.8)*Math.max(0,driveThrottle)*(13+sp*.045+drivenWheelSpin*14)*vehicleTune.drift*driftP.hold*driftCeiling;
   // Handbrake flicks: this one IS steer-directed, because that is exactly what
   // yanking the lever mid-corner does — it breaks the rears loose on demand.
   if(handbrakeAuthority>0)lateralAccel+=(steerIn!==0?-Math.sign(steerIn):rearStepDir)*(22+sp*.08)*handbrakeAuthority;
@@ -32652,7 +32769,7 @@ function updateDrive(dt){
     // microsteps stay below the thinnest expanded collider, with a high-speed-only
     // ceiling of 40; ordinary traffic costs 1-3 steps exactly as before.
     const steps=clamp(Math.ceil(Math.hypot(vel.x,vel.z)*dt/COLLISION_STEP),1,COLLISION_MAX_STEPS),sdt=dt/steps;
-    let impact=0;const hitActors=new Set(),dynNear=[],otherVel={x:0,z:0};
+    let impact=0;const hitActors=new Set(),contactActors=new Set(),dynNear=[],otherVel={x:0,z:0};
     for(let s=0;s<steps;s++){
       carState.x+=vel.x*sdt;carState.z+=vel.z*sdt;
       // Capsule-vs-world, settled iteratively. Corrections move position only;
@@ -32687,18 +32804,18 @@ function updateDrive(dt){
         }
         if(e.mask===DYN_TRAFFIC){
           if(a._patrol&&playerToward>8&&playerToward>Math.max(0,-otherToward)*1.12){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,priority:true,immediate:true});}else if(!a._patrol&&closing>18)scheduleTrafficDriverExit(a,.3+Math.random()*1.4,'collision');
-          if(playerToward>TRAFFIC_BASH_SPEED&&closing>=TRAFFIC_BLAST_SPEED){const vd=window.GameSystems&&GameSystems.api('vdamage'),crime=window.GameSystems&&GameSystems.api('crime'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1500),.55,1.65),damage=(closing-TRAFFIC_BASH_SPEED)*1.05*massRatio,r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(crime)crime.markCaused(a,null,8);superBlastVehicle(a,false,closing,nx,nz);continue;}
-          contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.055,.16);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}
+          if(playerToward>TRAFFIC_BASH_SPEED&&closing>=TRAFFIC_BLAST_SPEED){const vd=window.GameSystems&&GameSystems.api('vdamage'),crime=window.GameSystems&&GameSystems.api('crime'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1500),.55,1.65),damage=(closing-TRAFFIC_BASH_SPEED)*1.05*massRatio,r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(crime)crime.markCaused(a,null,8);playerVehicleContactFeedback(closing,PLAYER_vehicleMass(),e.mass||a.mass||1500,nx,nz,Math.abs((vel.x-otherVel.x)*(-nz)+(vel.z-otherVel.z)*nx));superBlastVehicle(a,false,closing,nx,nz);continue;}
+          const contactTangent=Math.abs((vel.x-otherVel.x)*(-nz)+(vel.z-otherVel.z)*nx),playerMass=PLAYER_vehicleMass(),otherMass=e.mass||a.mass||1500;contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,playerMass,a,e.r,otherVel,otherMass,.055,.16);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){const energy=vehicleContactEnergy(im,playerMass,otherMass);a._contactT=Math.max(a._contactT||0,.18+clamp(energy/55,0,1)*.72);writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;if(!contactActors.has(a)){contactActors.add(a);playerVehicleContactFeedback(im,playerMass,otherMass,nx,nz,contactTangent);}}
           if(!hitActors.has(a)&&playerToward>0&&closing>TRAFFIC_BASH_SPEED){hitActors.add(a);const force=clamp((closing-TRAFFIC_BASH_SPEED)/(TRAFFIC_BLAST_SPEED-TRAFFIC_BASH_SPEED),0,1.5),massRatio=clamp((vehicleTune.mass||1400)/(a.mass||1500),.55,1.65),damage=Math.max(0,(closing-TRAFFIC_BASH_SPEED)*.42*massRatio*(.35+force*.65)),vd=window.GameSystems&&GameSystems.api('vdamage');if(vd)vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z});else a.hp-=damage;boom(a.x,a.z,0xffaa30,6,2);playCrash();if((vd&&vd.integrity(a)<=0)||(!vd&&a.hp<=0)){igniteTraffic(a);doFlash(.2);const crime=window.GameSystems&&GameSystems.api('crime'),ev=crime&&crime.report('vehicle-destruction',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:1,witnessRadius:145});if(ev)alertPedestrians(a.x,a.z,145,'collision',ev);}}
           continue;
         }
         if(e.mask===DYN_COP){
           const copToward=-otherToward,playerInitiated=playerToward>9&&playerToward>copToward*1.15;
           if(a._roadblock&&ramRoadblockCar(a,closing,nx,nz,vel))continue;
-          if(playerInitiated){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,priority:true,immediate:true});const vd=window.GameSystems&&GameSystems.api('vdamage'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1900),.5,1.5),damage=Math.max(1,(closing-8)*.82*massRatio),r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(closing>=TRAFFIC_BLAST_SPEED){if(crime)crime.markCaused(a,null,8);superBlastVehicle(a,true,closing,nx,nz);continue;}}
+          if(playerInitiated){const crime=window.GameSystems&&GameSystems.api('crime');if(crime)crime.report('ram-police',{perpetrator:'player',actor:carState,x:a.x,z:a.z,severity:2,priority:true,immediate:true});const vd=window.GameSystems&&GameSystems.api('vdamage'),massRatio=clamp((PLAYER_vehicleMass())/(a.mass||1900),.5,1.5),damage=Math.max(1,(closing-8)*.82*massRatio),r=vd&&vd.damage(a,{amount:damage,channel:'collision',from:'player',x:a.x,y:(a.y||0)+2,z:a.z,critical:closing>55,ui:false});if(closing>=TRAFFIC_BLAST_SPEED){if(crime)crime.markCaused(a,null,8);playerVehicleContactFeedback(closing,PLAYER_vehicleMass(),e.mass||a.mass||1900,nx,nz,Math.abs((vel.x-otherVel.x)*(-nz)+(vel.z-otherVel.z)*nx));superBlastVehicle(a,true,closing,nx,nz);continue;}}
           if(copToward>5&&(a.ramCd||0)<=0){if(policeRamPlayer(a,nx,nz,vel))return;continue;}
         }
-        contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.05,.17);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}
+        const contactTangent=Math.abs((vel.x-otherVel.x)*(-nz)+(vel.z-otherVel.z)*nx),playerMass=PLAYER_vehicleMass(),otherMass=e.mass||a.mass||(e.mask===DYN_COP?1900:1500);contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,playerMass,a,e.r,otherVel,otherMass,.05,.17);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;if(e.mask===DYN_TRAFFIC)a._contactT=Math.max(a._contactT||0,.18+clamp(vehicleContactEnergy(im,playerMass,otherMass)/55,0,1)*.72);if(!contactActors.has(a)){contactActors.add(a);playerVehicleContactFeedback(im,playerMass,otherMass,nx,nz,contactTangent);}}
       }
     }
     if(impact>30){const crashDamage=Math.pow(Math.max(0,impact-27),1.06)*.054,vd=window.GameSystems&&GameSystems.api('vdamage');breakDriftCombo();if(vd)vd.damage('player',{amount:crashDamage,channel:'collision',from:'world'});else carState.hp=Math.max(0,carState.hp-crashDamage);boom(carState.x,carState.z,0xffaa30,Math.min(9,3+crashDamage));doFlash(Math.min(.13,.035+crashDamage*.009));playCrash();}
@@ -32763,13 +32880,15 @@ function updateDrive(dt){
   // mesh transform
   car.position.set(carState.x,carState.y,carState.z);
   car.rotation.y=carState.heading;
-  car.rotation.z=lerp(car.rotation.z,clamp(driftAngle*-.42-steerIn*authority*.045,-.24,.24),0.13);
+  contactPitchV+=(-contactPitch*38-contactPitchV*8.2)*dt;contactRollV+=(-contactRoll*42-contactRollV*8.8)*dt;
+  contactPitch=clamp(contactPitch+contactPitchV*dt,-.16,.16);contactRoll=clamp(contactRoll+contactRollV*dt,-.19,.19);
+  car.rotation.z=lerp(car.rotation.z,clamp(driftAngle*-.42-steerIn*authority*.045+contactRoll,-.32,.32),0.13);
   // Weight transfer you can see. The nose dips under braking and the tail squats
-  // under power — 3.5 degrees at full brake, no more. Small, but it is most of
-  // what sells a brake pedal as a brake rather than as a speed multiplier.
+  // under power — 3.5 degrees at full brake, no more. Contact springs add a brief
+  // mass-weighted pitch/roll kick without adding another collision or physics pass.
   const targetPitch=clamp(brakePressure*.061-throttleIn*.024*clamp(1-speedNorm*.7,0,1),-.028,.062)*clamp(sp/9,0,1);
   bodyPitch=lerp(bodyPitch,targetPitch,clamp(dt*7,0,1));
-  car.rotation.x=carState.airborne?lerp(car.rotation.x,-clamp(carState.vy*.02,-.4,.4),.2):lerp(car.rotation.x,carSurfacePitch+bodyPitch,.16);
+  car.rotation.x=carState.airborne?lerp(car.rotation.x,-clamp(carState.vy*.02,-.4,.4),.2):lerp(car.rotation.x,carSurfacePitch+bodyPitch+contactPitch,.16);
   if(car.userData.tailLight)car.userData.tailLight.material.color.setHex(brakePressure>.08?0xff5555:0xff2222);
   spotL.position.set(carState.x-1.3*Math.cos(carState.heading),carState.y+3,carState.z+1.3*Math.sin(carState.heading));
   spotR.position.set(carState.x+1.3*Math.cos(carState.heading),carState.y+3,carState.z-1.3*Math.sin(carState.heading));
@@ -33163,6 +33282,8 @@ window.GAME_DEBUG={
                     // measured numbers, so the harness has to be able to read them
                     driftAngle:+driftAngle.toFixed(3),yawRate:+driftYawRate.toFixed(3),
                     rearSlip:+rearSlip.toFixed(3),frontSlip:+frontSlip.toFixed(3),gripLost,surface:carSurface.type,
+                    driftInitiation,driftRecovery:+driftRecovery.toFixed(3),driftCeiling:+driftUpgradeCeiling().toFixed(3),driftPersonality:Object.assign({},currentDriftPersonality()),
+                    contactEnergy:+lastContactEnergy.toFixed(3),contactPitch:+contactPitch.toFixed(3),contactRoll:+contactRoll.toFixed(3),
                     brake:+brakePressure.toFixed(3),brakeLock:+brakeLock.toFixed(3),
                     marks:tireMarks.length,debris:carDebris.length};},
   get camera(){return {x:camera.position.x,y:camera.position.y,z:camera.position.z};},
@@ -33320,7 +33441,7 @@ const mapSelectEl=document.getElementById('mapSelect'),overlayTitleEl=document.g
 const vehicleSelectEl=document.getElementById('vehicleSelect');
 let pendingMapId=null,mapStage='map';
 const MAP_CARDS=[
-  {id:'neon',  name:'NEON CITY',    accent:'#ff2d9b', icon:'🌃', sub:'DEFAULT · 8 ZONES + THE RIM',
+  {id:'neon',  name:'NEON STATE',   accent:'#ff2d9b', icon:'🌃', sub:'DEFAULT · 8 ZONES + THE RIM',
    desc:'Neon downtown, freight docks, airport runway, marina stadium, cliff villas, hill switchbacks, retail and quarry stunts.'},
   
   // The LEGACY STATE card is gone by user directive — its gas stations, diner
@@ -33426,7 +33547,7 @@ if(window.GameSystems){
 
     vehicles:{
       TUNES:VEHICLE_TUNES,get currentKey(){return vehicleTuneKey;},get tune(){return vehicleTune;},
-      select:selectPlayerVehicle,get color(){return carColor;},
+      select:selectPlayerVehicle,selectRaw:selectPlayerVehicle,get color(){return carColor;},
       setColor(hex){carColor=hex;if(car&&car.children[0]&&car.children[0].material)car.children[0].material.color.setHex(hex);},
       selectionUI:{get open(){return carSelectionOpen;},vehicleSelectEl,mapSelectEl,openVehicleSelection,begin,showVehicleStage}
     },
