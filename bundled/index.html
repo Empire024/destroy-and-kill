@@ -28752,7 +28752,7 @@ function roadsideSlotClear(world,x,z,y,ownSeg){const segs=world&&world.roadsRef&
     a.vx=vel.x;a.vz=vel.z;a.vy=vy;a.speed=speed;a.grounded=nowGround;a.agl=Math.max(0,a.y-surface);return{speed:Math.abs(speed),stall:!nowGround&&speed<stallSpeed,grounded:nowGround,touchdown,impact,water};
   }
   function heliPhysics(a,c,dt){
-    const ground=supportHeight(a,a.x,a.z),grounded=a.y<=ground+.12,alt=a.y-ground;a.heading+=c.yaw*PHYS.heliYaw*dt*(grounded?.3:1);
+    const ground=supportHeight(a,a.x,a.z),grounded=a.y<=ground+.12,alt=a.y-ground;a.heading-=c.yaw*PHYS.heliYaw*dt*(grounded?.3:1);
     const ng=grounded?1:clamp(1-alt/8,0,1),targetPitch=grounded?0:lerp(-c.pitch*.34,0,ng),targetRoll=grounded?0:lerp(c.roll*.4,0,ng);a.pitch=lerp(a.pitch,targetPitch,smooth(5,dt));a.roll=lerp(a.roll,targetRoll,smooth(5,dt));
     const fx=Math.sin(a.heading),fz=Math.cos(a.heading),fa=grounded?0:c.pitch*PHYS.heliAccel*(a.style.thrust/26),sa=grounded?0:c.roll*PHYS.heliAccel*.75*(a.style.thrust/26);let vx=(a.vx||0)+(fx*fa+fz*sa)*dt,vz=(a.vz||0)+(fz*fa-fx*sa)*dt,damp=Math.max(0,1-(grounded?4:.75)*dt);vx*=damp;vz*=damp;const ps=Math.hypot(vx,vz);if(ps>a.style.topSpeed){vx*=a.style.topSpeed/ps;vz*=a.style.topSpeed/ps;}let vy=lerp(a.vy||0,c.throttle*PHYS.heliVertical,smooth(2.6,dt));if(grounded&&c.throttle<=0)vy=0;
     const vel={x:vx,z:vz},impact=moveHorizontal(a,vel,dt),wasAir=!grounded;a.y+=vy*dt;let surface=supportHeight(a,a.x,a.z),touchdown=0,nowGround=false,water=false;
