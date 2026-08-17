@@ -6,7 +6,7 @@
 'use strict';
 if(!window.GameSystems)return;
 
-const BUILD='v49b',STORE_KEY='neon-state-bugreports-v1',SCHEMA='neon-state-bugreport-v1';
+const BUILD='v49c',STORE_KEY='neon-state-bugreports-v1',SCHEMA='neon-state-bugreport-v1';
 const MAX_REPORTS=20,MAX_STORAGE_CHARS=3600000,CONSOLE_CAP=20;
 const consoleRing=[];
 let ctx=null,root=null,quick=null,recDot=null,pending=null,session=null,lastExportJSON='',lastSummary=null,fpsAvg=0;

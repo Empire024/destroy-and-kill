@@ -432,12 +432,12 @@ function makeCharacter(){
 
 // ---------- Player vehicles ----------
 const VEHICLE_TUNES={
-  streetDrift:{name:'STREET DRIFT',drive:'RWD',style:4,color:0xff7abf,power:.46,turboPush:.32,maxPsi:.35,topSpeed:.74,grip:.88,steer:1.07,drift:1.24,reverseAccel:34,gearAccel:[0,86,80,74,68,62,56]},
+  streetDrift:{name:'STREET DRIFT',drive:'RWD',style:4,color:0xff7abf,power:.46,turboPush:.32,maxPsi:.35,topSpeed:.74,grip:.84,steer:1.07,drift:1.24,reverseAccel:34,gearAccel:[0,96,90,83,76,70,63]},
   // gearAccel is per-gear thrust. 1st and 2nd are pulled back from 134/119: at
   // full throttle they hit the limiter almost instantly and the car just sat
   // there. Gears 4-6 are untouched, so the top end pulls exactly as hard.
-  proDrift:{name:'PRO DRIFT',drive:'RWD',style:4,color:0xff2d9b,power:.97,turboPush:1.25,maxPsi:1.50,topSpeed:1,grip:1.06,steer:1.09,drift:1.27,reverseAccel:82,gearAccel:[0,112,112,112,110,102,98]},
-  gripper:{name:'GRIPPER',drive:'AWD',style:2,color:0x20e3ff,power:1.76,turboPush:1.52,maxPsi:1.5,topSpeed:1,grip:1.90,steer:1.10,drift:.18,reverseAccel:112,gearAccel:[0,196,178,162,150,138,126]},
+  proDrift:{name:'PRO DRIFT',drive:'RWD',style:4,color:0xff2d9b,power:.97,turboPush:1.25,maxPsi:1.50,topSpeed:1,grip:1.00,steer:1.09,drift:1.27,reverseAccel:82,gearAccel:[0,123,123,123,121,112,108]},
+  gripper:{name:'GRIPPER',drive:'AWD',style:2,color:0x20e3ff,power:1.76,turboPush:1.52,maxPsi:1.5,topSpeed:1,grip:1.82,steer:1.10,drift:.18,reverseAccel:112,gearAccel:[0,220,199,181,168,155,141]},
   // The commuter's card promises "comically slow" and it was doing 0-60 in 3.0s
   // and topping out at 164mph — a hot hatch on nitrous. Two separate problems:
   // topSpeed .43 put sixth gear's ceiling at 550*.43 = 236mph, and the inherited
@@ -449,7 +449,7 @@ const VEHICLE_TUNES={
   // final drive actually feels like — and leave enough top-gear pull to reach the
   // drag limit. Measured after: 0-60 in 7.4s, 0-100 in 14.2s, top 105mph, and it
   // now works through all six gears instead of running out of road in third.
-  commuter:{name:'COMMUTER',drive:'FWD',style:0,color:0xd7c98c,power:.31,turboPush:.08,maxPsi:.10,topSpeed:.22,grip:.82,steer:.82,drift:.05,reverseAccel:26,gearAccel:[0,36,36,36,38,40,44]}
+  commuter:{name:'COMMUTER',drive:'FWD',style:0,color:0xd7c98c,power:.31,turboPush:.08,maxPsi:.10,topSpeed:.22,grip:.78,steer:.82,drift:.05,reverseAccel:26,gearAccel:[0,41,41,41,44,46,50]}
 };
 // Factory metadata lives on the base tune too, not only on the progression
 // wrapper. This keeps direct/debug/legacy selection paths consistent with the
