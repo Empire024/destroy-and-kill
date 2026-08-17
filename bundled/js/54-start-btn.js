@@ -2659,7 +2659,7 @@ function updateFoot(dt){
   const wantCrouch=!!keys.ControlLeft&&foot.grounded&&!jumpPressed;foot.crouched=wantCrouch;foot.crouchBlend+=(Number(wantCrouch)-foot.crouchBlend)*(1-Math.exp(-dt*14));
   const yaw=combatView?combatApi.heading():foot.heading,input={forward:!!(keys['w']||keys['arrowup']||mobileInput.gas),back:!!(keys['s']||keys['arrowdown']||mobileInput.brake),left:!MOBILE_UI&&!!(keys['a']||keys['arrowleft']),right:!MOBILE_UI&&!!(keys['d']||keys['arrowright'])};if(!combatView&&MOBILE_UI&&Math.abs(touchTurn)>.001)input.lateral=touchTurn;
   const sprintBlocked=!!(combatApi&&combatApi.sprintBlocked&&combatApi.sprintBlocked()),basis=H.footDirection(input,yaw,combatView,2.6*dt),sprint=(keys['shift']||mobileInput.nitro)&&!sprintBlocked&&!foot.crouched?1.7:1,creep=foot.crouched?.45:1,spd=15*sprint*creep;foot.heading=basis.heading;moveFootCollision(basis.x*spd*basis.amount,basis.z*spd*basis.amount,dt);
-  const ground=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(!foot.grounded){foot.vy-=30*dt;foot.y+=foot.vy*dt;const landing=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(foot.vy<=0&&foot.y<=landing){foot.y=landing;foot.vy=0;foot.grounded=true;}}else{foot.y=ground;foot.vy=0;}
+  const ground=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(!foot.grounded){foot.vy-=30*dt;foot.y+=foot.vy*dt;const landing=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(foot.vy<=0&&foot.y<=landing){foot.y=landing;foot.vy=0;foot.grounded=true;}}else if(ground<foot.y-1.6){foot.grounded=false;foot.vy=0;}else{foot.y=ground;foot.vy=0;}
   foot.walk+=basis.amount&&foot.grounded?dt*9*sprint*(foot.crouched?.72:1):0;const bob=foot.grounded?Math.abs(Math.sin(foot.walk))*.25*(foot.crouched?.55:1):0;footChar.position.set(foot.x,foot.y+bob-foot.crouchBlend*.08,foot.z);footChar.rotation.y=foot.heading;
   const swing=basis.amount&&foot.grounded?Math.sin(foot.walk)*.5*(foot.crouched?.55:1):0;applyFootPose(footChar,swing,foot.crouchBlend,basis.amount>.01);
 }
@@ -2731,8 +2731,18 @@ function update(dt){
     // the terrain field than its overhang rule allows). If a real surface above
     // the waterline is holding the player up, they are standing, not swimming.
     const py=onFoot?PLAYER_y():carState.y,gy=WORLD_groundHeightAt(PX,PZ,py);
-    window.__DBG_sink={px:PX,pz:PZ,py:py,gy:gy,seaY:GameSea.y,blocked:!(gy>GameSea.y+0.02&&py>=gy-0.6)};
-    if(!(gy>GameSea.y+0.02&&py>=gy-0.6)){ startSink(PX,PZ,dt); return; }
+    let held=gy>GameSea.y+0.02&&py>=gy-0.6;
+    // The heightfield floors at exactly 0 beyond its authored bounds, which
+    // reads as "ground above the waterline" across the entire open sea. A bare
+    // 0-floor only counts as land inside built-up fabric (a real collider
+    // nearby); open water has none, so cars and pedestrians sink as they should.
+    if(held&&gy<0.011&&gy>-0.011){
+      let near=null;try{near=activeWorld.obstaclesNear(PX,PZ);}catch(e){}
+      let fabric=false;if(near)for(let i=0;i<near.length;i++){const o=near[i];if(Math.hypot(o.x-PX,o.z-PZ)<120){fabric=true;break;}}
+      held=fabric;
+    }
+    window.__DBG_sink={px:PX,pz:PZ,py:py,gy:gy,seaY:GameSea.y,blocked:!held};
+    if(!held){ startSink(PX,PZ,dt); return; }
     if(waterTimer>0) leaveWater();
   } else
   if(waterTimer>0) leaveWater();   // made it back to dry land in time
