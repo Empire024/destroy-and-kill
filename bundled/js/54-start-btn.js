@@ -2637,6 +2637,7 @@ function applyFootPose(mesh,swing,crouch,moving){
   if(ud.head){ud.head.position.y=R.headY-c*.91;ud.head.rotation.x=c*.045;}
   if(ud.face){ud.face.position.y=R.headY-c*.91;ud.face.rotation.x=c*.045;}
 }
+window.NEON_MOVE_TUNING=Object.assign({WALK_RAMP:.15,SPRINT_RAMP:.9,STOP_TIME:.2,TURN_RATE:22,SPRINT_TURN_DAMP:.25,WALK_SPEED:15,SPRINT_MULT:1.7,SPRINT_AIM_LOCKOUT:16.6,AIM_HINT_MAX:4,AIM_HINT_CD:3},window.NEON_MOVE_TUNING||{});
 function moveFootCollision(vx,vz,dt){
   const speed=Math.hypot(vx,vz),steps=clamp(Math.ceil(speed*dt/.58),1,18),sdt=dt/steps;_footVel.x=vx;_footVel.z=vz;
   for(let s=0;s<steps;s++){
@@ -2658,7 +2659,27 @@ function updateFoot(dt){
   const jumpHeld=!!keys[' '],jumpPressed=jumpHeld&&!foot.jumpLatch;if(jumpPressed&&foot.grounded){foot.vy=12.8;foot.grounded=false;foot.crouched=false;}foot.jumpLatch=jumpHeld;
   const wantCrouch=!!keys.ControlLeft&&foot.grounded&&!jumpPressed;foot.crouched=wantCrouch;foot.crouchBlend+=(Number(wantCrouch)-foot.crouchBlend)*(1-Math.exp(-dt*14));
   const yaw=combatView?combatApi.heading():foot.heading,input={forward:!!(keys['w']||keys['arrowup']||mobileInput.gas),back:!!(keys['s']||keys['arrowdown']||mobileInput.brake),left:!MOBILE_UI&&!!(keys['a']||keys['arrowleft']),right:!MOBILE_UI&&!!(keys['d']||keys['arrowright'])};if(!combatView&&MOBILE_UI&&Math.abs(touchTurn)>.001)input.lateral=touchTurn;
-  const sprintBlocked=!!(combatApi&&combatApi.sprintBlocked&&combatApi.sprintBlocked()),basis=H.footDirection(input,yaw,combatView,2.6*dt),sprint=(keys['shift']||mobileInput.nitro)&&!sprintBlocked&&!foot.crouched?1.7:1,creep=foot.crouched?.45:1,spd=15*sprint*creep;foot.heading=basis.heading;moveFootCollision(basis.x*spd*basis.amount,basis.z*spd*basis.amount,dt);
+  const sprintBlocked=!!(combatApi&&combatApi.sprintBlocked&&combatApi.sprintBlocked()),basis=H.footDirection(input,yaw,combatView,2.6*dt),sprint=(keys['shift']||mobileInput.nitro)&&!sprintBlocked&&!foot.crouched?1.7:1,creep=foot.crouched?.45:1,spd=15*sprint*creep;foot.heading=basis.heading;
+  // Momentum running: rate-limit the commanded velocity (foot.mvx/mvz) instead of applying input instantly.
+  // Airborne keeps the old instant air control; grounded ramps walk in WALK_RAMP, builds walk->sprint over
+  // SPRINT_RAMP, stops over STOP_TIME, and damps velocity-direction changes as speed approaches full sprint.
+  const MT=window.NEON_MOVE_TUNING,tvx=basis.x*spd*basis.amount,tvz=basis.z*spd*basis.amount;
+  if(!MT||!foot.grounded){foot.mvx=tvx;foot.mvz=tvz;}
+  else{
+    const walkTop=MT.WALK_SPEED*creep,sprintTop=MT.WALK_SPEED*MT.SPRINT_MULT,cvx=foot.mvx||0,cvz=foot.mvz||0,cs=Math.hypot(cvx,cvz),ts=Math.hypot(tvx,tvz);
+    let ns;
+    if(ts>cs){const acc=cs<walkTop-.01?MT.WALK_SPEED/MT.WALK_RAMP:(sprintTop-MT.WALK_SPEED)/MT.SPRINT_RAMP;ns=Math.min(ts,cs+acc*dt);}
+    else ns=Math.max(ts,cs-MT.WALK_SPEED/MT.STOP_TIME*dt);
+    let dx=0,dz=0;
+    if(ts>1e-4){
+      const ta=Math.atan2(tvx,tvz);
+      if(cs<.5){dx=Math.sin(ta);dz=Math.cos(ta);}
+      else{const ca=Math.atan2(cvx,cvz);let da=ta-ca;if(da>Math.PI)da-=Math.PI*2;else if(da<-Math.PI)da+=Math.PI*2;const sf=clamp((cs-walkTop)/Math.max(.001,sprintTop-walkTop),0,1),mx=MT.TURN_RATE*(1-MT.SPRINT_TURN_DAMP*sf)*dt,na=ca+clamp(da,-mx,mx);dx=Math.sin(na);dz=Math.cos(na);}
+    }else if(cs>1e-4){dx=cvx/cs;dz=cvz/cs;}
+    if(ns<.02)ns=0;
+    foot.mvx=dx*ns;foot.mvz=dz*ns;
+  }
+  foot.speed=Math.hypot(foot.mvx||0,foot.mvz||0);moveFootCollision(foot.mvx||0,foot.mvz||0,dt);
   const ground=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(!foot.grounded){foot.vy-=30*dt;foot.y+=foot.vy*dt;const landing=WORLD_groundHeightAt(foot.x,foot.z,foot.y);if(foot.vy<=0&&foot.y<=landing){foot.y=landing;foot.vy=0;foot.grounded=true;}}else if(ground<foot.y-1.6){foot.grounded=false;foot.vy=0;}else{foot.y=ground;foot.vy=0;}
   foot.walk+=basis.amount&&foot.grounded?dt*9*sprint*(foot.crouched?.72:1):0;const bob=foot.grounded?Math.abs(Math.sin(foot.walk))*.25*(foot.crouched?.55:1):0;footChar.position.set(foot.x,foot.y+bob-foot.crouchBlend*.08,foot.z);footChar.rotation.y=foot.heading;
   const swing=basis.amount&&foot.grounded?Math.sin(foot.walk)*.5*(foot.crouched?.55:1):0;applyFootPose(footChar,swing,foot.crouchBlend,basis.amount>.01);

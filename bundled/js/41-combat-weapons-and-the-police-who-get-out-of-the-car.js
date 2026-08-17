@@ -104,6 +104,20 @@
   // module's existing hitscan pipeline; these values only control aim/camera,
   // recoil, crosshair feedback and the two visible gun models.
   let aimHeld=false,aimButtonHeld=false,forcedFirstPerson=false,aimYaw=0,aimPitch=0,aimBlend=0;
+  // Sprint traversal gate: at full sprint the mouse only steers (mouselook stays live) — the weapon
+  // does not raise and cannot fire until actual measured speed drops below SPRINT_AIM_LOCKOUT or
+  // sprint is released. Speed is measured from real position deltas so walls/interiors behave.
+  let sprintGateLocked=false,sprintGateSpd=0,sprintGatePX=null,sprintGatePZ=null,sprintGateHints=0,sprintGateHintCd=0;
+  function sprintGateHint(){const T=window.NEON_MOVE_TUNING||{};if(!ctxRef||sprintGateHints>=(T.AIM_HINT_MAX||4)||sprintGateHintCd>0)return;sprintGateHints++;sprintGateHintCd=T.AIM_HINT_CD||3;ctxRef.fx.toast('TOO FAST TO AIM — slow down to shoot','#9ab');}
+  function updateSprintGate(dt,ctx){
+    const T=window.NEON_MOVE_TUNING;sprintGateHintCd=Math.max(0,sprintGateHintCd-dt);
+    if(!T||!ctx.player.onFoot){sprintGateLocked=false;sprintGateSpd=0;sprintGatePX=null;return;}
+    const px=ctx.player.x,pz=ctx.player.z;
+    if(sprintGatePX!==null&&dt>0){const inst=Math.min(60,Math.hypot(px-sprintGatePX,pz-sprintGatePZ)/dt);sprintGateSpd+=(inst-sprintGateSpd)*(1-Math.exp(-dt*12));}
+    sprintGatePX=px;sprintGatePZ=pz;
+    const foot=ctx.player.foot,k=ctx.input.keys,sprinting=!!((k['shift']||ctx.input.mobileInput.nitro)&&!sprintBlockedByWeapon()&&!(foot&&foot.crouched));
+    sprintGateLocked=sprinting&&sprintGateSpd>(T.SPRINT_AIM_LOCKOUT||16.6)&&!!inv.equipped&&!(melee&&melee.isWeapon(inv.equipped));
+  }
   let recoilKick=0,recoilYawKick=0,recoilPitchKick=0,recoilIndex=0,muzzleImpulse=0,crosshairBloom=0,hitMarkerTimer=0,headshotTimer=0,equipKick=0,weaponClock=0,switchClock=0;
   let combatCanvas=null,pointerLocked=false,worldWeapon=null,viewWeapon=null,aimCameraWasActive=false,qaLookActive=false,qaLookTimer=0,weaponWheelRoot=null,weaponWheelOpen=false,weaponWheelIndex=0,weaponWheelItems=[],weaponWheelLastInput=0;
   let inputHandlers=null,modelTmpV=null,aimCameraDir=null,gunNoiseBuffer=null,gunTailBuffers=new Map(),combatDirty=false,combatSaveClock=0,combatSerial=0;
@@ -490,6 +504,7 @@
   function tryFire(ctx) {
     const w = inv.equipped && WEAPONS[inv.equipped];
     if (!w || inv.cd > 0 || inv.reloadTimer > 0) return false;
+    if (sprintGateLocked) { sprintGateHint(); return false; } // too fast to shoot — traversal mode
     if (ctx.player.dead || ctx.player.dying) return false;
     if (!ctx.player.onFoot && !w.inCar) {
       if (!inv.warnedInCar) { inv.warnedInCar = true; ctx.fx.toast('The ' + w.name + ' is no use from the driver\'s seat', '#9ab'); }
@@ -647,14 +662,14 @@
   }
 
   function updateWeaponPresentation(dt,ctx){
-    weaponClock+=dt;switchClock=Math.max(0,switchClock-dt);const presentFeel=WEAPON_FEEL[inv.equipped]||WEAPON_FEEL.pistol,recover=presentFeel.recover||7,rk=1-Math.exp(-dt*recover),pitchReturn=recoilPitchKick*rk,yawReturn=recoilYawKick*(1-Math.exp(-dt*recover*.82));recoilKick=Math.max(0,recoilKick-dt*recover);muzzleImpulse=Math.max(0,muzzleImpulse-dt*(recover*1.7));crosshairBloom=Math.max(0,crosshairBloom-dt*(recover*.64));if(mouseLookActive()){aimPitch=clamp(aimPitch-pitchReturn,-.72,.72);aimYaw-=yawReturn;}recoilPitchKick-=pitchReturn;recoilYawKick-=yawReturn;hitMarkerTimer=Math.max(0,hitMarkerTimer-dt);headshotTimer=Math.max(0,headshotTimer-dt);equipKick=Math.max(0,equipKick-dt*4.5);qaLookTimer=Math.max(0,qaLookTimer-dt);if(qaLookActive&&qaLookTimer<=0)qaLookActive=false;if(weaponWheelOpen&&performance.now()-weaponWheelLastInput>1050)closeWeaponWheel(true);const aimTarget=(aimHeld||qaLookActive)?1:0;aimBlend+=(aimTarget-aimBlend)*(1-Math.exp(-dt*(aimTarget?11:8)));
+    weaponClock+=dt;switchClock=Math.max(0,switchClock-dt);const presentFeel=WEAPON_FEEL[inv.equipped]||WEAPON_FEEL.pistol,recover=presentFeel.recover||7,rk=1-Math.exp(-dt*recover),pitchReturn=recoilPitchKick*rk,yawReturn=recoilYawKick*(1-Math.exp(-dt*recover*.82));recoilKick=Math.max(0,recoilKick-dt*recover);muzzleImpulse=Math.max(0,muzzleImpulse-dt*(recover*1.7));crosshairBloom=Math.max(0,crosshairBloom-dt*(recover*.64));if(mouseLookActive()){aimPitch=clamp(aimPitch-pitchReturn,-.72,.72);aimYaw-=yawReturn;}recoilPitchKick-=pitchReturn;recoilYawKick-=yawReturn;hitMarkerTimer=Math.max(0,hitMarkerTimer-dt);headshotTimer=Math.max(0,headshotTimer-dt);equipKick=Math.max(0,equipKick-dt*4.5);qaLookTimer=Math.max(0,qaLookTimer-dt);if(qaLookActive&&qaLookTimer<=0)qaLookActive=false;if(weaponWheelOpen&&performance.now()-weaponWheelLastInput>1050)closeWeaponWheel(true);const aimTarget=((aimHeld&&!sprintGateLocked)||qaLookActive)?1:0;aimBlend+=(aimTarget-aimBlend)*(1-Math.exp(-dt*(aimTarget?11:8)));
     const onFoot=ctx.player.onFoot&&!!inv.equipped,fp=onFoot&&firstPersonActive(),mesh=ctx.player.footMesh;if(mesh)mesh.visible=ctx.player.onFoot&&!fp;if(worldWeapon)worldWeapon.visible=onFoot&&!fp;if(viewWeapon)viewWeapon.visible=onFoot&&fp;
     if(!onFoot){aimBlend=0;aimCameraWasActive=false;if(crosshair)crosshair.classList.remove('show');return;}const look=mouseLookActive();if(!look){aimYaw=ctx.player.heading;aimPitch*=Math.max(0,1-dt*8);}if(fp)updateFirstPersonCamera(dt,ctx);else if(aimBlend>.005)updateThirdPersonAimCamera(dt,ctx);else if(aimCameraWasActive){aimCameraWasActive=false;ctx.cameraInternals.smoothingReady=false;}
     const ground=combatFloorAt(ctx,ctx.player.x,ctx.player.z,ctx.player.y),heading=look?aimYaw:ctx.player.heading,fwdx=Math.sin(heading),fwdz=Math.cos(heading),rx=Math.cos(heading),rz=-Math.sin(heading),moving=!!(ctx.input.keys['w']||ctx.input.keys['s']||ctx.input.keys['a']||ctx.input.keys['d']||ctx.input.mobileInput.gas||ctx.input.mobileInput.brake),bob=moving?Math.sin(weaponClock*10)*.035:Math.sin(weaponClock*2.2)*.012,reload=inv.reloadTimer>0?Math.sin((1-inv.reloadTimer/Math.max(.01,inv.reloadTotal||WEAPONS[inv.equipped].reload||1))*Math.PI):0,switchDrop=equipKick*.36;
     if(worldWeapon){const long=inv.equipped==='rifle'||inv.equipped==='shotgun'||inv.equipped==='smg',hand=mesh&&mesh.userData.armR;if(hand&&worldWeapon.parent!==hand)hand.add(worldWeapon);worldWeapon.position.set(long?.05:.08,-.72,long?.18:.13-muzzleImpulse*.045);orientHandFirearm(worldWeapon,hand,heading,look?aimPitch*aimBlend:0,(long?-.02:-.05)-recoilKick*.035-recoilYawKick*.35);}
     if(viewWeapon){const cam=ctx.camera,aim=aimBlend,ox=(inv.equipped==='rifle'?.43:inv.equipped==='shotgun'?.45:inv.equipped==='smg'?.42:.50)*(1-aim)+(inv.equipped==='rifle'?.04:.06)*aim+recoilYawKick*.9,oy=(inv.equipped==='rifle'||inv.equipped==='shotgun'?-.43:-.40)+bob-reload*.22+equipKick*.22+recoilPitchKick*.7,oz=(inv.equipped==='rifle'?-1.18:inv.equipped==='shotgun'?-1.12:inv.equipped==='smg'?-1.02:-.92)+recoilKick*.20+muzzleImpulse*.10;modelTmpV.set(ox,oy,oz).applyQuaternion(cam.quaternion);viewWeapon.position.copy(cam.position).add(modelTmpV);viewWeapon.quaternion.copy(cam.quaternion);viewWeapon.rotateY(Math.PI);viewWeapon.rotateZ(reload*.62-recoilYawKick*.55);viewWeapon.rotateX(-recoilKick*.08-recoilPitchKick*.9);/* model +Z remains camera-forward in every first-person pose */}
     if(mesh&&mesh.userData.armL){const long=inv.equipped==='rifle'||inv.equipped==='shotgun'||inv.equipped==='smg',pistol=!long&&inv.equipped!=='melee',rightAim=pistol?-1.48:long?-1.36:-.78,leftAim=pistol?-.42:long?-1.16:-.28,idleL=-.28,idleR=.18;mesh.userData.armL.rotation.x=lerp(idleL,leftAim,aimBlend)-reload*.28;mesh.userData.armR.rotation.x=lerp(idleR,rightAim-recoilKick*.13,aimBlend)-reload*.12;mesh.userData.armL.rotation.z=lerp(.10,long?.28:pistol?.06:.10,aimBlend);mesh.userData.armR.rotation.z=lerp(-.10,long?-.12:pistol?-.08:-.10,aimBlend);}
-    if(crosshair){crosshair.classList.toggle('show',!!aimHeld);crosshair.classList.toggle('hit',aimHeld&&hitMarkerTimer>0);crosshair.classList.toggle('head',aimHeld&&headshotTimer>0);crosshair.style.setProperty('--gap',(4+crosshairBloom*7).toFixed(1)+'px');}
+    if(crosshair){crosshair.classList.toggle('show',!!aimHeld&&!sprintGateLocked);crosshair.classList.toggle('hit',aimHeld&&hitMarkerTimer>0);crosshair.classList.toggle('head',aimHeld&&headshotTimer>0);crosshair.style.setProperty('--gap',(4+crosshairBloom*7).toFixed(1)+'px');}
   }
 
   function applyMouseLook(dx,dy){aimYaw+=window.NEON_HANDEDNESS.mouseYawDelta(dx)*.00235;if(aimYaw>Math.PI)aimYaw-=Math.PI*2;else if(aimYaw<-Math.PI)aimYaw+=Math.PI*2;aimPitch=clamp(aimPitch-(Number(dy)||0)*.00195,-.72,.72);return{yaw:aimYaw,pitch:aimPitch};}
@@ -664,7 +679,7 @@
       if(!ctxRef||!ctxRef.player.onFoot||!inv.equipped||ctxRef.player.dead||ctxRef.player.dying)return;
       if(e.button!==0&&e.button!==2)return;
       e.preventDefault();e.stopImmediatePropagation();combatCanvas.focus({preventScroll:true});
-      if(e.button===2){if(!equippedCanAim()){aimButtonHeld=false;ctx.fx.toast('MINIGUN · HIP FIRE ONLY','#ffd23f');return;}aimButtonHeld=true;if(!aimHeld)syncAim();aimHeld=true;requestAimLock();}
+      if(e.button===2){if(!equippedCanAim()){aimButtonHeld=false;ctx.fx.toast('MINIGUN · HIP FIRE ONLY','#ffd23f');return;}aimButtonHeld=true;if(!aimHeld)syncAim();aimHeld=true;requestAimLock();if(sprintGateLocked)sprintGateHint();}
       else{inv.fireHeld=true;tryFire(ctxRef);}
     };
     const up=e=>{
@@ -1274,7 +1289,7 @@
       // The readout lives in #systemsUI, which body.dying does not fade, so a
       // death would leave it hanging over the WASTED screen. One compare a frame.
       if (wUI && wUI.classList.contains('show') !== !!w) paintWeaponUI();
-      if (w && w.auto && inv.fireHeld) tryFire(ctx);
+      updateSprintGate(dt,ctx);if (w && w.auto && inv.fireHeld) tryFire(ctx);
       if(ctx.player.onFoot)recoverHeldAim();else{aimButtonHeld=false;aimHeld=false;if(forcedFirstPerson)setForcedFirstPerson(false);}
       updateFootPolice(dt,ctx);updateDetachedOfficers(dt,ctx);updateArmedPeds(dt,ctx);
       updateFx(dt);updateWeaponPresentation(dt,ctx);if(melee)melee.update(dt);if(ordnance)ordnance.update(dt);
@@ -1317,7 +1332,7 @@
       fire(){return tryFire(ctxRef);},
       ordnanceDebug(){return ordnance?{contracts:ordnance.contractProbe(),backblastTrace:ordnance.probeBackblastTrace()}:null;},
       clearInputState(){inv.fireHeld=false;aimButtonHeld=false;aimHeld=false;qaLookActive=false;qaLookTimer=0;if(ordnance)ordnance.player.setTrigger(false);return true;},weaponWheelOpen(){return weaponWheelOpen;},
-      isFirstPerson(){return firstPersonActive();},mouseLookActive(){return mouseLookActive();},aiming(){return aimHeld;},heading(){return mouseLookActive()?aimYaw:(ctxRef?ctxRef.player.heading:0);},pitch(){return mouseLookActive()?aimPitch:0;},
+      isFirstPerson(){return firstPersonActive();},mouseLookActive(){return mouseLookActive();},aiming(){return aimHeld;},sprintAimLocked(){return sprintGateLocked;},sprintGateSpeed(){return sprintGateSpd;},aimBlendValue(){return aimBlend;},heading(){return mouseLookActive()?aimYaw:(ctxRef?ctxRef.player.heading:0);},pitch(){return mouseLookActive()?aimPitch:0;},
       turn(yaw,pitch){aimYaw+=Number(yaw)||0;aimPitch=clamp(aimPitch+(Number(pitch)||0),-.72,.72);return{yaw:aimYaw,pitch:aimPitch};},
       cameraYaw(){return aimYaw;},
       injectMouse(dx,dy){if(!inputHandlers||!ctxRef||!ctxRef.player.onFoot)return false;if(!mouseLookActive())syncAim();qaLookActive=true;qaLookTimer=.9;return!!inputHandlers.move({movementX:Number(dx)||0,movementY:Number(dy)||0,__qa:true});},
