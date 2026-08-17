@@ -13,14 +13,16 @@ const pick=a=>a[(Math.random()*a.length)|0];
 const dist2=(ax,az,bx,bz)=>Math.hypot(ax-bx,az-bz);
 
 /* HANDedness contract — one audit reference for every control consumer.
- * World axes: +X east/right on the map, +Z north/up-road; heading 0 faces +Z.
- * Forward is (sin h, cos h), actor-right is (cos h, -sin h). A visible RIGHT
+ * World axes: +Z north/up-road; heading 0 faces +Z; +X is the SCREEN-LEFT of a
+ * +Z-facing actor/chase camera (proven by carSteer + the measured probe pair).
+ * Forward is (sin h, cos h), actor-LEFT is (cos h, -sin h). A visible RIGHT
  * command must rotate/translate toward the actor's right after that actor's
  * model/controller basis is applied exactly once. Cars retain their left-positive
  * tyre-solver scalar at the input boundary. The chase/OTS camera's screen-left
- * is positive world yaw, while aircraft HEADING is the opposite sign convention:
- * positive aircraft heading turns RIGHT toward +X, so aircraft yaw-left is -1
- * and yaw-right is +1. Physical mouse-right remains negative camera yaw. Canvas
+ * is positive world yaw, and aircraft HEADING uses the SAME sign convention:
+ * positive aircraft heading turns LEFT toward +X, so aircraft yaw-left is +1
+ * and yaw-right is -1 (v53: the old inverted claim here made planes fly
+ * mirrored). Physical mouse-right remains negative camera yaw. Canvas
  * arrows convert world bearing only at draw time.
  */
 window.NEON_HANDEDNESS=Object.freeze({
@@ -35,9 +37,11 @@ window.NEON_HANDEDNESS=Object.freeze({
   /* The sole raw mouse-X -> yaw mapping. Positive physical mouse X must look right,
      which is negative world yaw for this chase/OTS camera basis. */
   mouseYawDelta(dx){return-(Number(dx)||0);},
-  /* AIRCRAFT SIGN CONTRACT: heading 0 faces +Z; +heading turns RIGHT toward +X.
-     Therefore LEFT=-1 and RIGHT=+1. Do not compensate this sign anywhere else. */
-  aircraftYaw(left,right){return(right?1:0)-(left?1:0);},
+  /* AIRCRAFT SIGN CONTRACT: heading 0 faces +Z; +heading turns LEFT toward +X
+     (same sign as carSteer; the measured probe shows car A dyaw POSITIVE).
+     Therefore LEFT=+1 and RIGHT=-1; planePhysics and heliPhysics both consume
+     yaw via heading+=. Do not compensate this sign anywhere else. */
+  aircraftYaw(left,right){return(left?1:0)-(right?1:0);},
   verification:Object.freeze({footFree:'A=left,D=right,mouse-right=look-right',footAim:'A=left,D=right,mouse-right=look-right',car:'A=left,D=right',heli:'A=yaw-left,D=yaw-right,Q/E=strafe',plane:'A=roll-left,D=roll-right,Q=yaw-left,E=yaw-right'})
 });
 (function handednessBootSelfTest(){
@@ -56,8 +60,8 @@ window.NEON_HANDEDNESS=Object.freeze({
     else{
       const heliA=air.controlMapForTest('helicopter',{a:true}),heliD=air.controlMapForTest('helicopter',{d:true}),planeA=air.controlMapForTest('plane',{a:true}),planeD=air.controlMapForTest('plane',{d:true}),planeQ=air.controlMapForTest('plane',{q:true}),planeE=air.controlMapForTest('plane',{e:true});
       probe={heliA,heliD,planeA,planeD,planeQ,planeE};
-      if(!(heliA.yaw<0&&heliD.yaw>0&&heliA.roll===0&&heliD.roll===0))errors.push('REAL helicopter map violated A=left/D=right yaw');
-      if(!(planeA.roll<0&&planeD.roll>0&&planeQ.yaw<0&&planeE.yaw>0))errors.push('REAL plane map violated A/D roll or Q/E yaw signs');
+      if(!(heliA.yaw>0&&heliD.yaw<0&&heliA.roll===0&&heliD.roll===0))errors.push('REAL helicopter map violated A=left/D=right yaw (left must be POSITIVE)');
+      if(!(planeA.roll>0&&planeD.roll<0&&planeQ.yaw>0&&planeE.yaw<0))errors.push('REAL plane map violated A/D roll or Q/E yaw signs (left must be POSITIVE)');
     }
     return publish(errors,false,probe);
   };

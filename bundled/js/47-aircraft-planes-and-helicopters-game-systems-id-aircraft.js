@@ -111,7 +111,7 @@
     a.vx=vel.x;a.vz=vel.z;a.vy=vy;a.speed=speed;a.grounded=nowGround;a.agl=Math.max(0,a.y-surface);return{speed:Math.abs(speed),stall:!nowGround&&speed<stallSpeed,grounded:nowGround,touchdown,impact,water};
   }
   function heliPhysics(a,c,dt){
-    const ground=supportHeight(a,a.x,a.z),grounded=a.y<=ground+.12,alt=a.y-ground;a.heading-=c.yaw*PHYS.heliYaw*dt*(grounded?.3:1);
+    const ground=supportHeight(a,a.x,a.z),grounded=a.y<=ground+.12,alt=a.y-ground;a.heading+=c.yaw*PHYS.heliYaw*dt*(grounded?.3:1);
     const ng=grounded?1:clamp(1-alt/8,0,1),targetPitch=grounded?0:lerp(-c.pitch*.34,0,ng),targetRoll=grounded?0:lerp(c.roll*.4,0,ng);a.pitch=lerp(a.pitch,targetPitch,smooth(5,dt));a.roll=lerp(a.roll,targetRoll,smooth(5,dt));
     const fx=Math.sin(a.heading),fz=Math.cos(a.heading),fa=grounded?0:c.pitch*PHYS.heliAccel*(a.style.thrust/26),sa=grounded?0:c.roll*PHYS.heliAccel*.75*(a.style.thrust/26);let vx=(a.vx||0)+(fx*fa+fz*sa)*dt,vz=(a.vz||0)+(fz*fa-fx*sa)*dt,damp=Math.max(0,1-(grounded?4:.75)*dt);vx*=damp;vz*=damp;const ps=Math.hypot(vx,vz);if(ps>a.style.topSpeed){vx*=a.style.topSpeed/ps;vz*=a.style.topSpeed/ps;}let vy=lerp(a.vy||0,c.throttle*PHYS.heliVertical,smooth(2.6,dt));if(grounded&&c.throttle<=0)vy=0;
     const vel={x:vx,z:vz},impact=moveHorizontal(a,vel,dt),wasAir=!grounded;a.y+=vy*dt;let surface=supportHeight(a,a.x,a.z),touchdown=0,nowGround=false,water=false;
@@ -122,11 +122,13 @@
   function mapAircraftControls(kind,k,m){
     k=k||{};m=m||{};kind=kind==='helicopter'?'heli':kind;
     const H=window.NEON_HANDEDNESS,w=!!(k.w||k.KeyW),s=!!(k.s||k.KeyS),a=!!(k.a||k.KeyA),d=!!(k.d||k.KeyD),q=!!(k.q||k.KeyQ),e=!!(k.e||k.KeyE),up=!!(k.arrowup||k.ArrowUp),down=!!(k.arrowdown||k.ArrowDown),left=!!(a||m.left),right=!!(d||m.right);
-    /* Heading 0 faces +Z and positive heading rotates RIGHT toward +X.
-       Therefore yaw LEFT is NEGATIVE and yaw RIGHT is POSITIVE.
+    /* Heading 0 faces +Z and positive heading rotates LEFT toward +X — +X is
+       screen-left of a +Z-facing chase camera (measured: car A gives +dyaw).
+       Therefore yaw/roll LEFT is POSITIVE and RIGHT is NEGATIVE, the same sign
+       as car steer; planePhysics AND heliPhysics both consume yaw via heading+=.
        This is the single keyboard-to-aircraft mapping used by play and tests. */
-    if(kind==='heli')return{throttle:(w||m.gas?1:0)-(s||m.brake?1:0),pitch:(up?1:0)-(down?1:0),roll:(e?1:0)-(q?1:0),yaw:H?H.aircraftYaw(left,right):(right?1:0)-(left?1:0),afterburner:false};
-    return{throttle:(w||m.gas?1:0)-(s||m.brake?1:0),pitch:(up?1:0)-(down?1:0),roll:(right?1:0)-(left?1:0),yaw:H?H.aircraftYaw(q,e):(e?1:0)-(q?1:0),afterburner:!!(k.shift||k.ShiftLeft||k.ShiftRight)};
+    if(kind==='heli')return{throttle:(w||m.gas?1:0)-(s||m.brake?1:0),pitch:(up?1:0)-(down?1:0),roll:(q?1:0)-(e?1:0),yaw:H?H.aircraftYaw(left,right):(left?1:0)-(right?1:0),afterburner:false};
+    return{throttle:(w||m.gas?1:0)-(s||m.brake?1:0),pitch:(up?1:0)-(down?1:0),roll:(left?1:0)-(right?1:0),yaw:H?H.aircraftYaw(q,e):(q?1:0)-(e?1:0),afterburner:!!(k.shift||k.ShiftLeft||k.ShiftRight)};
   }
   function controlsFor(a){return mapAircraftControls(a&&a.kind||'plane',controlKeys,ctx.input.mobileInput||{});}
   function sync(a,dt){
