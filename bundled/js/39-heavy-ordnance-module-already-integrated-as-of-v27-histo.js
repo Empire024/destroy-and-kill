@@ -983,19 +983,49 @@ ACTUAL V26 ANCHORS FOUND IN THE ATTACHED GAME
 
     function ensureMinigunAudio() {
       const ac = audioContext(); if (!ac || minigunAudio) return minigunAudio;
-      const master = ac.createGain(), whine = ac.createOscillator(), harmonic = ac.createOscillator(), noise = ac.createBufferSource(), filter = ac.createBiquadFilter(), noiseGain = ac.createGain();
-      master.gain.value = 0; whine.type = 'sawtooth'; harmonic.type = 'square'; whine.frequency.value = 55; harmonic.frequency.value = 110;
-      noise.buffer = ensureNoise(ac, .5); noise.loop = true; filter.type = 'bandpass'; filter.frequency.value = 820; filter.Q.value = .8; noiseGain.gain.value = 0;
-      whine.connect(master); harmonic.connect(master); noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(master); master.connect(ac.destination); whine.start(); harmonic.start(); noise.start();
-      minigunAudio = { ac: ac, master: master, whine: whine, harmonic: harmonic, noise: noise, filter: filter, noiseGain: noiseGain, targetSpin: 0, targetFire: 0 };
+      try {
+        const master = ac.createGain(), hum = ac.createOscillator(), humLp = ac.createBiquadFilter(), humGain = ac.createGain(), whir = ac.createBufferSource(), whirBp = ac.createBiquadFilter(), whirGain = ac.createGain();
+        master.gain.value = 1; hum.type = 'triangle'; hum.frequency.value = 40; humLp.type = 'lowpass'; humLp.frequency.value = 230; humLp.Q.value = .6; humGain.gain.value = 0;
+        whir.buffer = ensureNoise(ac, .5); whir.loop = true; whirBp.type = 'bandpass'; whirBp.frequency.value = 2300; whirBp.Q.value = 2.4; whirGain.gain.value = 0;
+        hum.connect(humLp); humLp.connect(humGain); humGain.connect(master); whir.connect(whirBp); whirBp.connect(whirGain); whirGain.connect(master); master.connect(ac.destination); hum.start(); whir.start();
+        minigunAudio = { ac: ac, master: master, hum: hum, humGain: humGain, whirGain: whirGain, nextShot: 0, targetSpin: 0, targetFire: 0 };
+      } catch (_) { minigunAudio = null; }
       return minigunAudio;
+    }
+
+    // One mechanical report per round: a bandpassed noise burst (the muzzle
+    // crack) over a fast-decaying sine thump, with random pitch jitter. The
+    // old sweeping sawtooth 'whine' read as a siren; it is gone. The rotor is
+    // now a QUIET low triangle hum plus a faint bandpassed air whir.
+    function minigunShotBurst(ac, at, level) {
+      const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain(), thump = ac.createOscillator(), tg = ac.createGain();
+      src.buffer = ensureNoise(ac, .5); bp.type = 'bandpass'; bp.frequency.value = 720 + Math.random() * 640; bp.Q.value = 1.05;
+      g.gain.setValueAtTime(.048 + level * .055, at); g.gain.exponentialRampToValueAtTime(.0001, at + .05);
+      src.connect(bp); bp.connect(g); g.connect(ac.destination); src.start(at, Math.random() * .3); src.stop(at + .055);
+      thump.type = 'sine'; thump.frequency.setValueAtTime(146 + Math.random() * 28, at); thump.frequency.exponentialRampToValueAtTime(60, at + .04);
+      tg.gain.setValueAtTime(.042 + level * .034, at); tg.gain.exponentialRampToValueAtTime(.0001, at + .05);
+      thump.connect(tg); tg.connect(ac.destination); thump.start(at); thump.stop(at + .06);
+      cleanupNodes([src, bp, g, thump, tg], 600);
     }
 
     function updateMinigunAudio(spin, firing) {
       if (!minigunAudio && spin <= .001 && firing <= .001) return;
-      const a = ensureMinigunAudio(); if (!a) return; const t = a.ac.currentTime;
-      a.targetSpin = spin; a.targetFire = firing; a.whine.frequency.setTargetAtTime(55 + spin * 360, t, .045); a.harmonic.frequency.setTargetAtTime(110 + spin * 720, t, .05); a.filter.frequency.setTargetAtTime(650 + spin * 1900, t, .04); a.noiseGain.gain.setTargetAtTime(firing * .12, t, .025); a.master.gain.setTargetAtTime((spin * .045 + firing * .075), t, .045);
+      const a = ensureMinigunAudio(); if (!a) return;
+      try {
+        const t = a.ac.currentTime;
+        a.targetSpin = spin; a.targetFire = firing;
+        a.hum.frequency.setTargetAtTime(38 + spin * 74, t, .05);
+        a.humGain.gain.cancelScheduledValues(t); a.humGain.gain.setTargetAtTime(spin * .016, t, .06); a.humGain.gain.setTargetAtTime(0, t + .3, .15);
+        a.whirGain.gain.cancelScheduledValues(t); a.whirGain.gain.setTargetAtTime(spin * .0085, t, .06); a.whirGain.gain.setTargetAtTime(0, t + .3, .15);
+        if (firing > .001) {
+          const interval = Math.max(.03, (BALANCE.minigun && BALANCE.minigun.interval) || .05);
+          if (a.nextShot < t) a.nextShot = t;
+          let guard = 0;
+          while (a.nextShot < t + .08 && guard++ < 8) { minigunShotBurst(a.ac, a.nextShot, firing); a.nextShot += interval; }
+        } else a.nextShot = 0;
+      } catch (_) {}
     }
+    if (typeof window !== 'undefined') window.GAME_DEBUG_MINIGUN_AUDIO = updateMinigunAudio;
 
     function obstacleBox(o) {
       const base = o.baseY == null ? 0 : Number(o.baseY) || 0, h = o.h == null ? 40 : Number(o.h) || 40;

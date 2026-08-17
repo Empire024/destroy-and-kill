@@ -1486,7 +1486,7 @@
   const DESTS = [
     { id: 'marina', name: 'MARINA BOARDWALK', x: 1090, z: 5060, blurb: 'the boardwalk' },
     { id: 'clinic', name: 'TIDELIGHT CLINIC', x: 862, z: 4886, blurb: 'the clinic' },
-    { id: 'lockup', name: 'TIDELIGHT LOCKUP', x: 486, z: 5462, blurb: 'the lockup' },
+    { id: 'lockup', name: 'TIDELIGHT LOCKUP', x: 508, z: 5368, blurb: 'the lockup' },
     { id: 'lighthouse', name: 'LIGHTHOUSE POINT', x: 1096, z: 5486, blurb: 'the lighthouse' },
     { id: 'bowl', name: 'OCEAN BOWL WEST GATE', x: -614, z: 4940, blurb: 'the stadium' },
     { id: 'northshore', name: 'NORTH SHORE TURN', x: -660, z: 5588, blurb: 'the north shore' },

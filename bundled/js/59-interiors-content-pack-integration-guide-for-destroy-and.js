@@ -289,7 +289,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-downtown',facilityId:'garage-downtown',name:'DOWNTOWN LOCKUP WORKSHOP',x:-1030,z:830,side:1,accent:0xff9b2b,theme:'downtown'})}),
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-docks',facilityId:'garage-docks',name:'DOCKS WAREHOUSE WORKSHOP',x:-730,z:2480,side:-1,accent:0xff9b2b,theme:'docks'})}),
     Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-crown',facilityId:'garage-crown',name:'HILLS CITY MOTOR HOUSE WORKSHOP',x:-4765,z:-1320,side:1,accent:0x67e7ff,theme:'hills'})}),
-    Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-island',facilityId:'garage-island',name:'TIDELIGHT LOCKUP WORKSHOP',x:480,z:5480,side:-1,accent:0x20e3ff,theme:'island'})})
+    Object.freeze({kind:'garage',def:Object.freeze({id:'int-garage-island',facilityId:'garage-island',name:'TIDELIGHT LOCKUP WORKSHOP',x:530,z:5352,side:1,accent:0x20e3ff,theme:'island'})})
   ]);
 
   const PAINTS=Object.freeze([

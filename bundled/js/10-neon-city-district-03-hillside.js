@@ -527,7 +527,7 @@
       const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
       const nx = dz * (HW + 13), nz = -dx * (HW + 13);
       const lx = p[0] + nx, lz = p[1] + nz, ly = H(lx, lz);
-      if(A)A.add('neon',{kind:'hillsideStreetLamp',x:lx,y:ly,z:lz,ry:Math.atan2(dx,dz),s:1});
+      if(A&&!(lx>-3590&&lx<-3400&&lz>-1650&&lz<-1550))A.add('neon',{kind:'hillsideStreetLamp',x:lx,y:ly,z:lz,ry:Math.atan2(dx,dz),s:1});
     }
 
     // ---- 5. jumps ---------------------------------------------------------
@@ -584,7 +584,7 @@
         b.box({ x: cx + t, z: cz + hd - 5, y: y + 4.6, w: 26, h: 0.7, d: 4.6, color: 0x20e3ff, emissive: true, noCollide: true });
       }
       // crib holding the terrace up over the back face
-      for (let t = -hd; t < hd; t += 26) b.box({ x: cx - hw + 3, z: cz + t, y: y - 24, w: 8, h: 26, d: 26, color: 0x2b2e35 });
+      for (let t = -hd; t < hd; t += 26) { if (Math.abs(cz + t + 1602) < 44) continue; /* Aurora Span deck passes through the west rim here */ b.box({ x: cx - hw + 3, z: cz + t, y: y - 24, w: 8, h: 26, d: 26, color: 0x2b2e35 }); }
 
       // --- radio mast: four legs, cross bracing, red aircraft warning lights
       const lampGeo = () => new THREE.BoxGeometry(3.4, 3.4, 3.4);

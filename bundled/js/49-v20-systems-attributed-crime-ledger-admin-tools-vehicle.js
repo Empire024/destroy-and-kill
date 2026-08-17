@@ -10,7 +10,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
 
 /* -------------------------- attributed crime ledger ----------------------- */
 (function(){
- let ctx=null,serial=0,neverWanted=false,lastHeatAt=-1e9;const live=new Map(),logs=[],lastPriorityByType=new Map();const MAX_LOG=180,MAX_AGE=12000,ESCALATION_GAP=[0,4,6,8,10,12],PRIORITY_REPEAT_MS=Object.freeze({'ram-police':4200,'assault-police':2600,'kill-pedestrian':800,'kill-police':800,'vehicular-homicide':800,'robbery':4500});
+ let ctx=null,serial=0,neverWanted=false,lastHeatAt=-1e9;const live=new Map(),logs=[],lastPriorityByType=new Map();const MAX_LOG=180,MAX_AGE=12000,ESCALATION_GAP=[0,4,6,8,10,12],PRIORITY_REPEAT_MS=Object.freeze({'ram-police':4200,'assault-police':2600,'kill-pedestrian':800,'kill-police':800,'vehicular-homicide':800,'robbery':4500});let nsHeatPool=0,nsHeatAt=-1e9,nsLastWanted=0;const NS_HEAT_PTS=Object.freeze({'kill-pedestrian':2,'vehicular-homicide':2,'kill-police':3,'assault-police':1,'heavy-assault-police':2,'ram-police':1,'robbery':2,'armed-assault':1,'gun-assault':1,'hit-pedestrian':1,'vehicle-theft':1,'assault-mechanic':1,'vehicle-explosion':2,'vehicle-explosion-police':3,'destroy-aircraft':4}),NS_STAR_COST=[2,3,4,6,8,10];
  function actorLabel(a){if(!a)return'none';if(a===ctx.player||a===ctx.carState||a===ctx.player.carMesh)return'player';return a._debugId||a.id||a.vehicleKind||a._combatRole||a.kind||a.constructor&&a.constructor.name||'actor';}
  function resolve(o){
    if(o&&o.admin)return'admin';if(o&&o.perpetrator)return o.perpetrator;
@@ -30,7 +30,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
    const current=ctx.stats.wanted|0,now=performance.now(),priority=!!event.priority,gap=(ESCALATION_GAP[current]||0)*1000,repeat=PRIORITY_REPEAT_MS[event.type]||900;
    if(priority){const last=lastPriorityByType.get(event.type)||-1e9;if(now-last<repeat){pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:false,requestedHeat:n,reason:'priority-repeat-guard'});return false;}lastPriorityByType.set(event.type,now);}
    else if(current>0&&now-lastHeatAt<gap){pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:false,requestedHeat:n,reason:'escalation-cooldown',remaining:+((gap-(now-lastHeatAt))/1000).toFixed(1)});return false;}
-   const applied=Math.min(priority?n:1,6-current);if(applied<=0)return false;ctx.engine.setWanted(current+applied);ctx.stats._decay=0;lastHeatAt=now;pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:true,heat:applied,requestedHeat:n,priority,reason:reason||'reported'});return true;
+   const pts=NS_HEAT_PTS[event.type]!==undefined?NS_HEAT_PTS[event.type]:Math.min(Math.max(1,n),2);nsHeatPool=Math.min(12,nsHeatPool+pts);nsHeatAt=now;let lvl=current;while(lvl<6&&nsHeatPool>=NS_STAR_COST[lvl]){nsHeatPool-=NS_STAR_COST[lvl];lvl++;}if(lvl>current)ctx.engine.setWanted(lvl);ctx.stats._decay=0;lastHeatAt=now;nsLastWanted=Math.max(lvl,current);pushLog({report:true,crime:event.type,eventId:event.id,perpetrator:event.perpetrator,witness:actorLabel(witness),accepted:true,heat:lvl-current,pts,pool:+nsHeatPool.toFixed(1),requestedHeat:n,priority,reason:reason||'reported'});return true;
  }
  function report(type,o){
    o=o||{};const perpetrator=resolve(o),id='crime-'+(++serial),e={id,type:String(type||'crime'),perpetrator,actor:o.actor||null,causeEventId:o.causeEventId||null,x:Number.isFinite(o.x)?o.x:ctx.player.x,y:Number.isFinite(o.y)?o.y:ctx.player.y,z:Number.isFinite(o.z)?o.z:ctx.player.z,at:performance.now(),severity:clamp(o.severity==null?1:+o.severity,1,3),witnessRadius:clamp(o.witnessRadius==null?115:+o.witnessRadius,30,260),reported:false,priority:!!o.priority,source:o.source||''};
@@ -51,7 +51,83 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,hex=n=>'#'+(n>>>0).to
  function recentAt(x,z,r,type){let best=null;for(const e of live.values()){if(performance.now()-e.at>MAX_AGE||e.reported||!(e.perpetrator==='player'||e.perpetrator==='player-caused'))continue;if(type&&e.type!==type)continue;if(Math.hypot(e.x-x,e.z-z)<=r&&(best===null||e.at>best.at))best=e;}return best;}
  function recentType(type,maxAge=7000){const now=performance.now();for(const e of live.values())if((e.perpetrator==='player'||e.perpetrator==='player-caused')&&e.type===type&&now-e.at<=maxAge)return e;return null;}
  function markCaused(a,event,seconds){if(!a)return;a._playerCauseUntil=performance.now()+(seconds||5)*1000;a._playerCauseEvent=event&&event.id||event||null;}
- GameSystems.register({id:'crime',order:43,alwaysUpdate:true,init(c){ctx=c;window.GAME_DEBUG_CRIME={logs:()=>logs.slice(),events:()=>Array.from(live.values()).map(e=>({id:e.id,type:e.type,perpetrator:e.perpetrator,x:e.x,z:e.z,age:+((performance.now()-e.at)/1000).toFixed(2),reported:e.reported})),clear:()=>{logs.length=0;live.clear();}};},update(){const t=performance.now();for(const [id,e]of live)if(t-e.at>MAX_AGE*2)live.delete(id);if(neverWanted&&ctx.stats.wanted)ctx.engine.setWanted(0);},api:{report,witness,coerce,recentAt,recentType,markCaused,logs:()=>logs.slice(),events:()=>Array.from(live.values()),addHeat(n,meta){const e=meta&&meta.event?coerce(meta.event):meta&&meta.type?report(meta.type,meta):null;return heat(n,e,meta&&meta.witness,meta&&meta.reason);},setNeverWanted(v){neverWanted=!!v;if(neverWanted)ctx.engine.setWanted(0);return neverWanted;},neverWanted:()=>neverWanted,playerResponsible(o){const p=resolve(o);return p==='player'||p==='player-caused';}}});
+ GameSystems.register({id:'crime',order:43,alwaysUpdate:true,init(c){ctx=c;window.GAME_DEBUG_CRIME={logs:()=>logs.slice(),events:()=>Array.from(live.values()).map(e=>({id:e.id,type:e.type,perpetrator:e.perpetrator,x:e.x,z:e.z,age:+((performance.now()-e.at)/1000).toFixed(2),reported:e.reported})),clear:()=>{logs.length=0;live.clear();}};},update(dt){const t=performance.now();const w=ctx.stats.wanted|0;if(w<nsLastWanted)nsHeatPool=0;nsLastWanted=w;if(nsHeatPool>0&&t-nsHeatAt>9000)nsHeatPool=Math.max(0,nsHeatPool-(+dt||.016)*.2);for(const [id,e]of live)if(t-e.at>MAX_AGE*2)live.delete(id);if(neverWanted&&ctx.stats.wanted)ctx.engine.setWanted(0);},api:{report,witness,coerce,recentAt,recentType,markCaused,logs:()=>logs.slice(),events:()=>Array.from(live.values()),addHeat(n,meta){const e=meta&&meta.event?coerce(meta.event):meta&&meta.type?report(meta.type,meta):null;return heat(n,e,meta&&meta.witness,meta&&meta.reason);},setNeverWanted(v){neverWanted=!!v;if(neverWanted)ctx.engine.setWanted(0);return neverWanted;},neverWanted:()=>neverWanted,playerResponsible(o){const p=resolve(o);return p==='player'||p==='player-caused';}}});
+})();
+
+/* ---------------------- military escalation + 6-star state ---------------- */
+(function(){
+ if(!window.GameSystems)return;
+ let ctx=null,crime=null,ep=null,active=false,spawnT=0,convoyT=0,convoySeq=0,pulled=false;
+ function resetEpisode(){ep={copKills:0,helisDown:0,blasts:0,copCars:0};active=false;spawnT=2;convoyT=4;}
+ resetEpisode();
+ function militarize(cop,truck){
+   try{
+     if(!cop||!cop.mesh)return cop;cop._military=true;cop.mass=truck?4300:3400;cop.aggression=1.22;cop.spdMul=truck?.9:1.0;cop.turnRate=truck?2.0:2.6;
+     cop.mesh.traverse(function(o){if(o.isMesh&&o.material&&o.material.color){o.material=o.material.clone();var h=o.material.color.getHex();o.material.color.setHex(h===0x111927||h===0x1a2340?0x24331d:(h>0x888888?0x3a4a30:h));}});
+     var armMat=new THREE.MeshStandardMaterial({color:0x2b3a22,roughness:.9,metalness:.15});
+     if(truck){var box=new THREE.Mesh(new THREE.BoxGeometry(3.5,2.3,5.2),armMat);box.position.set(0,2.45,-.55);cop.mesh.add(box);
+       var cab=new THREE.Mesh(new THREE.BoxGeometry(3.1,1.1,1.6),armMat);cab.position.set(0,2.0,2.6);cop.mesh.add(cab);
+       var plate=new THREE.Mesh(new THREE.BoxGeometry(2.2,.9,.08),new THREE.MeshBasicMaterial({color:0x9fb08a}));plate.position.set(0,2.5,-3.18);cop.mesh.add(plate);}
+     else{var bar=new THREE.Mesh(new THREE.BoxGeometry(2.6,.5,3.6),armMat);bar.position.set(0,1.9,-.2);cop.mesh.add(bar);}
+   }catch(e){}
+   return cop;
+ }
+ function roadSpawnNear(minD,maxD){
+   var w=ctx.world;if(!w||!w.nearestRoad)return null;
+   for(var i=0;i<14;i++){var ang=Math.random()*Math.PI*2,dd=minD+Math.random()*(maxD-minD),x=ctx.player.x+Math.sin(ang)*dd,z=ctx.player.z+Math.cos(ang)*dd,r=w.nearestRoad(x,z);if(r&&r.d<80)return r;}
+   return null;
+ }
+ function countMil(convoy){var n=0,cops=ctx.actors.cops||[];for(var i=0;i<cops.length;i++){var c=cops[i];if(c._military&&!c._retiring&&(!convoy)===(!c._nsConvoy))n++;}return n;}
+ function spawnMilitary(){
+   var road=roadSpawnNear(280,430);if(!road||!ctx.actors.spawnCop)return;
+   var y=ctx.world.groundHeightAt?ctx.world.groundHeightAt(road.x,road.z,0):0;
+   var c=ctx.actors.spawnCop({level:6,heavy:true,visible:true,partner:true,spawn:{x:road.x,z:road.z,y:road.y===undefined?y:road.y},heading:Math.atan2(ctx.player.x-road.x,ctx.player.z-road.z)});
+   if(c)militarize(c,true);
+ }
+ function spawnConvoy(){
+   var road=roadSpawnNear(300,460);if(!road||!ctx.actors.spawnCop)return;
+   var h=road.heading||0,fx=Math.sin(h),fz=Math.cos(h),cid=++convoySeq;
+   for(var i=0;i<3;i++){var sx=road.x-fx*i*11,sz=road.z-fz*i*11,sy=ctx.world.groundHeightAt?ctx.world.groundHeightAt(sx,sz,0):0;
+     var c=ctx.actors.spawnCop({level:6,heavy:i>0,visible:true,partner:true,spawn:{x:sx,z:sz,y:sy},heading:h});
+     if(c){c._nsConvoy=cid;if(i>0)militarize(c,true);}}
+ }
+ function engagePullover(dt){
+   var tr=ctx.actors.traffic;if(!tr)return;
+   for(var i=0;i<tr.length;i++){var t=tr[i];if(!t||t.dead||t._patrol||t._driverExited||t._nsConvoy||(t._panicT||0)>0)continue;
+     if(!t._nsPull)t._nsPull={cap:Object.prototype.hasOwnProperty.call(t,'_trafficCap')?t._trafficCap:null,t:0};
+     t._nsPull.t+=dt;t._trafficCap=t._nsPull.t<1.7?8:0;
+     var edge=(t._homeLaneSign||t._roadTravelSign||1)*2.05;
+     t.laneSign=(t.laneSign===undefined?edge:t.laneSign+(edge-t.laneSign)*Math.min(1,dt*5));
+   }
+   pulled=true;
+ }
+ function releasePullover(){
+   var tr=ctx.actors.traffic;if(tr)for(var i=0;i<tr.length;i++){var t=tr[i];if(t&&t._nsPull){if(t._nsPull.cap===null)delete t._trafficCap;else t._trafficCap=t._nsPull.cap;delete t._nsPull;}}
+   pulled=false;
+ }
+ GameSystems.register({id:'military',order:47,init:function(c){
+   ctx=c;crime=GameSystems.api('crime');
+   GameSystems.events.on('actor:killed',function(e){if(e&&e.kind==='cop')ep.copKills++;});
+   GameSystems.events.on('vehicle:superblast',function(e){
+     if(!e||!e.playerCaused)return;ep.blasts++;if(e.isCop)ep.copCars++;
+     var cr=crime||GameSystems.api('crime');if(cr&&cr.report)cr.report(e.isCop?'vehicle-explosion-police':'vehicle-explosion',{perpetrator:'player',x:e.x,z:e.z,severity:e.isCop?3:2,priority:true,immediate:true});
+   });
+   GameSystems.events.on('police:heli-down',function(e){
+     ep.helisDown++;var cr=crime||GameSystems.api('crime');if(cr&&cr.report)cr.report('destroy-aircraft',{perpetrator:'player',x:e&&e.x,z:e&&e.z,severity:3,priority:true,immediate:true});
+     if(ctx&&ctx.fx&&ctx.fx.toast)ctx.fx.toast('POLICE HELICOPTER DOWN','#ff922b');
+   });
+ },update:function(dt){
+   if(!ctx)return;var w=ctx.stats.wanted|0;
+   if(w===0){if(active||ep.copKills||ep.helisDown||ep.blasts)resetEpisode();if(pulled)releasePullover();return;}
+   if(!active&&w>=5&&(ep.helisDown>=2||ep.copKills>=8||ep.copCars>=3||(w>=6&&ep.copKills>=5))){
+     active=true;spawnT=0;convoyT=1.5;
+     if(ctx.fx&&ctx.fx.banner)ctx.fx.banner('MILITARY DEPLOYED','ARMOURED UNITS EN ROUTE','#9fb08a');
+     if(ctx.fx&&ctx.fx.toast)ctx.fx.toast('☠ MILITARY DEPLOYED','#9fb08a');
+   }
+   if(active&&w>=5){spawnT-=dt;if(spawnT<=0&&countMil(false)<2){spawnMilitary();spawnT=9;}}
+   if(w>=6){convoyT-=dt;if(convoyT<=0){var have={},n=0,cops=ctx.actors.cops||[];for(var i=0;i<cops.length;i++){var c=cops[i];if(c._nsConvoy&&!c._retiring&&!have[c._nsConvoy]){have[c._nsConvoy]=1;n++;}}if(n<2)spawnConvoy();convoyT=16;}}
+   if(w>=6)engagePullover(dt);else if(w<5&&pulled)releasePullover();
+ },api:{status:function(){return{active:active,episode:JSON.parse(JSON.stringify(ep)),pulled:pulled,militaryUnits:countMil(false),convoyUnits:countMil(true)};}}});
 })();
 
 /* -------------------------- per-vehicle upgrades -------------------------- */

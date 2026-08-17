@@ -137,7 +137,7 @@
     {id:'garage-downtown',kind:'garage',name:'DOWNTOWN LOCKUP',x:-1030,z:830,spawnX:-995,spawnZ:830,heading:Math.PI/2,slots:5},
     {id:'garage-docks',kind:'garage',name:'DOCKS WAREHOUSE',x:-730,z:2480,spawnX:-690,spawnZ:2480,heading:Math.PI/2,slots:5},
     {id:'garage-crown',kind:'garage',name:'HILLS CITY MOTOR HOUSE',x:-4765,z:-1320,spawnX:-4765,spawnZ:-1278,heading:Math.PI/2,slots:4},
-    {id:'garage-island',kind:'garage',name:'TIDELIGHT LOCKUP',x:480,z:5480,spawnX:480,spawnZ:5442,heading:Math.PI,slots:4},
+    {id:'garage-island',kind:'garage',name:'TIDELIGHT LOCKUP',x:530,z:5380,spawnX:508,spawnZ:5380,heading:-Math.PI/2,slots:4},
     {id:'dealer-retail',kind:'dealer',name:'CANYON MOTORS',x:1810,z:760,spawnX:1848,spawnZ:760,heading:Math.PI/2,stock:[
       {id:'commuter',price:450},{id:'hauler',price:1500},{id:'hotHatch',price:3600,missions:1},{id:'muscleV8',price:5600,missions:3}
     ]},

@@ -1954,24 +1954,104 @@ const VEHICLE_HORN_PERSONALITY=Object.freeze({
   bfCanyonWraith:Object.freeze({f1:352,f2:444,amp:.164,hold:.32,release:.19,formant:610,q:.85,warmth:1640,beat:1.12,saw:.2,tri:.75})
 });
 const DEFAULT_HORN_PERSONALITY=Object.freeze({f1:405,f2:510,amp:.135,hold:.30,release:.16,formant:690,q:.78,warmth:1950,beat:1.35,saw:.15,tri:.70});
+let hornVoice=null;
+// Horn is press-and-hold: vehicleHorn() starts the chord, vehicleHornUp()
+// releases it. Dual saw+triangle tone pair per personality row, through the
+// same formant bandpass + warmth lowpass, with a slow ~4-6 Hz vibrato LFO on
+// the oscillators' detune so a held horn breathes like a real diaphragm horn.
 function vehicleHorn(){
   if(onFoot||playerAircraft||!car)return false;initAudio();if(!audioCtx||muted)return true;
-  const id=vehicleTuneKey||'',h=VEHICLE_HORN_PERSONALITY[id]||DEFAULT_HORN_PERSONALITY,t=audioCtx.currentTime,stop=t+h.hold+h.release+.04,
-    mix=audioCtx.createGain(),formant=audioCtx.createBiquadFilter(),warmth=audioCtx.createBiquadFilter(),out=audioCtx.createGain();
-  mix.gain.value=1;formant.type='bandpass';formant.frequency.setValueAtTime(h.formant,t);formant.Q.value=h.q;
-  warmth.type='lowpass';warmth.frequency.setValueAtTime(h.warmth,t);warmth.Q.value=.42;
-  out.gain.setValueAtTime(.0001,t);out.gain.exponentialRampToValueAtTime(h.amp,t+.010);out.gain.setTargetAtTime(h.amp*.94,t+.045,.09);out.gain.setValueAtTime(h.amp*.91,t+h.hold);out.gain.exponentialRampToValueAtTime(.0001,t+h.hold+h.release);
-  [[h.f1,-1],[h.f2,1]].forEach(([f,side],i)=>{
-    const saw=audioCtx.createOscillator(),tri=audioCtx.createOscillator(),sg=audioCtx.createGain(),tg=audioCtx.createGain();
-    saw.type='sawtooth';tri.type='triangle';saw.frequency.setValueAtTime(f,t);tri.frequency.setValueAtTime(f+side*h.beat,t);
-    saw.detune.setValueAtTime(side*(i?2.4:1.7),t);tri.detune.setValueAtTime(-side*(i?2.0:1.5),t);sg.gain.value=h.saw;tg.gain.value=h.tri;
-    saw.connect(sg);tri.connect(tg);sg.connect(mix);tg.connect(mix);saw.start(t);tri.start(t);saw.stop(stop);tri.stop(stop);
-  });
-  mix.connect(formant);formant.connect(warmth);warmth.connect(out);out.connect(audioCtx.destination);return true;
+  if(hornVoice)return true;
+  try{
+    const id=vehicleTuneKey||'',h=VEHICLE_HORN_PERSONALITY[id]||DEFAULT_HORN_PERSONALITY,t=audioCtx.currentTime,
+      mix=audioCtx.createGain(),formant=audioCtx.createBiquadFilter(),warmth=audioCtx.createBiquadFilter(),out=audioCtx.createGain(),
+      vib=audioCtx.createOscillator(),vibGain=audioCtx.createGain(),oscs=[vib];
+    mix.gain.value=1;formant.type='bandpass';formant.frequency.setValueAtTime(h.formant,t);formant.Q.value=h.q;
+    warmth.type='lowpass';warmth.frequency.setValueAtTime(h.warmth,t);warmth.Q.value=.42;
+    vib.type='sine';vib.frequency.value=4.2+h.beat*.9;vibGain.gain.value=3.4;
+    out.gain.setValueAtTime(.0001,t);out.gain.exponentialRampToValueAtTime(h.amp,t+.012);out.gain.setTargetAtTime(h.amp*.92,t+.05,.12);
+    [[h.f1,-1],[h.f2,1]].forEach(([f,side],i)=>{
+      const saw=audioCtx.createOscillator(),tri=audioCtx.createOscillator(),sg=audioCtx.createGain(),tg=audioCtx.createGain();
+      saw.type='sawtooth';tri.type='triangle';saw.frequency.setValueAtTime(f,t);tri.frequency.setValueAtTime(f+side*h.beat,t);
+      saw.detune.setValueAtTime(side*(i?2.4:1.7),t);tri.detune.setValueAtTime(-side*(i?2.0:1.5),t);
+      vibGain.connect(saw.detune);vibGain.connect(tri.detune);
+      sg.gain.value=h.saw;tg.gain.value=h.tri;
+      saw.connect(sg);tri.connect(tg);sg.connect(mix);tg.connect(mix);saw.start(t);tri.start(t);oscs.push(saw,tri);
+    });
+    vib.start(t);
+    mix.connect(formant);formant.connect(warmth);warmth.connect(out);out.connect(audioCtx.destination);
+    hornVoice={out:out,oscs:oscs,rel:Math.max(.09,h.release)};
+  }catch(_){hornVoice=null;}
+  return true;
 }
+function vehicleHornUp(){
+  const v=hornVoice;hornVoice=null;if(!v||!audioCtx)return;
+  try{
+    const t=audioCtx.currentTime;
+    v.out.gain.cancelScheduledValues(t);v.out.gain.setTargetAtTime(.0001,t,v.rel*.45);
+    const stop=t+v.rel+.3;for(const o of v.oscs){try{o.stop(stop);}catch(_){}}
+    setTimeout(()=>{try{v.out.disconnect();}catch(_){}},(v.rel+.5)*1000);
+  }catch(_){}
+}
+window.GAME_DEBUG_HORN_AUDIO={down:vehicleHorn,up:vehicleHornUp};
 function togglePlayerSiren(){if(onFoot||playerAircraft||!car||!car.userData.policeVehicle)return vehicleHorn();playerSirenOn=!playerSirenOn;playerSirenAudioT=0;addToast(playerSirenOn?'🚨 Siren on':'Siren off',playerSirenOn?'#2b6bff':'#9ab');return true;}
-function spatialSirenPulse(cop,phase){if(!audioCtx||muted||!cop)return;const dx=cop.x-playerX,dz=cop.z-playerZ,d=Math.hypot(dx,dz);if(d>620)return;const rel=((cop.vx||0)-(onFoot?0:carState.vx||0))*(dx/(d||1))+((cop.vz||0)-(onFoot?0:carState.vz||0))*(dz/(d||1)),freq=(phase?760:590)+clamp(-rel*1.7,-90,90),t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(),p=audioCtx.createPanner();o.type='sawtooth';o.frequency.setValueAtTime(freq,t);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(clamp((1-d/650)*.075,.008,.075),t+.018);g.gain.exponentialRampToValueAtTime(.0001,t+.30);p.distanceModel='inverse';p.refDistance=35;p.maxDistance=700;p.rolloffFactor=1.1;if(p.positionX){p.positionX.value=cop.x;p.positionY.value=(cop.y||0)+2;p.positionZ.value=cop.z;}else p.setPosition(cop.x,(cop.y||0)+2,cop.z);o.connect(g);g.connect(p);p.connect(audioCtx.destination);o.start(t);o.stop(t+.31);}
-function updateVehicleSirens(dt){if(!onFoot&&!playerAircraft&&car&&car.userData.policeVehicle&&playerSirenOn){playerSirenAudioT-=dt;if(playerSirenAudioT<=0){playerSirenAudioT=.34;beep((performance.now()/340|0)%2?760:590,.27,'sawtooth',.08);}const on=(performance.now()/POLICE_GLOBAL_TUNING.sirenFlashIntervalMs|0)%2;if(car.userData.bl){car.userData.bl.material.color.setHex(on?0x2b6bff:0x111133);car.userData.br.material.color.setHex(on?0x111133:0xff2b2b);}}policeSirenAudioT-=dt;if(stats.wanted>0&&policeSirenAudioT<=0){policeSirenAudioT=.36;const live=cops.filter(c=>!c._hidden&&!c._retiring&&!c._inert&&!c._roadblock).sort((a,b)=>dist2(a.x,a.z,playerX,playerZ)-dist2(b.x,b.z,playerX,playerZ)).slice(0,3);for(let i=0;i<live.length;i++)spatialSirenPulse(live[i],((performance.now()/360|0)+i)&1);}}
+/* Police sirens are persistent WebAudio voices, not repeated beeps. Each voice
+   is two slightly-detuned sawtooths through a lowpass; frequency sweeps as a
+   wail (slow) or yelp (fast), gain follows distance to the player, a stereo
+   panner follows bearing, and a small Doppler term follows closing speed. At
+   most two cop voices (nearest units) plus the player's own two-tone siren.
+   Every gain write also schedules a dead-man fade so a paused or hidden game
+   never leaves a siren droning. */
+let sirenVoices=[],playerSirenVoice=null;
+function makeSirenVoice(){
+  const o1=audioCtx.createOscillator(),o2=audioCtx.createOscillator(),lp=audioCtx.createBiquadFilter(),g=audioCtx.createGain(),pan=audioCtx.createStereoPanner?audioCtx.createStereoPanner():null;
+  o1.type='sawtooth';o2.type='sawtooth';o2.detune.value=8;lp.type='lowpass';lp.frequency.value=2200;lp.Q.value=.7;g.gain.value=0;
+  o1.connect(lp);o2.connect(lp);lp.connect(g);
+  if(pan){g.connect(pan);pan.connect(audioCtx.destination);}else g.connect(audioCtx.destination);
+  o1.start();o2.start();
+  return{o1:o1,o2:o2,lp:lp,g:g,pan:pan,phase:Math.random()*6};
+}
+function sirenGainTo(v,gain,t){const g=v.g.gain;try{g.cancelScheduledValues(t);}catch(_){}g.setTargetAtTime(gain,t,.07);g.setTargetAtTime(0,t+.35,.18);}
+function silenceSirenVoices(tau){if(!audioCtx)return;const t=audioCtx.currentTime;try{for(const v of sirenVoices)if(v)v.g.gain.setTargetAtTime(0,t,tau||.1);if(playerSirenVoice)playerSirenVoice.g.gain.setTargetAtTime(0,t,tau||.1);}catch(_){}}
+function updateVehicleSirens(dt){
+  try{
+    const wantPlayer=!onFoot&&!playerAircraft&&car&&car.userData.policeVehicle&&playerSirenOn;
+    if(wantPlayer){
+      const on=(performance.now()/POLICE_GLOBAL_TUNING.sirenFlashIntervalMs|0)%2;
+      if(car.userData.bl){car.userData.bl.material.color.setHex(on?0x2b6bff:0x111133);car.userData.br.material.color.setHex(on?0x111133:0xff2b2b);}
+    }
+    if(!audioCtx)return;
+    const t=audioCtx.currentTime;
+    if(wantPlayer){
+      playerSirenAudioT+=dt;
+      if(!playerSirenVoice&&!muted)playerSirenVoice=makeSirenVoice();
+      if(playerSirenVoice){
+        const f=(playerSirenAudioT%.9)<.45?915:645;
+        playerSirenVoice.o1.frequency.setTargetAtTime(f,t,.035);playerSirenVoice.o2.frequency.setTargetAtTime(f,t,.035);
+        sirenGainTo(playerSirenVoice,muted?0:.05,t);
+      }
+    }else if(playerSirenVoice)sirenGainTo(playerSirenVoice,0,t);
+    const live=stats.wanted>0&&!muted?cops.filter(c=>!c._hidden&&!c._retiring&&!c._inert&&!c._roadblock).sort((a,b)=>dist2(a.x,a.z,playerX,playerZ)-dist2(b.x,b.z,playerX,playerZ)).slice(0,2):[];
+    const heading=onFoot?(foot&&foot.heading||0):carState.heading;
+    for(let i=0;i<2;i++){
+      const cop=live[i];let v=sirenVoices[i];
+      if(!cop){if(v)sirenGainTo(v,0,t);continue;}
+      if(!v)v=sirenVoices[i]=makeSirenVoice();
+      v.phase+=dt*(i?3.1:.185)*Math.PI*2;   // voice 0 wails over ~5.4 s, voice 1 yelps at ~3 Hz
+      const dx=cop.x-playerX,dz=cop.z-playerZ,d=Math.hypot(dx,dz),
+        rel=((cop.vx||0)-(onFoot?0:carState.vx||0))*(dx/(d||1))+((cop.vz||0)-(onFoot?0:carState.vz||0))*(dz/(d||1)),
+        doppler=clamp(-rel*1.4,-70,70),
+        f=615+(.5-.5*Math.cos(v.phase))*470+doppler,
+        near=clamp(1-d/680,0,1),
+        gain=.082*Math.pow(near,1.3);
+      v.o1.frequency.setTargetAtTime(f,t,.03);v.o2.frequency.setTargetAtTime(f,t,.03);
+      v.lp.frequency.setTargetAtTime(1150+near*1750,t,.08);
+      if(v.pan)v.pan.pan.setTargetAtTime(clamp(Math.sin(Math.atan2(dx,dz)-heading)*.75,-1,1),t,.08);
+      sirenGainTo(v,gain,t);
+    }
+  }catch(_){}
+}
+window.GAME_DEBUG_SIREN_AUDIO={update:updateVehicleSirens,make:function(){try{if(!audioCtx)return 'no-audio';const v=makeSirenVoice(),tt=audioCtx.currentTime;v.o1.stop(tt+.2);v.o2.stop(tt+.2);return 'ok';}catch(e){return 'ERR:'+e;}},silence:silenceSirenVoices};
 
 function chord(freqs,step=70,type='triangle'){ freqs.forEach((f,i)=>setTimeout(()=>beep(f,0.16,type,0.12),i*step)); }
 const playPickup=()=>beep(880,0.09,'square',0.1);
@@ -2396,9 +2476,9 @@ addEventListener('keydown',e=>{ window.OV_TEXT_ENTRY=window.OV_TEXT_ENTRY||funct
   if(!e.repeat&&(k==='x'||k==='u')) requestManualShift(1);
   if(!e.repeat&&(k==='y'||k==='z')) requestManualShift(-1);
 });
-addEventListener('keyup',e=>{const k=(e.key||'').toLowerCase(),interiors=window.GameSystems&&GameSystems.api('interiors');if(k==='e'&&interiors&&interiors.handleUseKey)interiors.handleUseKey(false);noteKeyEvent(e,false);},true);
-addEventListener('blur',()=>clearAllInputState('window-blur'),true);
-document.addEventListener('visibilitychange',()=>{if(document.hidden)clearAllInputState('visibility-hidden');},true);
+addEventListener('keyup',e=>{const k=(e.key||'').toLowerCase(),interiors=window.GameSystems&&GameSystems.api('interiors');if(k==='e'&&interiors&&interiors.handleUseKey)interiors.handleUseKey(false);if(k==='h')vehicleHornUp();noteKeyEvent(e,false);},true);
+addEventListener('blur',()=>{clearAllInputState('window-blur');vehicleHornUp();},true);
+document.addEventListener('visibilitychange',()=>{if(document.hidden){clearAllInputState('visibility-hidden');vehicleHornUp();silenceSirenVoices(.08);}},true);
 document.addEventListener('pointerlockchange',()=>{if(document.hidden||!document.hasFocus())clearAllInputState('pointerlockchange-unfocused');},true);
 function resetCar(){
   resetBurstTires();if(onFoot){ carState.x=foot.x; carState.z=foot.z; }
@@ -2796,16 +2876,19 @@ function update(dt){
     cop.y=WORLD_groundHeightAt(cop.x,cop.z,cop.y===undefined?carState.y:cop.y);cop.mesh.position.set(cop.x,cop.y,cop.z);cop.mesh.rotation.y=cop.heading;
     const on=(performance.now()/POLICE_GLOBAL_TUNING.sirenFlashIntervalMs|0)%2;if(cop.mesh.userData.bl){cop.mesh.userData.bl.material.color.setHex(on?0x2b6bff:0x111133);cop.mesh.userData.br.material.color.setHex(on?0x111133:0xff2b2b);}
   }
-function retirePoliceAirSupportUnit(aa,a,reason,destroyed){const i=policeAirUnits.indexOf(a);if(i>=0)policeAirUnits.splice(i,1);if(destroyed)policeAirSpawnCooldown=Math.max(policeAirSpawnCooldown,POLICE_AIR_DESTROY_COOLDOWN);if(aa&&aa.retire)aa.retire(a,reason||'police-air-retire');return true;}
+const nsTracers=[],nsTracerUp=new THREE.Vector3(0,1,0),nsTracerDir=new THREE.Vector3();
+function nsAirTracer(x0,y0,z0,x1,y1,z1){try{const dx=x1-x0,dy=y1-y0,dz=z1-z0,L=Math.hypot(dx,dy,dz)||1;const m=new THREE.Mesh(new THREE.CylinderGeometry(.16,.42,Math.min(L,58),5,1,true),new THREE.MeshBasicMaterial({color:0xffdf7a,transparent:true,opacity:.95,blending:THREE.AdditiveBlending,depthWrite:false}));m.position.set(x0+dx*.5,y0+dy*.5,z0+dz*.5);nsTracerDir.set(dx/L,dy/L,dz/L);m.quaternion.setFromUnitVectors(nsTracerUp,nsTracerDir);scene.add(m);nsTracers.push({m,t:.19});beep(200,.06,'square',.07);setTimeout(()=>beep(130,.05,'square',.05),45);}catch(e){}}
+function nsUpdateTracers(dt){for(let i=nsTracers.length-1;i>=0;i--){const tr=nsTracers[i];tr.t-=dt;if(tr.t<=0){scene.remove(tr.m);tr.m.geometry.dispose();tr.m.material.dispose();nsTracers.splice(i,1);}else tr.m.material.opacity=tr.t/.19*.95;}}
+function retirePoliceAirSupportUnit(aa,a,reason,destroyed){const i=policeAirUnits.indexOf(a);if(i>=0)policeAirUnits.splice(i,1);if(destroyed){policeAirSpawnCooldown=Math.max(policeAirSpawnCooldown,POLICE_AIR_DESTROY_COOLDOWN);try{window.GameSystems&&GameSystems.events.emit('police:heli-down',{x:a&&a.x||0,z:a&&a.z||0});}catch(e){}}if(aa&&aa.retire)aa.retire(a,reason||'police-air-retire');return true;}
 function updatePoliceAirSupport(dt,tune,PX,PZ,PY){
-  const aa=window.GameSystems&&GameSystems.api('aircraft');if(!aa)return;policeAirSpawnCooldown=Math.max(0,policeAirSpawnCooldown-dt);
+  nsUpdateTracers(dt);const aa=window.GameSystems&&GameSystems.api('aircraft');if(!aa)return;policeAirSpawnCooldown=Math.max(0,policeAirSpawnCooldown-dt);
   const blocked=currentMapId!=='neon'||document.body.classList.contains('paint-spray-active')||document.body.classList.contains('interior-active'),cap=blocked||stats.wanted<5?0:Math.min(2,Math.max(0,tune.airSupport|0));
   for(let i=policeAirUnits.length-1;i>=0;i--){const a=policeAirUnits[i];if(!a||a._retired){policeAirUnits.splice(i,1);continue;}if(a.dead){retirePoliceAirSupportUnit(aa,a,'police-air-destroyed',true);}}
   while(policeAirUnits.length>cap){const a=policeAirUnits[policeAirUnits.length-1];retirePoliceAirSupportUnit(aa,a,'wanted-tier-drop',false);}
   if(cap<=0)return;
   if(policeAirUnits.length<cap&&policeAirSpawnCooldown<=0&&aa.spawnAt){const seq=++policeAirSpawnSeq,phase=seq*Math.PI*.83,spawnR=170,a=aa.spawnAt('newscopter',PX+Math.sin(phase)*spawnR,PZ+Math.cos(phase)*spawnR,PY+85,Math.atan2(PX-(PX+Math.sin(phase)*spawnR),PZ-(PZ+Math.cos(phase)*spawnR)));if(a){a._policeSupport=true;a._policeAirPhase=phase;a._policeShotT=1.6+(seq%3)*.35;a.parked=false;a.solid=false;policeAirUnits.push(a);policeAirSpawnCooldown=POLICE_AIR_SPAWN_COOLDOWN;setBanner(policeAirUnits.length>1?'AIR SUPPORT REINFORCED':'AIR SUPPORT','POLICE HELICOPTER INBOUND','#2b6bff');}}
   const clock=performance.now()*.00022;
-  for(let i=0;i<policeAirUnits.length;i++){const u=policeAirUnits[i];if(!u||u.dead||u.burning)continue;const a=clock+(u._policeAirPhase||0),rad=125+Math.sin(a*.7+i)*18,targetX=PX+Math.sin(a)*rad,targetZ=PZ+Math.cos(a)*rad,targetY=Math.max(PY+70,WORLD_groundHeightAt(targetX,targetZ,PY)+62);u.x=lerp(u.x,targetX,clamp(dt*.9,0,1));u.z=lerp(u.z,targetZ,clamp(dt*.9,0,1));u.y=lerp(u.y,targetY,clamp(dt*1.2,0,1));u.heading=Math.atan2(PX-u.x,PZ-u.z);u.mesh.visible=true;u._policeShotT=Math.max(0,(u._policeShotT||0)-dt);if(tune.marksmen>0&&u._policeShotT<=0&&policeDirector.seen){u._policeShotT=clamp(4.2-tune.marksmen*.72,2.1,3.5)+i*.28;const d=Math.hypot(PX-u.x,PZ-u.z);if(d<260){boom(PX+(Math.random()-.5)*4,PZ+(Math.random()-.5)*4,0xff3b3b,2,PY+1);GameSystems.context().engine.hurtPlayer(.18+tune.marksmen*.08,{source:'police-marksman'});addToast('🎯 AIR MARKSMAN','#ff6b6b');}}}
+  for(let i=0;i<policeAirUnits.length;i++){const u=policeAirUnits[i];if(!u||u.dead||u.burning)continue;const a=clock+(u._policeAirPhase||0),rad=68+Math.sin(a*.7+i)*12,targetX=PX+Math.sin(a)*rad,targetZ=PZ+Math.cos(a)*rad,targetY=Math.max(PY+34,WORLD_groundHeightAt(targetX,targetZ,PY)+26);u.x=lerp(u.x,targetX,clamp(dt*.9,0,1));u.z=lerp(u.z,targetZ,clamp(dt*.9,0,1));u.y=lerp(u.y,targetY,clamp(dt*1.2,0,1));u.heading=Math.atan2(PX-u.x,PZ-u.z);u.mesh.visible=true;u._policeShotT=Math.max(0,(u._policeShotT||0)-dt);if(tune.airSupport>0&&u._policeShotT<=0&&policeDirector.seen){u._policeShotT=clamp(2.4-(tune.marksmen||0)*.45,1.15,2.4)+i*.22;const d=Math.hypot(PX-u.x,PZ-u.z);if(d<300){const nsHit=Math.random()<.42&&performance.now()>=(window._nsCopGraceUntil||0),nsTx=PX+(Math.random()-.5)*3+(nsHit?0:(Math.random()<.5?-1:1)*(6+Math.random()*8)),nsTz=PZ+(Math.random()-.5)*3+(nsHit?0:(Math.random()<.5?-1:1)*(6+Math.random()*8)),nsTy=WORLD_groundHeightAt(nsTx,nsTz,PY)+.6;nsAirTracer(u.x,u.y-2.4,u.z,nsTx,nsTy,nsTz);boom(nsTx,nsTz,nsHit?0xff3b3b:0xffd23f,nsHit?3:2,nsTy+.5);if(nsHit){GameSystems.context().engine.hurtPlayer(.12+(tune.marksmen||0)*.05,{source:'police-marksman'});window._nsCopGraceUntil=performance.now()+900;addToast('🎯 AIR MARKSMAN','#ff6b6b');}}}}
 }
   updatePoliceAirSupport(dt,tune,PX,PZ,PY);
   // Vehicle arrest: surrendering while boxed in is BUSTED, not death by ram.
@@ -3133,7 +3216,7 @@ function updateShovedTraffic(dt){
 }
 function superBlastVehicle(obj,isCop=false,impactEnergy=60,nx=0,nz=0){
   if(!obj||!obj.mesh||obj._superBlasted)return;if(!isCop&&!obj._patrol)trafficDriverExit(obj,'extreme-impact');obj._superBlasted=true;obj.dead=true;obj.burning=false;const ti=traffic.indexOf(obj);if(ti>=0)traffic.splice(ti,1);if(isCop){const ci=cops.indexOf(obj);if(ci>=0)cops.splice(ci,1);}const mesh=obj.mesh,dx=nx||obj.x-carState.x,dz=nz||obj.z-carState.z,len=Math.hypot(dx,dz)||1,e=clamp(impactEnergy,42,115),y=mesh.position.y;mesh.visible=true;
-  blasted.push({obj,mesh,isCop,x:obj.x,y,z:obj.z,vx:dx/len*(28+e*.85)+carState.vx*.58,vz:dz/len*(28+e*.85)+carState.vz*.58,vy:18+e*.47,sx:rand(4,8)*(Math.random()<.5?-1:1),sy:rand(2,5),sz:rand(6,11)*(Math.random()<.5?-1:1),bounces:0,grounded:false,t:0,impactEnergy:e,startedHp:obj._bHp===undefined?obj.hp:obj._bHp,midairFire:false});boom(obj.x,obj.z,0xffd23f,12,2);playCrash();panicTrafficAt&&panicTrafficAt(obj.x,obj.z,145,obj);
+  blasted.push({obj,mesh,isCop,x:obj.x,y,z:obj.z,vx:dx/len*(28+e*.85)+carState.vx*.58,vz:dz/len*(28+e*.85)+carState.vz*.58,vy:18+e*.47,sx:rand(4,8)*(Math.random()<.5?-1:1),sy:rand(2,5),sz:rand(6,11)*(Math.random()<.5?-1:1),bounces:0,grounded:false,t:0,impactEnergy:e,startedHp:obj._bHp===undefined?obj.hp:obj._bHp,midairFire:false});boom(obj.x,obj.z,0xffd23f,12,2);playCrash();panicTrafficAt&&panicTrafficAt(obj.x,obj.z,145,obj);try{window.GameSystems&&GameSystems.events.emit('vehicle:superblast',{isCop:!!isCop,x:obj.x,z:obj.z,playerCaused:(obj._playerCauseUntil||0)>performance.now()});}catch(e){}
 }
 function updateBlastedVehicles(dt){
   for(let i=blasted.length-1;i>=0;i--){const b=blasted[i],m=b.mesh;b.t+=dt;b.vy-=BLAST_G*dt;b.x+=b.vx*dt;b.z+=b.vz*dt;b.y+=b.vy*dt;const drag=Math.max(0,1-(b.grounded?3.2:.38)*dt);b.vx*=drag;b.vz*=drag;const gy=WORLD_groundHeightAt(b.x,b.z,b.y);if(!b.midairFire&&b.y>gy+8&&b.impactEnergy>78&&b.startedHp<45&&Math.random()<dt*.42){b.midairFire=true;const f=makeFire();m.add(f);b.fire=f;}
@@ -3560,11 +3643,29 @@ function updateDrive(dt){
           const sx=carState.x+dirx*o,sz=carState.z+dirz*o,pt={x:sx,z:sz};
           const nb=WORLD_obstaclesNear(sx,sz,{mph:Math.hypot(vel.x,vel.z)*1.6,kind:'player'});
           for(let i=0;i<nb.length;i++){const b=nb[i];
+            if(b._cwRelease===undefined&&b.w!==undefined&&!b.breakable){b._cwRelease=0;try{const rg=window.GameSystems&&GameSystems.api('roadgraph');if(rg&&rg.nearest&&Math.max(b.w,b.d)<=14){const rd=rg.nearest(b.x,b.z,b.baseY||0);if(rd&&rd.d<Math.min(9,(rd.width||34)*.5+1)&&Math.abs((b.baseY||0)-rd.y)<6){b._cwRelease=1;console.warn('[neon-core] runtime collider release at '+Math.round(b.x)+','+Math.round(b.z)+' — prop-sized box stands in a live carriageway');}}}catch(e){}}
+            if(b._cwRelease===1)continue;
             if(b.baseY!==undefined&&(carState.y>b.baseY+b.h-.6||carState.y<b.baseY-2.2))continue;
             if(b.breakable&&!b.broken){const cs=aabbClosing(pt,bodyR,b.x,b.z,b.w*.5,b.d*.5,vel);if(cs>=(b.breakAt||BARRIER_BREAK_SPEED)&&smashBarrier(b,cs,vel))continue;}
             const bx=pt.x,bz=pt.z,profile=obstacleResponse(b),im=aabbPush(pt,bodyR,b.x,b.z,b.w*.5,b.d*.5,vel,profile.rest,profile.friction);if(im>impact)impact=im;if(Math.abs(pt.x-bx)+Math.abs(pt.z-bz)>1e-7)corrected=true;
           }
-          for(const r of rampSolids){const bx=pt.x,bz=pt.z,im=aabbPush(pt,bodyR,r.x,r.z,r.ex,r.ez,vel,.01,.11);if(im>impact)impact=im;if(Math.abs(pt.x-bx)+Math.abs(pt.z-bz)>1e-7)corrected=true;}
+          for(const r of rampSolids){const bx=pt.x,bz=pt.z;let im=0;
+            if(r.len>0&&r.width>0&&r.fx!==undefined&&isFinite(r.height)){
+              // v50 ramp overhaul: a misaligned ramp is solid only across its real oriented
+              // body, and only where the local deck face is too tall to crest. The old
+              // axis-aligned ex/ez box walled empty air around every diagonal ramp.
+              const rdx=pt.x-r.x,rdz=pt.z-r.z,la=rdx*r.fx+rdz*r.fz,lt=rdx*r.fz-rdz*r.fx,hl=r.len*.5,hw=r.width*.5;
+              if(Math.abs(la)<=hl+bodyR&&Math.abs(lt)<=hw+bodyR){
+                const surf=(r.baseY||0)+clamp((la+hl)/r.len,0,1)*r.height;
+                if(carState.y>=(r.baseY||0)-2.2&&carState.y<surf-1.0){
+                  const lp={x:la,z:lt},lv={x:vel.x*r.fx+vel.z*r.fz,z:vel.x*r.fz-vel.z*r.fx};
+                  im=aabbPush(lp,bodyR,0,0,hl,hw,lv,.01,.11);
+                  pt.x=r.x+lp.x*r.fx+lp.z*r.fz;pt.z=r.z+lp.x*r.fz-lp.z*r.fx;
+                  vel.x=lv.x*r.fx+lv.z*r.fz;vel.z=lv.x*r.fz-lv.z*r.fx;
+                }
+              }
+            }else im=aabbPush(pt,bodyR,r.x,r.z,r.ex,r.ez,vel,.01,.11);
+            if(im>impact)impact=im;if(Math.abs(pt.x-bx)+Math.abs(pt.z-bz)>1e-7)corrected=true;}
           carState.x+=pt.x-sx;carState.z+=pt.z-sz;
         }
         if(!corrected)break;
@@ -3687,10 +3788,10 @@ function updateDrive(dt){
 const camTarget=new THREE.Vector3(),camSmoothedTarget=new THREE.Vector3(),camDesired=new THREE.Vector3(),camLookRig=new THREE.PerspectiveCamera();
 let cameraSmoothingReady=false;
 function dampAlpha(rate,dt){return 1-Math.exp(-rate*dt);}
-function applySmoothCamera(desired,target,dt,posRate,lookRate,rotRate){
+function applySmoothCamera(desired,target,dt,posRate,lookRate,rotRate,terrainClamp){
   if(!cameraSmoothingReady||camera.position.distanceToSquared(desired)>250000){camera.position.copy(desired);camSmoothedTarget.copy(target);cameraSmoothingReady=true;}
   else{camera.position.lerp(desired,dampAlpha(posRate,dt));camSmoothedTarget.lerp(target,dampAlpha(lookRate,dt));}
-  camLookRig.position.copy(camera.position);camLookRig.lookAt(camSmoothedTarget);camera.quaternion.slerp(camLookRig.quaternion,dampAlpha(rotRate,dt));
+  if(terrainClamp){/* v49 black-screen fix: the SMOOTHED camera lags the terrain-cleared desired position (descents, drifts, crash-shake) and could sink under the heightfield, which the v49 chunk skirts made light-tight. Clamp the actual camera to raw terrain (deep hint: never resolve a deck above the camera). */const camTerrY=WORLD_groundHeightAt(camera.position.x,camera.position.z,-1e9)+1.4;if(camera.position.y<camTerrY)camera.position.y=camTerrY;}camLookRig.position.copy(camera.position);camLookRig.lookAt(camSmoothedTarget);camera.quaternion.slerp(camLookRig.quaternion,dampAlpha(rotRate,dt));
 }
 function updateCamera(dt){
   if(playerAircraft&&window.GameSystems){const aa=GameSystems.api('aircraft');if(aa&&aa.updateCamera&&aa.updateCamera(dt))return;}
@@ -3702,7 +3803,7 @@ function updateCamera(dt){
   if(onFoot&&window.GameSystems){const interiors=GameSystems.api('interiors');if(interiors&&interiors.updateCamera&&interiors.updateCamera(dt))return;}
   if(onFoot){
     const fx=Math.sin(foot.heading),fz=Math.cos(foot.heading),fy=PLAYER_y(),crouch=clamp(foot.crouchBlend||0,0,1);
-    camDesired.set(foot.x-fx*13,fy+9-crouch*.95,foot.z-fz*13);camTarget.set(foot.x+fx*6,fy+3.5-crouch*1.02,foot.z+fz*6);applySmoothCamera(camDesired,camTarget,dt,8,10,12);return;
+    camDesired.set(foot.x-fx*13,fy+9-crouch*.95,foot.z-fz*13);camTarget.set(foot.x+fx*6,fy+3.5-crouch*1.02,foot.z+fz*6);applySmoothCamera(camDesired,camTarget,dt,8,10,12,true);return;
   }
   const dirx=Math.sin(carState.heading),dirz=Math.cos(carState.heading),mph=Math.abs(carState.speed)*1.6;
   const vmag=Math.hypot(carState.vx,carState.vz),vdx=vmag>3?carState.vx/vmag:dirx,vdz=vmag>3?carState.vz/vmag:dirz;
@@ -3762,7 +3863,7 @@ function updateCamera(dt){
     if(!cameraSmoothingReady){camSmoothedTarget.copy(camTarget);cameraSmoothingReady=true;}else camSmoothedTarget.lerp(camTarget,dampAlpha(11.5,dt));
     camLookRig.position.copy(camera.position);camLookRig.lookAt(camSmoothedTarget);
     const baseQuat=camLookRig.quaternion.clone(),roll=clamp(-driftAngle*.13-driftYawRate*.035,-.15,.15),rollQuat=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),roll);baseQuat.multiply(rollQuat);camera.quaternion.slerp(baseQuat,dampAlpha(13.5,dt));
-  }else applySmoothCamera(camDesired,camTarget,dt,6.5,8,11);
+  }else applySmoothCamera(camDesired,camTarget,dt,6.5,8,11,true);
 }
 
 // ---------- Map (shared minimap + full map) ----------
@@ -3981,7 +4082,7 @@ function WORLD_obstaclesNear(x,z,mover){
   if(interiorsB)for(let i=0;i<interiorsB.length;i++)_obsMerge.push(interiorsB[i]);
   return _obsMerge;
 }
-function WORLD_rampsNear(x,z){ return activeWorld.rampsNear(x,z); }
+window.__RAMP_FIX=1;function WORLD_rampsNear(x,z){ return activeWorld.rampsNear(x,z); }
 function WORLD_nearestRoad(x,z){ return activeWorld.nearestRoad?activeWorld.nearestRoad(x,z):null; }
 // Bounds cannot answer "am I in the sea": NEON's land stops at x 4089.8 of a
 // 4200 bound in the east but at z -2600 of a -3200 bound in the north, and the

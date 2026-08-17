@@ -1804,6 +1804,12 @@ ACTUAL V18 ANCHORS FOUND IN THE ATTACHED GAME
       }
 
       if (kind === 'player' || target === ctx.player) {
+        // v50: a swing cannot reach through a closed vehicle — it dents the car.
+        if (ctx.player && ctx.player.onFoot === false) {
+          const vd = gameApi('vdamage');
+          if (vd && vd.damage) vd.damage('player', { amount: Math.min(12, amount * .25), channel: 'collision', from: 'melee' });
+          return { result: { applied: 0, killed: false }, amount: 0, meta: meta };
+        }
         const hearts = amount * 3 / 100;
         if (ctx.engine && ctx.engine.hurtPlayer) ctx.engine.hurtPlayer(hearts, meta);
         else if (ctx.fx && ctx.fx.flash) ctx.fx.flash(.22);

@@ -460,7 +460,7 @@
     ci.camDesired.set(px, py, pz);
     ci.camTarget.set(cs.x + chaseX * look, cs.y + targetY, cs.z + chaseZ * look);
     ci.applySmoothCamera(ci.camDesired, ci.camTarget, dt,
-      tightening ? T.posRateTighten : T.posRate, T.lookRate, T.rotRate);
+      tightening ? T.posRateTighten : T.posRate, T.lookRate, T.rotRate, true);
     return true;
   }
 
