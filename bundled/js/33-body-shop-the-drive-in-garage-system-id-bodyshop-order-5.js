@@ -442,7 +442,8 @@ body.shop-open #mobileControls{display:none!important}
       const t = document.createElement('div'); t.className = 't';
       t.textContent = e.displayName + ' — ' + nf(e.purchaseCost);
       const sub = document.createElement('small');
-      sub.textContent = unlocked ? e.blurb : '🔒 ' + prog.unlockProgress(e.id).need;
+      const lore = window.VEHICLE_LORE && window.VEHICLE_LORE[e.id];
+      sub.textContent = unlocked ? (lore ? lore.tagline + ' — ' + lore.lore : e.blurb) : '🔒 ' + prog.unlockProgress(e.id).need;
       t.appendChild(sub);
       const b = document.createElement('button'); b.type = 'button';
       const affordable = prog.wallet() >= e.purchaseCost;

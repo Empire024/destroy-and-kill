@@ -1625,16 +1625,34 @@ function resolveCarSurface(){
 // full force on frame one is most of what made braking feel like an anchor.
 let brakePressure=0,brakeLock=0,bodyPitch=0,absPulse=0,prevThrottleIn=0,throttleSpike=0,counterSteerHold=0,spinWarn=0,throttleResponse=0,drivenWheelSpin=0,drivenWheelRpm=0,burnoutPhase=0,tireBite=0,spinCatch=0;
 const VEHICLE_AUDIO_PERSONALITY=Object.freeze({
-  commuter:Object.freeze({pitch:.86,harmonic:.20,filter:.78,turbo:.78}),
-  streetDrift:Object.freeze({pitch:1.00,harmonic:.31,filter:1.00,turbo:1.02}),
+  commuter:Object.freeze({pitch:.86,harmonic:.2,filter:.78,turbo:.78}),
+  streetDrift:Object.freeze({pitch:1,harmonic:.31,filter:1,turbo:1.02}),
   proDrift:Object.freeze({pitch:1.08,harmonic:.28,filter:1.15,turbo:1.18}),
   hauler:Object.freeze({pitch:.72,harmonic:.46,filter:.72,turbo:.72}),
   hotHatch:Object.freeze({pitch:1.06,harmonic:.25,filter:1.08,turbo:1.15}),
-  muscleV8:Object.freeze({pitch:.67,harmonic:.60,filter:.90,turbo:.70}),
+  muscleV8:Object.freeze({pitch:.67,harmonic:.6,filter:.9,turbo:.7}),
   rally:Object.freeze({pitch:1.03,harmonic:.32,filter:1.12,turbo:1.22}),
   trackCoupe:Object.freeze({pitch:1.13,harmonic:.37,filter:1.18,turbo:.82}),
   gripper:Object.freeze({pitch:.92,harmonic:.48,filter:1.13,turbo:1.28}),
-  vortex:Object.freeze({pitch:.58,harmonic:.74,filter:.60,turbo:.50})
+  bmx:Object.freeze({pitch:.47,harmonic:.06,filter:.54,turbo:.35}),
+  mountainBike:Object.freeze({pitch:.52,harmonic:.09,filter:.6,turbo:.38}),
+  moped:Object.freeze({pitch:1.24,harmonic:.17,filter:1.2,turbo:.48}),
+  sportBike:Object.freeze({pitch:1.43,harmonic:.34,filter:1.36,turbo:.58}),
+  chopper:Object.freeze({pitch:.61,harmonic:.68,filter:.73,turbo:.44}),
+  boxerTruck:Object.freeze({pitch:.64,harmonic:.55,filter:.62,turbo:.66}),
+  courierVan:Object.freeze({pitch:.79,harmonic:.38,filter:.81,turbo:.74}),
+  forgeTruck:Object.freeze({pitch:.74,harmonic:.51,filter:.78,turbo:.84}),
+  flatbedRig:Object.freeze({pitch:.6,harmonic:.58,filter:.59,turbo:.68}),
+  vortex:Object.freeze({pitch:.58,harmonic:.74,filter:.6,turbo:.5}),
+  bfDuchess:Object.freeze({pitch:.63,harmonic:.64,filter:.76,turbo:.56}),
+  bfGravelGhost:Object.freeze({pitch:1.11,harmonic:.36,filter:1.21,turbo:1.31}),
+  bfInterceptor:Object.freeze({pitch:.7,harmonic:.59,filter:.89,turbo:.68}),
+  bfGoldenHour:Object.freeze({pitch:1.18,harmonic:.43,filter:1.25,turbo:1.12}),
+  bfWhiteLightning:Object.freeze({pitch:.69,harmonic:.62,filter:.8,turbo:.64}),
+  bfHeirloom:Object.freeze({pitch:1.09,harmonic:.23,filter:1.17,turbo:.46}),
+  bfCinder:Object.freeze({pitch:.77,harmonic:.67,filter:1.03,turbo:1.37}),
+  bfStillwater:Object.freeze({pitch:1.21,harmonic:.41,filter:1.29,turbo:1.43}),
+  bfCanyonWraith:Object.freeze({pitch:.84,harmonic:.44,filter:.93,turbo:1.05})
 });
 function vehicleHandlingTelemetry(id,stock=false){
   id=id||vehicleTuneKey;const live=VEHICLE_TUNES[id]||vehicleTune,prog=window.GameSystems&&GameSystems.api('progression'),factory=stock&&prog&&prog.factoryTune?prog.factoryTune(id):null,t=factory?Object.assign({},live,factory):live;
@@ -1895,18 +1913,48 @@ let audioBoost=0, limiterPopTimer=0, exhaustFlashTimer=0, exhaustFlashPeak=.1, e
 function beep(freq,dur=0.12,type='square',vol=0.14){ if(!audioCtx||muted)return; const o=audioCtx.createOscillator(),g=audioCtx.createGain();
   o.type=type; o.frequency.value=freq; o.connect(g); g.connect(audioCtx.destination);
   g.gain.setValueAtTime(vol,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur); o.start(); o.stop(audioCtx.currentTime+dur); }
+const VEHICLE_HORN_PERSONALITY=Object.freeze({
+  commuter:Object.freeze({f1:405,f2:510,amp:.105,hold:.25,release:.13,formant:690,q:.76,warmth:1900,beat:1.4,saw:.14,tri:.68}),
+  streetDrift:Object.freeze({f1:432,f2:544,amp:.125,hold:.29,release:.15,formant:720,q:.8,warmth:2050,beat:1.35,saw:.16,tri:.7}),
+  proDrift:Object.freeze({f1:458,f2:578,amp:.132,hold:.27,release:.14,formant:760,q:.84,warmth:2180,beat:1.25,saw:.17,tri:.71}),
+  hauler:Object.freeze({f1:350,f2:440,amp:.16,hold:.34,release:.19,formant:600,q:.82,warmth:1600,beat:1.15,saw:.18,tri:.74}),
+  hotHatch:Object.freeze({f1:486,f2:612,amp:.118,hold:.24,release:.13,formant:790,q:.78,warmth:2250,beat:1.55,saw:.15,tri:.69}),
+  muscleV8:Object.freeze({f1:318,f2:402,amp:.15,hold:.31,release:.18,formant:560,q:.88,warmth:1520,beat:1.1,saw:.19,tri:.75}),
+  rally:Object.freeze({f1:442,f2:556,amp:.13,hold:.26,release:.14,formant:740,q:.83,warmth:2120,beat:1.3,saw:.17,tri:.72}),
+  trackCoupe:Object.freeze({f1:514,f2:648,amp:.12,hold:.23,release:.13,formant:840,q:.8,warmth:2300,beat:1.45,saw:.15,tri:.7}),
+  gripper:Object.freeze({f1:552,f2:696,amp:.128,hold:.22,release:.12,formant:900,q:.86,warmth:2400,beat:1.2,saw:.16,tri:.72}),
+  bmx:Object.freeze({f1:730,f2:918,amp:.06,hold:.14,release:.09,formant:1050,q:.62,warmth:3000,beat:2.2,saw:.08,tri:.56}),
+  mountainBike:Object.freeze({f1:680,f2:856,amp:.064,hold:.16,release:.1,formant:980,q:.64,warmth:2860,beat:2,saw:.09,tri:.57}),
+  moped:Object.freeze({f1:505,f2:625,amp:.08,hold:.2,release:.12,formant:810,q:.72,warmth:2350,beat:1.8,saw:.11,tri:.62}),
+  sportBike:Object.freeze({f1:592,f2:746,amp:.096,hold:.19,release:.11,formant:940,q:.76,warmth:2700,beat:1.65,saw:.12,tri:.64}),
+  chopper:Object.freeze({f1:286,f2:362,amp:.132,hold:.33,release:.2,formant:500,q:.86,warmth:1450,beat:1.05,saw:.18,tri:.76}),
+  boxerTruck:Object.freeze({f1:108,f2:136,amp:.195,hold:.43,release:.25,formant:420,q:.7,warmth:1320,beat:.85,saw:.22,tri:.78}),
+  courierVan:Object.freeze({f1:142,f2:178,amp:.17,hold:.36,release:.2,formant:500,q:.74,warmth:1480,beat:.95,saw:.2,tri:.76}),
+  forgeTruck:Object.freeze({f1:124,f2:158,amp:.184,hold:.39,release:.22,formant:455,q:.72,warmth:1390,beat:.9,saw:.21,tri:.77}),
+  flatbedRig:Object.freeze({f1:96,f2:121,amp:.205,hold:.46,release:.27,formant:390,q:.69,warmth:1250,beat:.8,saw:.23,tri:.79}),
+  vortex:Object.freeze({f1:238,f2:302,amp:.145,hold:.37,release:.22,formant:470,q:.66,warmth:1380,beat:.72,saw:.2,tri:.74}),
+  bfDuchess:Object.freeze({f1:302,f2:382,amp:.148,hold:.35,release:.21,formant:525,q:.84,warmth:1500,beat:1,saw:.19,tri:.75}),
+  bfGravelGhost:Object.freeze({f1:468,f2:590,amp:.126,hold:.25,release:.13,formant:775,q:.82,warmth:2160,beat:1.32,saw:.16,tri:.71}),
+  bfInterceptor:Object.freeze({f1:336,f2:424,amp:.158,hold:.31,release:.18,formant:585,q:.9,warmth:1580,beat:1.05,saw:.2,tri:.76}),
+  bfGoldenHour:Object.freeze({f1:526,f2:664,amp:.122,hold:.24,release:.13,formant:855,q:.82,warmth:2320,beat:1.42,saw:.15,tri:.7}),
+  bfWhiteLightning:Object.freeze({f1:326,f2:412,amp:.162,hold:.34,release:.2,formant:565,q:.86,warmth:1540,beat:1.02,saw:.2,tri:.76}),
+  bfHeirloom:Object.freeze({f1:476,f2:600,amp:.11,hold:.27,release:.15,formant:800,q:.74,warmth:2200,beat:1.5,saw:.14,tri:.68}),
+  bfCinder:Object.freeze({f1:374,f2:472,amp:.168,hold:.29,release:.17,formant:650,q:.92,warmth:1750,beat:1.08,saw:.21,tri:.77}),
+  bfStillwater:Object.freeze({f1:566,f2:714,amp:.126,hold:.21,release:.12,formant:920,q:.88,warmth:2440,beat:1.18,saw:.16,tri:.72}),
+  bfCanyonWraith:Object.freeze({f1:352,f2:444,amp:.164,hold:.32,release:.19,formant:610,q:.85,warmth:1640,beat:1.12,saw:.2,tri:.75})
+});
+const DEFAULT_HORN_PERSONALITY=Object.freeze({f1:405,f2:510,amp:.135,hold:.30,release:.16,formant:690,q:.78,warmth:1950,beat:1.35,saw:.15,tri:.70});
 function vehicleHorn(){
   if(onFoot||playerAircraft||!car)return false;initAudio();if(!audioCtx||muted)return true;
-  const id=vehicleTuneKey||'',name=vehicleTune&&vehicleTune.name||'',airTruck=id==='boxerTruck'||id==='courierVan'||id==='forgeTruck'||id==='flatbedRig',truck=airTruck||id==='hauler'||/van|truck|utility/i.test(name),moped=id==='moped',
-    f1=moped?505:airTruck?245:truck?365:405,f2=moped?625:airTruck?310:truck?455:510,amp=moped?.080:airTruck?.195:truck?.165:.135,t=audioCtx.currentTime,hold=airTruck?.42:truck?.34:.30,release=airTruck?.24:truck?.19:.16,stop=t+hold+release+.04,
+  const id=vehicleTuneKey||'',h=VEHICLE_HORN_PERSONALITY[id]||DEFAULT_HORN_PERSONALITY,t=audioCtx.currentTime,stop=t+h.hold+h.release+.04,
     mix=audioCtx.createGain(),formant=audioCtx.createBiquadFilter(),warmth=audioCtx.createBiquadFilter(),out=audioCtx.createGain();
-  mix.gain.value=1;formant.type='bandpass';formant.frequency.setValueAtTime(moped?810:airTruck?430:truck?610:690,t);formant.Q.value=moped?.72:airTruck?.70:truck?.82:.78;
-  warmth.type='lowpass';warmth.frequency.setValueAtTime(moped?2350:airTruck?1350:truck?1650:1950,t);warmth.Q.value=.42;
-  out.gain.setValueAtTime(.0001,t);out.gain.exponentialRampToValueAtTime(amp,t+.010);out.gain.setTargetAtTime(amp*.94,t+.045,.09);out.gain.setValueAtTime(amp*.91,t+hold);out.gain.exponentialRampToValueAtTime(.0001,t+hold+release);
-  [[f1,-1],[f2,1]].forEach(([f,side],i)=>{
+  mix.gain.value=1;formant.type='bandpass';formant.frequency.setValueAtTime(h.formant,t);formant.Q.value=h.q;
+  warmth.type='lowpass';warmth.frequency.setValueAtTime(h.warmth,t);warmth.Q.value=.42;
+  out.gain.setValueAtTime(.0001,t);out.gain.exponentialRampToValueAtTime(h.amp,t+.010);out.gain.setTargetAtTime(h.amp*.94,t+.045,.09);out.gain.setValueAtTime(h.amp*.91,t+h.hold);out.gain.exponentialRampToValueAtTime(.0001,t+h.hold+h.release);
+  [[h.f1,-1],[h.f2,1]].forEach(([f,side],i)=>{
     const saw=audioCtx.createOscillator(),tri=audioCtx.createOscillator(),sg=audioCtx.createGain(),tg=audioCtx.createGain();
-    saw.type='sawtooth';tri.type='triangle';saw.frequency.setValueAtTime(f,t);tri.frequency.setValueAtTime(f+side*(moped?1.8:truck?1.15:1.35),t);
-    saw.detune.setValueAtTime(side*(i?2.4:1.7),t);tri.detune.setValueAtTime(-side*(i?2.0:1.5),t);sg.gain.value=truck?.18:.15;tg.gain.value=truck?.74:.70;
+    saw.type='sawtooth';tri.type='triangle';saw.frequency.setValueAtTime(f,t);tri.frequency.setValueAtTime(f+side*h.beat,t);
+    saw.detune.setValueAtTime(side*(i?2.4:1.7),t);tri.detune.setValueAtTime(-side*(i?2.0:1.5),t);sg.gain.value=h.saw;tg.gain.value=h.tri;
     saw.connect(sg);tri.connect(tg);sg.connect(mix);tg.connect(mix);saw.start(t);tri.start(t);saw.stop(stop);tri.stop(stop);
   });
   mix.connect(formant);formant.connect(warmth);warmth.connect(out);out.connect(audioCtx.destination);return true;

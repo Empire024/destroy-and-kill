@@ -1209,26 +1209,67 @@
     b.box({ x: x + 4.6, z: z, y: y + 26.9, w: 3.4, h: 1.1, d: 2.6, color: accent, emissive: true, noCollide: true });
   }
 
-  /** Pennant bunting strung between two points along +x. */
-  function bunting(b, x0, x1, z, y, r) {
+  /* Pennant bunting.
+   *
+   * Three things were wrong with the first version and all three are visible
+   * in logs/qa/v44a-dealer-lot.jpg:
+   *
+   *   - the flags were sized `span / n * 0.55`, so a flag grew with the length
+   *     of the row it hung over. Field B's 330-unit runs produced 7.3 x 1.5
+   *     flags — billboards, not bunting;
+   *   - they hung at ground + 12 with 2.6 of sag, putting the lowest ones at
+   *     ~13.6, which is straight through the chase camera. Driving the lot put
+   *     a flag a few units from the lens, and a 7.3 x 1.5 quad at that range
+   *     covers the screen;
+   *   - they were `emissive`, which in this builder means the unlit glow mesh.
+   *     An unlit quad has no shading at all, so the thing filling the screen
+   *     was 100%-saturated flat colour with no edges, shadow or gradient to
+   *     read it by — hence "untextured plane".
+   *
+   * Now: a fixed small flag, hung above head height, and lit rather than glowing
+   * so it takes shading like every other surface. The lot's neon comes from the
+   * pylon, the masts and the price boards, which are sized to be signs. */
+  const PENNANT_COLORS = Object.freeze([0x2f9fb8, 0xc4457f, 0xd9a536, 0x3f9e63, 0xc8532f]);
+  const BUNTING = Object.freeze({ rise: 21.5, sag: 2.2, w: 2.4, h: 1.7, d: 0.14, step: 11, maxFlags: 30 });
+
+  function bunting(b, x0, x1, z, groundY, phase) {
     const span = x1 - x0;
-    if (span < 20) return;
-    const n = Math.max(4, Math.min(26, Math.round(span / 13)));
-    const cols = [NEON.cyan, NEON.pink, NEON.amber, NEON.green];
+    if (span < 24) return 0;
+    const n = Math.max(4, Math.min(BUNTING.maxFlags, Math.round(span / BUNTING.step)));
+    const top = groundY + BUNTING.rise;
+    const sagAt = function (t) { return Math.sin(t * Math.PI) * BUNTING.sag; };
+    let made = 0;
     for (let i = 0; i <= n; i++) {
       const t = i / n, px = x0 + span * t;
-      const sag = Math.sin(t * Math.PI) * 2.6;
-      b.box({ x: px, z: z, y: y - sag, w: span / n * 0.55, h: 1.5, d: 0.18, color: cols[(i + (r ? 0 : 1)) % cols.length], emissive: true, noCollide: true });
+      const hangY = top - sagAt(t);
+      // b.box takes the BASE y, so subtract the flag height to hang it off the
+      // wire rather than standing it on top of the wire.
+      b.box({
+        x: px, z: z, y: hangY - BUNTING.h,
+        w: BUNTING.w, h: BUNTING.h, d: BUNTING.d,
+        color: PENNANT_COLORS[(i + (phase ? 0 : 1)) % PENNANT_COLORS.length],
+        noCollide: true
+      });
+      made++;
+      // The wire, as one short level segment per gap. The builder only rotates
+      // about Y, so a real catenary cannot be drawn as a box — stepping it at
+      // this flag density is indistinguishable and costs two triangles a step.
+      if (i < n) {
+        const midY = top - sagAt((i + 0.5) / n);
+        b.box({ x: px + span / n * 0.5, z: z, y: midY, w: span / n + 0.2, h: 0.14, d: 0.14, color: 0x3b424e, noCollide: true });
+      }
     }
-    b.box({ x: (x0 + x1) * 0.5, z: z, y: y + 1.4, w: span, h: 0.16, d: 0.16, color: 0x3b424e, noCollide: true });
+    return made;
   }
 
-  /** Angled price board at the head of a row. */
+  /** Angled price board at the head of a row. The glowing parts are strips on
+   *  a lit board, not the board itself — a board-sized emissive panel is the
+   *  same flat-slab defect the bunting had, just standing still. */
   function priceBoard(b, x, z, y, ry, accent) {
     b.box({ x: x, z: z, y: y, w: 0.7, h: 4.2, d: 0.7, rot: ry, color: 0x4d5563 });
-    b.box({ x: x, z: z, y: y + 4.2, w: 7.2, h: 3.4, d: 0.5, rot: ry, color: 0x161c27, noCollide: true });
-    b.box({ x: x, z: z, y: y + 4.6, w: 6.4, h: 1.5, d: 0.62, rot: ry, color: accent, emissive: true, noCollide: true });
-    b.box({ x: x, z: z, y: y + 6.5, w: 6.4, h: 0.6, d: 0.62, rot: ry, color: 0xe8eef7, emissive: true, noCollide: true });
+    b.box({ x: x, z: z, y: y + 4.2, w: 7.2, h: 3.4, d: 0.5, rot: ry, color: 0x1e2531, noCollide: true });
+    b.box({ x: x, z: z, y: y + 4.7, w: 5.6, h: 0.9, d: 0.58, rot: ry, color: accent, emissive: true, noCollide: true });
+    b.box({ x: x, z: z, y: y + 6.0, w: 5.6, h: 0.45, d: 0.58, rot: ry, color: 0xe8eef7, emissive: true, noCollide: true });
   }
 
   /** The illuminated brand pylon by the road. */
@@ -1433,7 +1474,9 @@
       }
       // Bunting over the aisle between the pair.
       const buntZ = base + STALL.depth;
-      bunting(b, field.x0 + 6, field.x1 - 6, buntZ, H(field.cx || (field.x0 + field.x1) * 0.5, buntZ) + 12, p % 2 === 0);
+      // Pass the GROUND height: bunting() owns how high it hangs, so the two
+      // fields cannot drift apart and the rise is tunable in one place.
+      st.props += bunting(b, field.x0 + 6, field.x1 - 6, buntZ, H(field.cx || (field.x0 + field.x1) * 0.5, buntZ), p % 2 === 0);
     }
   }
 
@@ -1557,13 +1600,15 @@
           st.props++;
         }
       }
-      // Entry gate posts either side of the drive mouth.
+      // Entry gate posts either side of the drive mouth. The crossbar sits at
+      // 16 rather than 13 so you drive under it instead of through it — at 13
+      // the lit strip swept across the middle of the chase camera on the way in.
       for (const z of [DRIVE.z0 - 3, DRIVE.z1 + 3]) {
-        b.box({ x: 534, z: z, y: H(534, z), w: 4, h: 12, d: 4, color: 0x2c343f });
-        b.box({ x: 534, z: z, y: H(534, z) + 12, w: 5, h: 1.4, d: 5, color: NEON.cyan, emissive: true, noCollide: true });
+        b.box({ x: 534, z: z, y: H(534, z), w: 4, h: 15, d: 4, color: 0x2c343f });
+        b.box({ x: 534, z: z, y: H(534, z) + 15, w: 5, h: 1.4, d: 5, color: NEON.cyan, emissive: true, noCollide: true });
       }
-      b.box({ x: 534, z: DRIVE.cz, y: H(534, DRIVE.cz) + 13.2, w: 1.4, h: 3.6, d: DRIVE.z1 - DRIVE.z0 + 6, color: 0x101620, noCollide: true });
-      b.box({ x: 533.2, z: DRIVE.cz, y: H(534, DRIVE.cz) + 14.2, w: 0.5, h: 1.9, d: DRIVE.z1 - DRIVE.z0, color: NEON.amber, emissive: true, noCollide: true });
+      b.box({ x: 534, z: DRIVE.cz, y: H(534, DRIVE.cz) + 16.2, w: 1.4, h: 3.6, d: DRIVE.z1 - DRIVE.z0 + 6, color: 0x101620, noCollide: true });
+      b.box({ x: 533.2, z: DRIVE.cz, y: H(534, DRIVE.cz) + 17.2, w: 0.5, h: 1.6, d: DRIVE.z1 - DRIVE.z0, color: NEON.amber, emissive: true, noCollide: true });
 
       // Smashable dressing rides the engine's own destructible authoring queue,
       // so these break and respawn exactly like every other street prop.

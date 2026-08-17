@@ -2314,15 +2314,8 @@ VERIFICATION (headless, before hand-off)
       if (rec && rec.route) live.routes.push(makeRoute(rec));
     }
     registerTalkPrompts();
-    // The engine owns 'h'. Layer the air horn under it without consuming it.
-    if (!hornKeyBound && typeof window !== 'undefined' && window.addEventListener) {
-      window.addEventListener('keydown', function (e) {
-        if (!e || e.repeat) return;
-        const k = String(e.key || '').toLowerCase();
-        if (k === 'h') airHorn();
-      }, { passive: true });
-      hornKeyBound = true;
-    }
+    // v47: the engine's per-vehicle horn table owns work-truck air horns; do not layer a second oscillator stack.
+    hornKeyBound = true;
     const help = api('help');
     if (help && help.addControls) {
       try { help.addControls('WORK TRUCKS', [['H', 'Air horn (in a work truck)'], ['Enter', 'Talk to a site foreman']]); } catch (_) { }

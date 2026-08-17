@@ -1182,6 +1182,26 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     g.userData.saCull={x:x,z:z,r:280};handle.landmarks.push(g);builder.landmark('CLAIM 9',x,z);return g;
   }
 
+  function buildDamVista(builder,handle) {
+    const T=builder.THREE,H=builder.terrain.heightAt.bind(builder.terrain),x=8615,z=1260,y=H(x,z),g=new T.Group();g.name='dam-vista';handle.landmarkRoot.add(g);
+    const conc=handle.material(0x8b9096),rail=handle.material(0xb9bec4),warm=handle.material(0xffd28a,'basic');
+    // crest walkway slab along the dam line (north-south), overlook facing the water (east)
+    addLocalBox(T,g,conc,10,1.1,64,x,y+.5,z,0);
+    for(let i=-3;i<=3;i++){
+      const pz=z+i*9.2,py=H(x+4.4,pz);
+      addLocalBox(T,g,rail,.45,2.2,.45,x+4.4,py+1.35,pz,0);
+      addWorldCollider(builder,x+4.4,pz,.45,.45,2.2,py,0);
+      if(i<3)addLocalBox(T,g,rail,.3,.3,9.0,x+4.4,py+2.35,pz+4.6,0);
+      const pz2=pz,py2=H(x-4.4,pz2);
+      addLocalBox(T,g,rail,.45,2.2,.45,x-4.4,py2+1.35,pz2,0);
+      if(i<3)addLocalBox(T,g,rail,.3,.3,9.0,x-4.4,py2+2.35,pz2+4.6,0);
+    }
+    addLocalBox(T,g,handle.material(0x4c4438),3.6,.5,1.3,x,y+1.35,z-20,1.5708);
+    addSignCanvas(T,g,'MERCY DAM · EST. NEON STATE','#20e3ff',20,4.4,x,y+4.1,z-24,1.5708);
+    for(const sz of [-26,26]){const ly=H(x,z+sz);addLocalBox(T,g,handle.material(0x2a2f36),.9,7.5,.9,x,ly+3.75,z+sz,0);addLocalBox(T,g,warm,1.6,.5,.7,x,ly+7.6,z+sz,0);}
+    g.userData.saCull={x:x,z:z,r:240};handle.landmarks.push(g);builder.landmark('MERCY DAM',x,z);return g;
+  }
+
   function buildMineQuarry(builder,handle) {
     const T=builder.THREE,H=builder.terrain.heightAt.bind(builder.terrain),x=10710,z=3010,y=H(x,z),g=new T.Group();g.name='copperhead-mine';handle.landmarkRoot.add(g);const rock=handle.material(0x4b443e),steel=handle.material(PALETTE.steel,'metal');addLocalBox(T,g,rock,72,34,18,x,y+17,z);addLocalBox(T,g,handle.material(0x08090a,'basic'),28,20,2,x,y+10,z+9.2);addLocalBox(T,g,steel,2,24,2,x-18,y+12,z+12);addLocalBox(T,g,steel,2,24,2,x+18,y+12,z+12);addLocalBox(T,g,steel,40,2,2,x,y+24,z+12);addSignCanvas(T,g,'COPPERHEAD','#c58b50',36,7,x,y+30,z+13,0);addWorldCollider(builder,x-29,z,12,18,34,y,0);addWorldCollider(builder,x+29,z,12,18,34,y,0);addWorldCollider(builder,x-21,z,14,18,34,y,0);addWorldCollider(builder,x+21,z,14,18,34,y,0);addWorldCollider(builder,x,z-8,72,2,34,y,0);for(let i=0;i<6;i++){const bx=10350+i*110,bz=3190+(i&1)*65,by=H(bx,bz);addLocalBox(T,g,handle.material(0x7b633f),9,4,24,bx,by+2,bz,.12*(i-2));}
     g.userData.saCull={x:10650,z:2920,r:900};handle.landmarks.push(g);builder.landmark('COPPERHEAD MINE',LANDMARK_ARRIVALS.mine.x,LANDMARK_ARRIVALS.mine.z,LANDMARK_ARRIVALS.mine.heading);return g;
@@ -1284,7 +1304,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   }
 
   function buildAllLandmarks(builder,handle) {
-    buildBridge(builder,handle);buildServiceTown(builder,handle);buildTruckStop(builder,handle);buildReservoirDam(builder,handle);buildRadioDish(builder,handle);buildAirstrip(builder,handle);buildTrailerPark(builder,handle);buildHillSign(builder,handle);buildLookout(builder,handle);buildSummitVista(builder,handle);buildVortexPad(builder,handle);buildSpiralViewpoints(builder,handle);buildCanyonRim(builder,handle);buildMiningCamp(builder,handle);buildMineQuarry(builder,handle);buildBillboards(builder,handle);
+    buildBridge(builder,handle);buildServiceTown(builder,handle);buildTruckStop(builder,handle);buildReservoirDam(builder,handle);buildRadioDish(builder,handle);buildAirstrip(builder,handle);buildTrailerPark(builder,handle);buildHillSign(builder,handle);buildLookout(builder,handle);buildSummitVista(builder,handle);buildVortexPad(builder,handle);buildSpiralViewpoints(builder,handle);buildCanyonRim(builder,handle);buildDamVista(builder,handle);buildMiningCamp(builder,handle);buildMineQuarry(builder,handle);buildBillboards(builder,handle);
   }
 
   function makeHandle(builder) {
@@ -1367,6 +1387,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
       vortexPad: buildVortexPad,
       spiralViewpoints: buildSpiralViewpoints,
       canyonRim: buildCanyonRim,
+      damVista: buildDamVista,
       miningCamp: buildMiningCamp,
       mineQuarry: buildMineQuarry,
       billboards: buildBillboards,
