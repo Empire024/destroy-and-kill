@@ -136,7 +136,7 @@
  *  2  gravelGhost bfGravelGhost GRAVEL GHOST        10500,  2560   tarp frame
  *     Behind the Copperhead workings. Stripped AWD rally car derived from
  *     rally: -240kg, +grip, shorter top end, numbers sanded off.
- *  3  interceptor bfInterceptor UNIT 14             11745, -3140   lean-to
+ *  3  interceptor bfInterceptor UNIT 14             10359, -1175   lean-to
  *     The burned-out fire checkpoint below FIREWATCH 7. Abandoned RWD patrol
  *     interceptor, muscleV8 block in a heavier sedan shell.
  *  4  goldenHour  bfGoldenHour  GOLDEN HOUR          1215,  2430   container
@@ -616,7 +616,7 @@
     },
     {
       id: 'interceptor', carId: 'bfInterceptor', region: 'FIREWATCH 7',
-      x: 11745, z: -3140, rot: 0.9, scene: 'leanto', fee: 0,
+      x: 10359, z: -1175, rot: -2.3, scene: 'leanto', fee: 0,
       poi: '🚨',
       prompt: 'TAKE THE CRUISER — UNIT 14',
       cover: 'doors',

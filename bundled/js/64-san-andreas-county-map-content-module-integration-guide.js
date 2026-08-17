@@ -247,9 +247,9 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     cityJoinX: 3800,
     cityJoinZ: -60,
     streamWakeDistance: 5200,
-    terrainCullDistance: 4300,
-    dressingCullDistance: 2350,
-    landmarkCullDistance: 3600,
+    terrainCullDistance: 3400,
+    dressingCullDistance: 1700,
+    landmarkCullDistance: 2900,
     terrainChunk: 1080,
     dressingChunk: 720,
     cullInterval: .22
@@ -836,8 +836,13 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
     }
     const n = climbBlendedTarget(x,z), d = Math.sqrt(n.d2);
     if (d < 95 && n.any) {
+      let ty = n.y;
+      if (d < 16) {
+        const nr = nearestPolylineSegment(x,z,CLIMB_POINTS,CLIMB_TARGETS);
+        ty = nr.y + (n.y - nr.y) * smooth01(clamp((d - 9) / 7, 0, 1));
+      }
       const blend = 1 - smooth01(clamp((d - 18) / 77, 0, 1));
-      return (n.y - heightBeforeRoadBench(x,z)) * blend;
+      return (ty - heightBeforeRoadBench(x,z)) * blend;
     }
     // The runway is a flat deck, so its terrain must be held below the same
     // authored elevation across the pavement and a broad, smooth shoulder.
@@ -1005,6 +1010,7 @@ ACTUAL V27 ANCHORS FOUND IN THE ATTACHED BUILD
   function makeTerrainGeometry(T,builder,x0,z0,x1,z1,step) {
     const pos=[],col=[],H=builder.terrain.heightAt.bind(builder.terrain),C=new T.Color();
     for(let x=x0;x<x1;x+=step){for(let z=z0;z<z1;z+=step){const xx=Math.min(x+step,x1),zz=Math.min(z+step,z1),cx=(x+xx)*.5,cz=(z+zz)*.5;if(countyLandStrength(cx,cz)<=.018)continue;const y00=H(x,z),y10=H(xx,z),y11=H(xx,zz),y01=H(x,zz),color=terrainColorAt(cx,cz,(y00+y10+y11+y01)*.25);C.setHex(color);const cr=C.r,cg=C.g,cb=C.b;pos.push(x,y00,z,xx,y10,z,xx,y11,zz,x,y00,z,xx,y11,zz,x,y01,zz);for(let i=0;i<6;i++)col.push(cr,cg,cb);}}
+    if(pos.length){const SK=44,skirt=function(ax,az,bx,bz){if(countyLandStrength((ax+bx)*.5,(az+bz)*.5)<=.018)return;const ya=H(ax,az),yb=H(bx,bz);C.setHex(terrainColorAt((ax+bx)*.5,(az+bz)*.5,(ya+yb)*.5));const cr=C.r,cg=C.g,cb=C.b;pos.push(ax,ya,az,bx,yb,bz,bx,yb-SK,bz,ax,ya,az,bx,yb-SK,bz,ax,ya-SK,az);for(let i=0;i<6;i++)col.push(cr,cg,cb);};for(let sx=x0;sx<x1;sx+=step){const sxx=Math.min(sx+step,x1);skirt(sx,z0,sxx,z0);skirt(sx,z1,sxx,z1);}for(let sz=z0;sz<z1;sz+=step){const szz=Math.min(sz+step,z1);skirt(x0,sz,x0,szz);skirt(x1,sz,x1,szz);}}
     if(!pos.length)return null;const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(pos,3));geo.setAttribute('color',new T.Float32BufferAttribute(col,3));geo.computeVertexNormals();geo.computeBoundingSphere();return geo;
   }
 

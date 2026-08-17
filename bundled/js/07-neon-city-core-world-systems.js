@@ -432,6 +432,23 @@
   /** Register a collision box (visual-free). w/d are FULL extents. */
   Builder.prototype.collider = function (x, z, w, d, h, baseY) {
     const c = { x, z, w, d, h: h || 40, baseY: baseY || 0 };
+    // v49 road-clearance guard: a prop-sized collider must not stand in a
+    // ground-level carriageway. Feature-detected and best-effort — it can
+    // never break a build. Footprints over 14 units (buildings, walls) and
+    // boxes registered well above/below the road surface are exempt, so
+    // rooftop clutter, elevated decks and roadside rails are untouched.
+    try {
+      if (this.roads && this.roads.nearest && Math.max(w, d) <= 14) {
+        const rd = this.roads.nearest(x, z);
+        if (rd && rd.d < Math.min(9, rd.width * 0.5 + 1) && Math.abs((baseY || 0) - rd.y) < 6) {
+          this.stats.roadSkips = (this.stats.roadSkips || 0) + 1;
+          console.warn('[neon-core] collider skipped at ' + Math.round(x) + ',' + Math.round(z) +
+            ' — it stands in a carriageway (' + rd.d.toFixed(1) + ' from centreline, road width ' + rd.width + ')');
+          c.roadSkipped = true;
+          return c;
+        }
+      }
+    } catch (e) { /* clearance is advisory — a failed probe must never block the build */ }
     this.colliders.insert(c, x - w / 2, z - d / 2, x + w / 2, z + d / 2);
     this.colliderList.push(c);
     this.stats.colliders++;

@@ -432,12 +432,12 @@ function makeCharacter(){
 
 // ---------- Player vehicles ----------
 const VEHICLE_TUNES={
-  streetDrift:{name:'STREET DRIFT',drive:'RWD',style:4,color:0xff7abf,power:.46,turboPush:.32,maxPsi:.35,topSpeed:.74,grip:.84,steer:1.07,drift:1.24,reverseAccel:34,gearAccel:[0,72,66,59,52,46,41]},
+  streetDrift:{name:'STREET DRIFT',drive:'RWD',style:4,color:0xff7abf,power:.46,turboPush:.32,maxPsi:.35,topSpeed:.74,grip:.88,steer:1.07,drift:1.24,reverseAccel:34,gearAccel:[0,86,80,74,68,62,56]},
   // gearAccel is per-gear thrust. 1st and 2nd are pulled back from 134/119: at
   // full throttle they hit the limiter almost instantly and the car just sat
   // there. Gears 4-6 are untouched, so the top end pulls exactly as hard.
-  proDrift:{name:'PRO DRIFT',drive:'RWD',style:4,color:0xff2d9b,power:.97,turboPush:1.25,maxPsi:1.50,topSpeed:1,grip:1.00,steer:1.09,drift:1.27,reverseAccel:82,gearAccel:[0,104,102,99,92,82,73]},
-  gripper:{name:'GRIPPER',drive:'AWD',style:2,color:0x20e3ff,power:1.76,turboPush:1.52,maxPsi:1.5,topSpeed:1,grip:1.82,steer:1.10,drift:.18,reverseAccel:112,gearAccel:[0,174,154,134,117,103,91]},
+  proDrift:{name:'PRO DRIFT',drive:'RWD',style:4,color:0xff2d9b,power:.97,turboPush:1.25,maxPsi:1.50,topSpeed:1,grip:1.06,steer:1.09,drift:1.27,reverseAccel:82,gearAccel:[0,112,112,112,110,102,98]},
+  gripper:{name:'GRIPPER',drive:'AWD',style:2,color:0x20e3ff,power:1.76,turboPush:1.52,maxPsi:1.5,topSpeed:1,grip:1.90,steer:1.10,drift:.18,reverseAccel:112,gearAccel:[0,196,178,162,150,138,126]},
   // The commuter's card promises "comically slow" and it was doing 0-60 in 3.0s
   // and topping out at 164mph — a hot hatch on nitrous. Two separate problems:
   // topSpeed .43 put sixth gear's ceiling at 550*.43 = 236mph, and the inherited
@@ -449,7 +449,7 @@ const VEHICLE_TUNES={
   // final drive actually feels like — and leave enough top-gear pull to reach the
   // drag limit. Measured after: 0-60 in 7.4s, 0-100 in 14.2s, top 105mph, and it
   // now works through all six gears instead of running out of road in third.
-  commuter:{name:'COMMUTER',drive:'FWD',style:0,color:0xd7c98c,power:.31,turboPush:.08,maxPsi:.10,topSpeed:.22,grip:.78,steer:.82,drift:.05,reverseAccel:26,gearAccel:[0,30,30,30,31,32,34]}
+  commuter:{name:'COMMUTER',drive:'FWD',style:0,color:0xd7c98c,power:.31,turboPush:.08,maxPsi:.10,topSpeed:.22,grip:.82,steer:.82,drift:.05,reverseAccel:26,gearAccel:[0,36,36,36,38,40,44]}
 };
 // Factory metadata lives on the base tune too, not only on the progression
 // wrapper. This keeps direct/debug/legacy selection paths consistent with the
@@ -465,13 +465,17 @@ for(const id of Object.keys(VEHICLE_TUNES)){
 }
 let vehicleTuneKey='streetDrift',vehicleTune=VEHICLE_TUNES.streetDrift;
 function makePlayerVehicleMesh(key,color){
+  // makeCar() adds itself to the scene before returning; the module factories
+  // don't, so anything they return must be added here or it never renders.
   const vortex=window.VortexModule;
-  if(vortex&&vortex.isVortex&&vortex.isVortex(key)&&vortex.createVehicleMesh)
-    return vortex.createVehicleMesh(THREE,key,{color});
+  if(vortex&&vortex.isVortex&&vortex.isVortex(key)&&vortex.createVehicleMesh){
+    const m=vortex.createVehicleMesh(THREE,key,{color});if(m&&!m.parent)scene.add(m);return m;
+  }
   const bikes=window.BikesModule;
-  return bikes&&bikes.isBike(key)
-    ? bikes.createVehicleMesh(THREE,key,{color})
-    : makeCar(color,false,CAR_STYLES[VEHICLE_TUNES[key].style]);
+  if(bikes&&bikes.isBike(key)){
+    const m=bikes.createVehicleMesh(THREE,key,{color});if(m&&!m.parent)scene.add(m);return m;
+  }
+  return makeCar(color,false,CAR_STYLES[VEHICLE_TUNES[key].style]);
 }
 let car=makePlayerVehicleMesh(vehicleTuneKey,vehicleTune.color);
 const carState={x:0,z:470,heading:0,speed:0,vx:0,vz:0,y:0,vy:0,airborne:false,airtime:0,maxAir:0,rampCd:0,ramp:null,hp:100,burning:false,fuse:0,fire:null};
@@ -518,7 +522,7 @@ const trees=[];   // legacy knock-over registry; empty now, loops remain valid
 const traffic=[]; const trafficColors=[0xff4d6d,0x4dff88,0xffd23f,0xff8c42,0xa66bff,0xffffff,0x33d6ff];
 // Solid circles game systems ask the collision resolver to honour (race
 // opponents). Entries: {x, z, y, r?, solid?} — see the resolver walk.
-const extraCollidables=[];
+const extraCollidables=[];window.__DBG_extra=extraCollidables;
 // (the legacy grid-traffic AI died with its map; regional traffic below serves every world)
 // Shared mesh pool — cars are reused by body style so an industrial van never
 // respawns as a sports silhouette merely because it was the last object culled.
@@ -1719,7 +1723,7 @@ function resetEngineHeat(){
 function damagePowertrain(engineAmount,transmissionAmount,reason){const admin=window.GameSystems&&GameSystems.api('admin');if(admin&&admin.invincibleCar&&admin.invincibleCar()){engineCondition=100;transmissionCondition=100;engineDamage=0;engineSeized=false;return;}
   engineAmount=Math.max(0,engineAmount||0);transmissionAmount=Math.max(0,transmissionAmount||0);if(engineAmount>0){engineCondition=clamp(engineCondition-engineAmount,0,100);engineDamage=100-engineCondition;}if(transmissionAmount>0)transmissionCondition=clamp(transmissionCondition-transmissionAmount,0,100);savePowertrainCondition();
   const severity=Math.max(engineAmount,transmissionAmount);if(severity>2&&car)spawnEngineSmoke(clamp(severity/28,.25,1));if(reason&&severity>4)addToast('⚠ '+reason+' · ENGINE '+Math.round(engineCondition)+'% · GEARBOX '+Math.round(transmissionCondition)+'%','#ff922b');
-  if(engineCondition<=0&&!engineSeized&&!engineBlown){const t=currentPowertrainProfile(),quality=clamp(t.engineQuality||.6,.2,1.1),violent=engineAmount>48/Math.max(.35,t.overRevTolerance||.5);if(t.extremeTune||quality<.58||violent)explodePlayerNow(reason||'ENGINE FAILURE','ENGINE DETONATED');else seizeEngineFromHeat();}
+  if(engineCondition<=0&&!engineSeized&&!engineBlown){const t=currentPowertrainProfile(),quality=clamp(t.engineQuality||.6,.2,1.1),violent=engineAmount>48/Math.max(.35,t.overRevTolerance||.5);if((t.extremeTune||quality<.58||violent)&&carState._rsp>16)explodePlayerNow(reason||'ENGINE FAILURE','ENGINE DETONATED');else seizeEngineFromHeat();}
 }
 function enginePowerHealth(){
   if(engineSeized)return 0;const damageFactor=clamp(.18+engineCondition*.0082,.18,1),gearboxFactor=clamp(.16+transmissionCondition*.0084,.16,1),heatLimit=15*Math.max(.35,currentPowertrainProfile().heatTolerance||.6),heatFactor=engineOverheated?clamp(1-(engineHeatSeconds-heatLimit)*.026,.42,1):1;
@@ -1805,7 +1809,7 @@ function ensurePlayerPossession(reason,pose){
 }
 function playerPossessionValid(){return!!(!onFoot&&!playerAircraft&&car&&car.userData.playerOwned&&!traffic.some(t=>t.mesh===car)&&!cops.some(c=>c.mesh===car));}
 function explodePlayerNow(reason,title){
-  if(dead||dying||!car)return;breakDriftCombo();engineBlown=true;carState.hp=0;igniteVehicle();carState.fuse=Math.max(carState.fuse,5.5);setBanner(title||'VEHICLE DESTROYED',(reason||'BAIL OUT')+' · PRESS E','#ff3b3b');doFlash(.42);playCrash();
+  if(dead||dying||!car)return;window.__DBG_death={reason:reason||null,title:title||null,rsp:carState._rsp};breakDriftCombo();engineBlown=true;carState.hp=0;igniteVehicle();carState.fuse=Math.max(carState.fuse,5.5);setBanner(title||'VEHICLE DESTROYED',(reason||'BAIL OUT')+' · PRESS E','#ff3b3b');doFlash(.42);playCrash();
 }
 function detonatePlayerCar(){explodePlayerCar();}
 function updateDying(dt){dying=false;}
@@ -2636,7 +2640,15 @@ function update(dt){
   const drivingSpeed=playerAircraft?Math.hypot(playerAircraft.vx||0,playerAircraft.vz||0):onFoot?0:carState.speed;
   // Eastern ocean and the outer state boundary. Aircraft handle water contact in
   // their own vertical solver and can safely cross the bay at altitude.
-  if(!playerAircraft&&WORLD_isDrowningAt(PX,PZ,onFoot?PLAYER_y():carState.y)){ startSink(PX,PZ,dt); return; }
+  if(!playerAircraft&&WORLD_isDrowningAt(PX,PZ,onFoot?PLAYER_y():carState.y)){
+    // The shore mask can misread built-up ground (city plates sit higher above
+    // the terrain field than its overhang rule allows). If a real surface above
+    // the waterline is holding the player up, they are standing, not swimming.
+    const py=onFoot?PLAYER_y():carState.y,gy=WORLD_groundHeightAt(PX,PZ,py);
+    window.__DBG_sink={px:PX,pz:PZ,py:py,gy:gy,seaY:GameSea.y,blocked:!(gy>GameSea.y+0.02&&py>=gy-0.6)};
+    if(!(gy>GameSea.y+0.02&&py>=gy-0.6)){ startSink(PX,PZ,dt); return; }
+    if(waterTimer>0) leaveWater();
+  } else
   if(waterTimer>0) leaveWater();   // made it back to dry land in time
   WORLD_updateStreaming(PX,PZ,dt); manageRegionalPopulation(PX,PZ,dt); WORLD_updateAtmosphere(PX,PZ);
 
@@ -3511,7 +3523,9 @@ function updateDrive(dt){
   updateDriftCombo(dt,Math.max(0,throttle),braking,counterSteer);
 
   // ---- ramps: classify each nearby ramp as drivable-slope (front) or solid-wall (back/side) ----
-  const rampSolids=[]; let ridingRamp=null; carState.rampCd-=dt;
+  const rampSolids=[]; let ridingRamp=null; carState.rampCd-=dt; if(carState.crashCd)carState.crashCd=Math.max(0,carState.crashCd-dt);
+  // real positional speed from the previous frame — a pinned car (wheels spinning, position frozen) must not re-take crash damage
+  carState._rsp=Math.hypot(carState.x-(carState._px===undefined?carState.x:carState._px),carState.z-(carState._pz===undefined?carState.z:carState._pz))/Math.max(dt,.001);carState._px=carState.x;carState._pz=carState.z;
   if(!carState.airborne){
     for(const r of WORLD_rampsNear(carState.x,carState.z)){
       if(carState.x<r.x-r.ex-3||carState.x>r.x+r.ex+3||carState.z<r.z-r.ez-3||carState.z>r.z+r.ez+3) continue;
@@ -3577,7 +3591,7 @@ function updateDrive(dt){
         contact.x=cx;contact.z=cz;const im=circleImpulse(contact,bodyR,vel,vehicleTune.mass||1400,a,e.r,otherVel,e.mass,.05,.17);carState.x+=contact.x-cx;carState.z+=contact.z-cz;if(im>impact)impact=im;if(im>0){writeActorVelocity(e.mask,a,otherVel);e.x=a.x;e.z=a.z;}
       }
     }
-    if(impact>30){const crashDamage=Math.pow(Math.max(0,impact-27),1.06)*.054,vd=window.GameSystems&&GameSystems.api('vdamage');breakDriftCombo();if(vd)vd.damage('player',{amount:crashDamage,channel:'collision',from:'world'});else carState.hp=Math.max(0,carState.hp-crashDamage);boom(carState.x,carState.z,0xffaa30,Math.min(9,3+crashDamage));doFlash(Math.min(.13,.035+crashDamage*.009));playCrash();}
+    if(impact>30&&!(carState.crashCd>0)&&carState._rsp>16){carState.crashCd=1.1;const crashDamage=Math.min(38,Math.pow(Math.max(0,impact-27),1.06)*.054),vd=window.GameSystems&&GameSystems.api('vdamage');breakDriftCombo();if(vd)vd.damage('player',{amount:crashDamage,channel:'collision',from:'world'});else carState.hp=Math.max(0,carState.hp-crashDamage);boom(carState.x,carState.z,0xffaa30,Math.min(9,3+crashDamage));doFlash(Math.min(.13,.035+crashDamage*.009));playCrash();}
     if(bikeApi&&bikeShape)bikeApi.reportImpact(impact,{kind:'vehicle-collision',vx:vel.x,vz:vel.z});
   }
   // Last-resort containment at extreme speed: bounce from visible walls, never teleport as water.
@@ -3630,7 +3644,7 @@ function updateDrive(dt){
   if(carState.airborne){
     carState.airtime+=dt;carState.y+=carState.vy*dt;carState.vy-=55*dt;carState.maxAir=Math.max(carState.maxAir,carState.y);
     const landingY=WORLD_groundHeightAt(carState.x,carState.z,carState.y);
-    if(carState.y<=landingY){const airHeight=Math.max(0,carState.maxAir-landingY);carState.y=landingY;carState.airborne=false;if(airborneOverRevRisk>0){const tol=Math.max(.12,vehicleTune.overRevTolerance||.5),quality=clamp(vehicleTune.engineQuality||.6,.2,1.1),impactLoad=1+Math.max(0,-carState.vy-8)*.018,dmg=airborneOverRevRisk*22*impactLoad/tol,catastrophic=62+quality*52;damagePowertrain(dmg,dmg*(.34+(1-quality)*.26),'LANDING OVER-REV');if(!engineBlown&&dmg>catastrophic){explodePlayerNow('ENGINE DETONATED','AIRBORNE MONEY SHIFT');return;}airborneOverRevRisk=0;}doFlash(.08);if(carState.airtime>.7||airHeight>7){const bonus=Math.round(60+airHeight*30+carState.airtime*120);stats.cash+=bonus;addToast('🛹 STUNT JUMP +$'+bonus,'#ffd23f');playSuccess();}vx*=.85;vz*=.85;}
+    if(carState.y<=landingY){const airHeight=Math.max(0,carState.maxAir-landingY);carState.y=landingY;carState.airborne=false;if(airborneOverRevRisk>0){const tol=Math.max(.12,vehicleTune.overRevTolerance||.5),quality=clamp(vehicleTune.engineQuality||.6,.2,1.1),impactLoad=1+Math.max(0,-carState.vy-8)*.018,dmg=airborneOverRevRisk*22*impactLoad/tol,catastrophic=62+quality*52;damagePowertrain(dmg,dmg*(.34+(1-quality)*.26),'LANDING OVER-REV');if(!engineBlown&&dmg>catastrophic){seizeEngineFromHeat();}airborneOverRevRisk=0;}doFlash(.08);if(carState.airtime>.7||airHeight>7){const bonus=Math.round(60+airHeight*30+carState.airtime*120);stats.cash+=bonus;addToast('🛹 STUNT JUMP +$'+bonus,'#ffd23f');playSuccess();}vx*=.85;vz*=.85;}
   }
 
   // commit velocity + derive signed forward speed for the HUD
@@ -3997,7 +4011,7 @@ function activateWorld(id){
   // clear the outgoing map's dynamic population so nothing is left floating
   traffic.slice().forEach(removeTrafficObject); peds.slice().forEach(removePedObject); clearWreckage();
   cops.slice().forEach(removeCop); clearPoliceRoadblocks(); resetPoliceDirector(false);
-  activeWorld=inst;
+  activeWorld=inst;window.__DBG_world=inst;
   if(inst.group){ if(!inst.group.parent) scene.add(inst.group); inst.group.visible=true; }
   // the legacy map's grid traffic/peds are built once at boot — rebuild them
   const sp=inst.spawn||{x:0,z:0,heading:0};
@@ -4350,7 +4364,7 @@ if(window.GameSystems){
       // and the update loop's stats.health<=0 check runs die() for us.
       hurtPlayer(hearts,meta){
         const admin=window.GameSystems&&GameSystems.api('admin');if(admin&&admin.invincible&&admin.invincible())return;
-        if(dead||dying)return;let amount=(hearts==null?1:hearts)*100/3;const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.absorbPlayerDamage)amount=combat.absorbPlayerDamage(amount,meta||{});if(amount<=0){heartFlashTimer=.22;doFlash(.10);return;}playerHealth=Math.max(0,playerHealth-amount);stats.health=playerHealth;heartFlashTimer=.7;doFlash(.35);
+        if(dead||dying)return;let amount=(hearts==null?1:hearts)*100/3;const combat=window.GameSystems&&GameSystems.api('combat');if(combat&&combat.absorbPlayerDamage)amount=combat.absorbPlayerDamage(amount,meta||{});amount=Math.min(amount,45);if(amount<=0){heartFlashTimer=.22;doFlash(.10);return;}playerHealth=Math.max(0,playerHealth-amount);stats.health=playerHealth;heartFlashTimer=.7;doFlash(.35);
       },
       healPlayer(amount){if(dead||dying)return false;playerHealth=Math.min(100,playerHealth+Math.max(0,+amount||0));stats.health=playerHealth;heartFlashTimer=0;return playerHealth;}
     },

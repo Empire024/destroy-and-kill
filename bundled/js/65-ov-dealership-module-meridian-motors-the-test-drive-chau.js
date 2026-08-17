@@ -991,12 +991,12 @@
 
   const CONFIG = {
     density: 1,
-    showcarBudget: 520,
+    showcarBudget: 220,
     movers: 5,
     activeRange: 500,
     moverRange: 400,
     cullInterval: 0.25,
-    lotCull: 2600,
+    lotCull: 1900,
     debug: false
   };
 

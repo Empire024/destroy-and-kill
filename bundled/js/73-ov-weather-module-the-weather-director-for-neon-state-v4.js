@@ -296,7 +296,7 @@ Syntax self-check:
   var lastTintA = -1, lastFlashA = -1, lastTintCss = '';
 
   // Particles
-  var RAIN_MAX = 340, DUST_MAX = 220, TUMBLE_MAX = 6;
+  var RAIN_MAX = 220, DUST_MAX = 140, TUMBLE_MAX = 6;
   var rainMesh = null, rainGeo = null, rainMat = null, rainPos = null, rainSeed = null;
   var dustMesh = null, dustGeo = null, dustMat = null, dustPos = null, dustSeed = null;
   var tumbleMesh = null, tumbleGeo = null, tumbleMat = null, tumble = null;
